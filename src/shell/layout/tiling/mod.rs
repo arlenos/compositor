@@ -4482,6 +4482,14 @@ where
     let mut geometries: HashMap<NodeId, Rectangle<i32, Local>> = HashMap::new();
     let alpha = alpha * transition;
 
+    // Drag-affordance backdrops (placeholders, group hovers, pill
+    // edges, overview tile bg) all need to track the user's
+    // window-corner radius so the in-flight drag visuals match the
+    // tiles they represent. Hardcoded `8.0` would freeze them at the
+    // bundled default and ignore the appearance-page intensity slider.
+    let lt_backdrop_radius =
+        crate::theme::lunaris_theme().effective_window_corners()[0];
+
     let focused = seat
         .and_then(|seat| {
             seat.get_keyboard()
@@ -4781,7 +4789,7 @@ where
                                     *renderer,
                                     backdrop_id.clone(),
                                     pill_geo,
-                                    8.,
+                                    lt_backdrop_radius,
                                     alpha * 0.4,
                                     group_color,
                                 )
@@ -4799,7 +4807,7 @@ where
                                     *renderer,
                                     Key::Group(Arc::downgrade(alive)),
                                     geo,
-                                    8.,
+                                    lt_backdrop_radius,
                                     alpha
                                         * if focused
                                             .as_ref()
@@ -4887,7 +4895,7 @@ where
                                                         (geo.loc.x, geo.loc.y - 8).into(),
                                                         (geo.size.w, 16).into(),
                                                     ),
-                                                    8.,
+                                                    lt_backdrop_radius,
                                                     alpha * 0.4,
                                                     group_color,
                                                 )
@@ -4929,7 +4937,7 @@ where
                                                         (geo.loc.x - 8, geo.loc.y).into(),
                                                         (16, geo.size.h).into(),
                                                     ),
-                                                    8.,
+                                                    lt_backdrop_radius,
                                                     alpha * 0.4,
                                                     group_color,
                                                 )
@@ -4997,7 +5005,7 @@ where
                                     *renderer,
                                     Key::Window(Usage::OverviewBackdrop, mapped.key()),
                                     geo,
-                                    8.,
+                                    lt_backdrop_radius,
                                     alpha
                                         * if focused
                                             .as_ref()
@@ -5054,7 +5062,7 @@ where
                                 *renderer,
                                 id.clone(),
                                 geo,
-                                8.,
+                                lt_backdrop_radius,
                                 alpha * 0.4,
                                 group_color,
                             )
@@ -5438,7 +5446,7 @@ where
                 renderer,
                 backdrop_id.clone(),
                 focused_geo,
-                8.,
+                lt.effective_window_corners()[0],
                 transition.unwrap_or(1.0) * 0.4,
                 group_color,
             )
