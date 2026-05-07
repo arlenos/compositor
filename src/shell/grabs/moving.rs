@@ -145,12 +145,23 @@ impl MoveGrabState {
 
         let gaps = (lt.wm.gaps_inner as i32, lt.wm.gaps_outer as i32);
         let thickness = self.indicator_thickness.max(1);
-        let lt_radius = lt.radius.window_corners.map(|r| r.round() as u8);
+        let lt_radius = lt.effective_window_corners().map(|r| r.round() as u8);
 
-        let snapping_indicator = match &self.snapping_zone {
-            Some(t) if &self.cursor_output == output => {
-                // Neutral background for snapping zone overlay.
-                let base_color = lt.color.fg_secondary;
+        // Snap-zone visual is only meaningful for floating drags
+        // (the screen-edge snap behaviour). For tiling drags, the
+        // tile-swap path (see Drop impl below) renders its own
+        // target highlight; showing screen-edge snap zones in
+        // tiling mode would be a false promise — the drop handler
+        // never acts on them. (Codex/Tim review.)
+        let snapping_indicator = match (&self.snapping_zone, self.previous) {
+            (Some(t), ManagedLayer::Floating) if &self.cursor_output == output => {
+                // Skeleton-style backdrop: theme's primary fg colour at
+                // 12% alpha mirrors the shell's `Skeleton` primitive
+                // (color-mix(fg-shell 12%, transparent)) so the
+                // compositor and the in-shell visual language agree.
+                // The IndicatorShader outline above keeps the accent-
+                // tinted hint colour for the rim.
+                let base_color = lt.color.fg_primary;
                 let overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
                 vec![
                     CosmicMappedRenderElement::from(IndicatorShader::element(
@@ -167,8 +178,8 @@ impl MoveGrabState {
                         renderer,
                         Key::Window(Usage::SnappingIndicator, self.window.key()),
                         t.overlay_geometry(non_exclusive_geometry, gaps),
-                        lt.radius.window_corners[0],
-                        0.4,
+                        lt.effective_window_corners()[0],
+                        0.12,
                         [base_color[0], base_color[1], base_color[2]],
                     )),
                 ]
@@ -903,11 +914,41 @@ impl Drop for MoveGrab {
                         ManagedLayer::Tiling
                             if shell.active_space(&output).unwrap().tiling_enabled =>
                         {
-                            let (window, location) = shell
-                                .active_space_mut(&output)
-                                .unwrap()
+                            // Drag-to-swap: hit-test the cursor against
+                            // tiled tiles on the drop output. If it lands
+                            // on a Mapped tile that isn't the source, swap
+                            // them in-place via `try_tile_swap`. Otherwise
+                            // fall through to `drop_window` so the existing
+                            // overview-hover insertion path still works.
+                            let cursor_global = seat
+                                .get_pointer()
+                                .map(|p| p.current_location().as_global())
+                                .unwrap_or_else(|| Point::from((0.0, 0.0)));
+                            let workspace = shell.active_space_mut(&output).unwrap();
+                            let cursor_local = cursor_global.to_local(&workspace.output);
+
+                            let target_window = workspace
                                 .tiling_layer
-                                .drop_window(grab_state.window);
+                                .toplevel_element_under(cursor_local)
+                                .and_then(|focus| match focus {
+                                    KeyboardFocusTarget::Element(m)
+                                        if m != grab_state.window =>
+                                    {
+                                        Some(m)
+                                    }
+                                    _ => None,
+                                });
+
+                            let swap_loc = target_window.as_ref().and_then(|target| {
+                                workspace
+                                    .tiling_layer
+                                    .try_tile_swap(&grab_state.window, target)
+                            });
+
+                            let (window, location) = match swap_loc {
+                                Some(loc) => (grab_state.window.clone(), loc),
+                                None => workspace.tiling_layer.drop_window(grab_state.window),
+                            };
                             Some((window, location.to_global(&output)))
                         }
                         _ => {

@@ -73,15 +73,33 @@ pub(crate) fn lunaris_hint_rgb(lt: &lunaris_theme::LunarisTheme) -> [f32; 3] {
     }
 }
 
-/// Compose the effective theme from the bundled bytes + user
-/// `theme.toml` overlay + `appearance.toml` preferences.
+/// Compose the effective theme from bundled bytes + user
+/// `theme.toml` + `appearance.toml`. Falls back to bundled
+/// defaults when the user files fail to parse — used at
+/// startup, where no last-good theme exists yet.
 ///
-/// The base bundled bytes are picked from `appearance.toml
-/// [theme].active` (or `mode` if active isn't set). User
-/// `theme.toml` overlays via `LunarisTheme::resolve()`.
-/// `appearance.toml` then layers radius_intensity + accent
-/// override + reduce_motion on top.
+/// **For runtime reload (file-watcher path) use
+/// `try_recompose_effective_theme` instead** — the watcher must
+/// keep the previous good theme on parse error rather than
+/// painting the bundled default across every output.
 pub fn recompose_effective_theme() -> lunaris_theme::LunarisTheme {
+    try_recompose_effective_theme().unwrap_or_else(|err| {
+        tracing::warn!(
+            "theme: initial compose failed ({err}); using bundled dark default"
+        );
+        default_dark_theme()
+    })
+}
+
+/// Like `recompose_effective_theme` but returns `Err` on parse
+/// failure instead of falling back. Used by the file watcher so
+/// a transiently-invalid save (mid-typing in editor, atomic-rename
+/// caught between writes) doesn't blank the desktop's theme.
+///
+/// On Err, the caller should keep the previously-published global
+/// theme and skip render scheduling — the next successful save
+/// fires the watcher again.
+pub fn try_recompose_effective_theme() -> Result<lunaris_theme::LunarisTheme, String> {
     let appearance = crate::config::appearance::current_appearance();
 
     // 1. Pick the bundled base from the user's `[theme].active`.
@@ -125,25 +143,15 @@ pub fn recompose_effective_theme() -> lunaris_theme::LunarisTheme {
     let customization = std::fs::read_to_string(&custom_path).ok();
 
     // 4. `LunarisTheme::resolve()` merges bundled + user_theme +
-    //    customization. On parse failure surface a warn and use
-    //    the unmerged bundled bytes — we never want a malformed
-    //    user file to block compositor startup.
-    let mut composed = match lunaris_theme::LunarisTheme::resolve(
+    //    customization. Parse failure propagates as Err — callers
+    //    decide how to handle it (startup falls back to bundled,
+    //    runtime reload keeps the last-good theme).
+    let mut composed = lunaris_theme::LunarisTheme::resolve(
         bundled,
         user_theme.as_deref(),
         customization.as_deref(),
-    ) {
-        Ok(t) => t,
-        Err(err) => {
-            tracing::warn!(
-                "theme: customization parse error, using bundled {active_id}: {err}"
-            );
-            match lunaris_theme::LunarisTheme::from_bundled(bundled) {
-                Ok(t) => t,
-                Err(_) => default_dark_theme(),
-            }
-        }
-    };
+    )
+    .map_err(|err| format!("customization parse error: {err}"))?;
 
     // 4. Apply appearance.toml preferences (accent override,
     //    radius_intensity, accessibility).
@@ -170,33 +178,82 @@ pub fn recompose_effective_theme() -> lunaris_theme::LunarisTheme {
     // it's a public-API hook for future code paths.
     let _ = default_light_theme;
 
-    composed
+    Ok(composed)
 }
 
-/// Start a file watcher for live theme updates. Watches both
-/// `~/.config/lunaris/theme.toml` and
-/// `~/.config/lunaris/appearance.toml`. The **initial** composition
-/// is done by the caller before `State::new` (see `lib.rs`) so
-/// frame 1 already has the correct theme; this function only
-/// registers the runtime-change pipeline.
+/// Start a file watcher for live theme updates. Watches **only**
+/// `~/.config/lunaris/theme.toml` — the user-customisation overlay.
+///
+/// `appearance.toml` is intentionally NOT watched here: it has its
+/// own watcher in `crate::config::appearance::watch()` that loads
+/// the file from disk into the cached `current_appearance()` and
+/// then recomposes. If this watcher also fired on appearance-file
+/// changes, it could run *before* `set_appearance` had updated
+/// the cache, recompose against stale appearance, and paint a
+/// one-frame flicker of the previous theme on every save. (Codex
+/// review HIGH-1.)
+///
+/// Parse-error handling: a transient bad save (mid-typing, atomic
+/// rename caught between writes) returns `Err` from
+/// `try_recompose_effective_theme`. The handler keeps the last-
+/// good global theme and skips render scheduling, so a malformed
+/// file does NOT briefly blank the desktop's customisation. The
+/// next successful save fires the watcher again. (Codex review
+/// HIGH-2.)
+///
+/// The **initial** composition is done by the caller before
+/// `State::new` (see `lib.rs`) so frame 1 already has the correct
+/// theme; this function only registers the runtime-change pipeline.
 pub fn watch_theme(handle: LoopHandle<'_, State>) {
     let (lt_ping_tx, lt_ping_rx) = calloop::ping::make_ping().unwrap();
     if let Err(e) = handle.insert_source(lt_ping_rx, move |_, _, state| {
-        let lt = recompose_effective_theme();
+        let lt = match try_recompose_effective_theme() {
+            Ok(t) => t,
+            Err(err) => {
+                tracing::warn!(
+                    "theme reload: parse failed, keeping last-good: {err}"
+                );
+                return;
+            }
+        };
+
         set_lunaris_theme(lt.clone());
         state.common.lunaris_theme = lt.clone();
-        let mut shell = state.common.shell.write();
-        shell.lunaris_theme = lt;
+        {
+            let mut shell = state.common.shell.write();
+            shell.lunaris_theme = lt;
+        }
         // Feature 4-C: window-header renderer pulls
         // `lunaris_theme()` directly but caches the rasterised
         // pixmap; bump generation so every window re-rasterises.
         crate::backend::render::window_header::bump_theme_generation();
+
+        // Schedule a render on every output — without this the new
+        // theme state sits in memory but no frame actually paints
+        // it, so window corner-radii / button radii / accent
+        // colours stayed at their pre-change values until some
+        // unrelated event happened to dirty an output. The
+        // outputs collection is read-locked (cloned) before we
+        // dispatch so we don't hold the shell lock across the
+        // backend calls.
+        let outputs: Vec<_> = state.common.shell.read().outputs().cloned().collect();
+        for output in outputs {
+            state.backend.schedule_render(&output);
+        }
     }) {
         tracing::error!("failed to insert lunaris theme ping source: {e}");
     }
-    let lt_watcher = lunaris_theme::ThemeWatcher::start(move || {
-        lt_ping_tx.ping();
-    });
+    // Watch ONLY theme.toml (user-customisation). appearance.toml
+    // has its own watcher path in `crate::config::appearance::watch()`
+    // — see HIGH-1 docstring above for the race that motivated
+    // splitting these.
+    let theme_path = lunaris_theme::LunarisTheme::user_customization_path();
+    let lt_watcher = lunaris_theme::ThemeWatcher::start_at(
+        vec![theme_path],
+        move || {
+            lt_ping_tx.ping();
+        },
+    );
     match lt_watcher {
         Ok(w) => std::mem::forget(w),
         Err(e) => tracing::warn!("failed to start lunaris theme watcher: {e}"),

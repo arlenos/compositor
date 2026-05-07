@@ -2668,6 +2668,114 @@ impl TilingLayout {
         }
     }
 
+    /// Swap a dragged tile with the tile under the drop point.
+    ///
+    /// Used by the `MoveGrab` Drop handler to implement drag-to-swap
+    /// in tiling mode. Returns the post-swap location of `source`
+    /// (which is `target`'s pre-swap location) on success, or `None`
+    /// when the swap can't proceed:
+    ///
+    /// - `last_overview_hover` isn't an `InitialPlaceholder`, so we
+    ///   can't locate the dragged window's tree slot (the source's
+    ///   `tiling_node_id` is taken when `unmap_as_placeholder` runs
+    ///   at drag start, so we go through the placeholder reference
+    ///   that `unmap_as_placeholder` published into
+    ///   `last_overview_hover`).
+    /// - target's `tiling_node_id` points at the placeholder itself
+    ///   (the cursor never left the source tile)
+    /// - target isn't a `Data::Mapped` (groups/placeholders fall
+    ///   through to `drop_window`'s overview-hover path).
+    ///
+    /// On success the placeholder slot becomes target's old data and
+    /// the target slot becomes the dragged window's data, with
+    /// `tiling_node_id` re-tagged on both windows. `update_positions`
+    /// then assigns geometries from the new tree shape.
+    pub fn try_tile_swap(
+        &mut self,
+        source_window: &CosmicMapped,
+        target: &CosmicMapped,
+    ) -> Option<Point<i32, Local>> {
+        let placeholder_node = match self.last_overview_hover.as_ref().map(|(_, z)| z) {
+            Some(TargetZone::InitialPlaceholder(id)) => id.clone(),
+            _ => return None,
+        };
+        let target_node = target.tiling_node_id.lock().unwrap().clone()?;
+        if placeholder_node == target_node {
+            return None;
+        }
+
+        let mut new_tree = self.queue.trees.back().unwrap().0.copy_clone();
+
+        // Snapshot target's current Data::Mapped — that's what
+        // moves into the placeholder slot. Validate placeholder
+        // shape before mutating anything.
+        let target_data_copy =
+            match new_tree.get(&target_node).ok()?.data() {
+                Data::Mapped {
+                    mapped,
+                    last_geometry,
+                    minimize_rect,
+                } => Data::Mapped {
+                    mapped: mapped.clone(),
+                    last_geometry: *last_geometry,
+                    minimize_rect: *minimize_rect,
+                },
+                _ => return None,
+            };
+        let target_loc_old = match &target_data_copy {
+            Data::Mapped { last_geometry, .. } => last_geometry.loc,
+            _ => unreachable!(),
+        };
+        if !matches!(
+            new_tree.get(&placeholder_node).ok()?.data(),
+            Data::Placeholder { .. }
+        ) {
+            return None;
+        }
+
+        // Move target into placeholder slot — re-tag its node id
+        // so future lookups find it at its new tree location.
+        new_tree
+            .get_mut(&placeholder_node)
+            .unwrap()
+            .replace_data(target_data_copy);
+        if let Data::Mapped { mapped, .. } =
+            new_tree.get(&placeholder_node).unwrap().data()
+        {
+            *mapped.tiling_node_id.lock().unwrap() = Some(placeholder_node.clone());
+        }
+
+        // Drop source into target slot. `last_geometry` is a stub —
+        // `update_positions` overwrites it from the new tree shape.
+        // Mirror `drop_window`'s prelude (output_enter + bounds) so
+        // the source surface re-enters tiled state cleanly after
+        // `unmap_as_placeholder` left it without an output.
+        source_window.output_enter(&self.output, source_window.bbox());
+        {
+            let layer_map = layer_map_for_output(&self.output);
+            source_window.set_bounds(layer_map.non_exclusive_zone().size);
+        }
+        source_window.set_tiled(true);
+        new_tree
+            .get_mut(&target_node)
+            .unwrap()
+            .replace_data(Data::Mapped {
+                mapped: source_window.clone(),
+                last_geometry: Rectangle::from_size((100, 100).into()),
+                minimize_rect: None,
+            });
+        *source_window.tiling_node_id.lock().unwrap() = Some(target_node);
+
+        let blocker = TilingLayout::update_positions(&self.output, &mut new_tree, self.gaps());
+        self.queue.push_tree(new_tree, ANIMATION_DURATION, blocker);
+
+        // Clear the stale placeholder reference so `cleanup_drag`
+        // doesn't try to unmap a slot that's now a real tile.
+        self.last_overview_hover = None;
+
+        Some(target_loc_old)
+    }
+
     pub fn drop_window(&mut self, window: CosmicMapped) -> (CosmicMapped, Point<i32, Local>) {
         let gaps = self.gaps();
 
@@ -5361,7 +5469,7 @@ where
         let scale = swap_geo.size.to_f64() / origin.size.to_f64();
 
         let radius = crate::theme::lunaris_theme()
-            .radius.window_corners
+            .effective_window_corners()
             .map(|x| if x < 4.0 { x } else { x + 4.0 })
             .map(|val| (val * scale.x.min(scale.y) as f32).round() as u8);
         swap_elements.push(CosmicMappedRenderElement::FocusIndicator(
@@ -5436,7 +5544,7 @@ where
                                 .map(|val| (val as f64 * scale.x.min(scale.y)).round() as u8)
                         }
                         _ => crate::theme::lunaris_theme()
-                            .radius.window_corners
+                            .effective_window_corners()
                             .map(|x| if x < 4.0 { x } else { x + 4.0 })
                             .map(|val| (val * scale.x.min(scale.y) as f32).round() as u8),
                     };

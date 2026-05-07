@@ -444,7 +444,7 @@ fn handle_reload(path: &Path, state: &mut State) {
          border={:?} error={:?} \
          radius_intensity={} effective_chip={} effective_button={} \
          effective_card={} effective_modal={} \
-         window_corners={:?} active_hint={} window_hint={:?} \
+         effective_window_corners={:?} active_hint={} window_hint={:?} \
          font_sans={:?}",
         cfg.theme.mode.as_deref().or(cfg.theme.active.as_deref()),
         theme.meta.variant,
@@ -454,7 +454,7 @@ fn handle_reload(path: &Path, state: &mut State) {
         theme.radius.intensity,
         theme.effective_chip(), theme.effective_button(),
         theme.effective_card(), theme.effective_modal(),
-        theme.radius.window_corners,
+        theme.effective_window_corners(),
         theme.wm.active_hint, theme.wm.window_hint,
         theme.typography.font_sans,
     );

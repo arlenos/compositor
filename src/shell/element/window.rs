@@ -476,7 +476,7 @@ impl CosmicWindow {
         }
         let lt = crate::theme::lunaris_theme();
         let mut radii = lt
-            .radius.window_corners
+            .effective_window_corners()
             .map(|x| if x < 4.0 { x } else { x + 4.0 })
             .map(|x| (x * scale as f32).round() as u8);
         if has_ssd && !clip {
@@ -537,7 +537,7 @@ impl CosmicWindow {
     {
         let (has_ssd, is_tiled, is_maximized, mut radii, appearance) = {
             let p = self.p();
-            let raw_radius = crate::theme::lunaris_theme().radius.window_corners;
+            let raw_radius = crate::theme::lunaris_theme().effective_window_corners();
             let mapped = raw_radius
                 .map(|x| if x < 4.0 { x } else { x + 4.0 })
                 .map(|x| x.round() as u8);
@@ -986,7 +986,7 @@ impl CosmicWindow {
         let radii = if round {
             {
                 crate::theme::lunaris_theme()
-                    .radius.window_corners
+                    .effective_window_corners()
                     .map(|x| if x < 4.0 { x } else { x + 4.0 })
                     .map(|x| x.round() as u8)
             }
