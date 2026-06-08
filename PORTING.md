@@ -7,9 +7,11 @@ the rationale behind each, and the process for keeping the fork in sync with ups
 
 - **Source:** https://github.com/pop-os/cosmic-comp
 - **Tracked as:** `git remote add upstream https://github.com/pop-os/cosmic-comp`
-- **Branch strategy:** `master` tracks upstream directly; our changes sit on top as a
-  series of commits. Run `git log --oneline upstream/master..HEAD` to see the full
-  diff against upstream at any time.
+- **Branch strategy:** upstream is **merged into** `master` (not rebased onto). A
+  long-lived fork has many of its own commits; rebasing replays all of them on
+  every sync and the same conflicts resurface. Merging resolves only the genuine
+  delta once and keeps our history intact. `git log --oneline upstream/master..HEAD`
+  still shows our delta against upstream at any time.
 
 ## What we keep
 
@@ -281,29 +283,48 @@ infrastructure with a Arlen-native TOML-based system.
 
 ## Upstream sync process
 
-### Weekly rebase (automated)
+### Weekly merge (automated)
 
-A scheduled CI job runs weekly:
+A scheduled CI job (`.github/workflows/upstream-merge.yml`) runs weekly:
 
-1. `git fetch upstream`
-2. Attempts `git rebase upstream/master` on a test branch
-3. If successful, opens a pull request for review
-4. If conflicts occur, opens a GitHub issue listing the conflicting files
+1. `git fetch upstream` and skip if nothing is new.
+2. `git merge upstream/master` on a dated branch.
+3. On a clean merge it builds (`cargo build --lib`) and runs the **integration
+   guard** (below); only a green, guard-passing merge opens a pull request.
+4. On conflicts it pushes the half-merged branch (markers committed, so the work
+   is not lost) and opens an issue. A build or guard failure opens an issue with
+   the reason instead of a PR.
 
-### Manual rebase
+The PR is opened with a PAT / GitHub App token (secret `UPSTREAM_MERGE_TOKEN`)
+so the fork's CI actually runs on it; the default `GITHUB_TOKEN` would suppress
+it.
+
+### Integration guard (what the merge must not drop)
+
+These are the Arlen seams a merge must preserve; the CI guard checks them and
+desktop-shell binds the protocol interfaces by exact name:
+
+- `src/event_bus.rs` emits to `/run/arlen/event-bus-producer.sock`.
+- the protocol interfaces `arlen_shell_overlay_v1`, `arlen_titlebar_v1` /
+  `arlen_titlebar_manager_v1`, `arlen_window_attachment_v1` /
+  `arlen_window_attach_manager_v1` (these must match the desktop-shell XMLs).
+- the default theme comes from `arlen_theme::DARK_TOML` / `LIGHT_TOML`.
+
+### Manual merge
 
 ```bash
 git fetch upstream
-git rebase upstream/master
+git merge upstream/master
 # Resolve conflicts if any, then:
-git rebase --continue
+git commit
+cargo build --lib   # the fork builds with --lib, not bare
 ```
 
 ### Contributing patches upstream
 
 Any change that is not Arlen-specific should be submitted as a pull request to
-cosmic-comp upstream. A shorter patch series means less rebase work on every
-upstream update. Check before committing whether a change belongs upstream.
+cosmic-comp upstream. A shorter delta means less to resolve on every merge.
+Check before committing whether a change belongs upstream.
 
 ### Conflict resolution guidelines
 
