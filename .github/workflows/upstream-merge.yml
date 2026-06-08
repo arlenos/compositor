@@ -91,14 +91,21 @@ jobs:
             exit 0
           fi
           # Integration guard: the Arlen seams the merge must not have dropped.
-          # The Event-Bus producer socket + the three protocol interface names
-          # desktop-shell binds by exact name. A merge that compiles but drops a
-          # seam fails here. (PORTING.md lists the seams; keep this in sync.)
+          # A merge that compiles but drops a seam fails here. (PORTING.md lists
+          # the seams; keep this in sync.)
           MISSING=""
+          # Event-Bus producer socket.
           grep -q "/run/arlen/event-bus-producer.sock" src/event_bus.rs || MISSING="$MISSING event-bus-socket"
-          for iface in arlen_shell_overlay_v1 arlen_titlebar_v1 arlen_window_attachment_v1; do
-            grep -rq "$iface" resources/protocols/ || MISSING="$MISSING $iface"
+          # All FIVE protocol interfaces desktop-shell binds, anchored to the
+          # actual <interface name="..."> declaration (a comment or arg
+          # reference must not satisfy it).
+          for iface in arlen_shell_overlay_v1 arlen_titlebar_v1 arlen_titlebar_manager_v1 \
+                       arlen_window_attach_manager_v1 arlen_window_attachment_v1; do
+            grep -rqF "interface name=\"$iface\"" resources/protocols/ || MISSING="$MISSING $iface"
           done
+          # The shared-crate theme source (not a vendored copy or a stray path).
+          grep -q "arlen_theme::DARK_TOML" src/theme.rs || MISSING="$MISSING theme-dark-source"
+          grep -q "arlen_theme::LIGHT_TOML" src/theme.rs || MISSING="$MISSING theme-light-source"
           if [ -n "$MISSING" ]; then
             echo "missing=$MISSING" >> "$GITHUB_OUTPUT"
             echo "status=guard-failed" >> "$GITHUB_OUTPUT"
