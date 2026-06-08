@@ -139,6 +139,7 @@ dependencies = [
 [[package]]
 name = "arlen-theme"
 version = "0.1.0"
+source = "git+https://github.com/arlenos/arlen#1485c170e135881edfdf1d58775153faa103d410"
 dependencies = [
  "dirs 5.0.1",
  "notify 7.0.0",
