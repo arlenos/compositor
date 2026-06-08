@@ -328,9 +328,15 @@ is a separate repo, the dependency is fixed by `Cargo.lock` to one commit. When
 arlen-theme changes land in the monorepo, refresh and re-verify the pin here:
 
 ```bash
-cargo update -p arlen-theme
-cargo build --locked --lib
+cargo build --lib   # reconciles the lockfile to the published git revision
+git add Cargo.lock && git commit -m "ci: pin arlen-theme to the published revision"
 ```
+
+A plain `cargo build` (not `cargo update -p arlen-theme`) is what reconciles the
+pin: the lock first carried `arlen-theme` as a path entry, and `cargo update -p`
+cannot update a path/sourceless entry (it reports "did not match any packages").
+Once the lock records the git source, later refreshes can use
+`cargo update -p arlen-theme`.
 
 then commit the updated `Cargo.lock`. The regular PR CI (`ci.yml`) should build
 `--locked` so the fork always compiles against the exact arlen-theme revision
@@ -339,9 +345,9 @@ does NOT use `--locked` (an upstream merge can legitimately change dependencies,
 which would make a locked build fail spuriously).
 
 Bootstrapping note: a freshly cloned compositor cannot build until the
-arlen-theme revision it pins is published. After the first arlen push that
-carries the theme single-source change, run the `cargo update` above and commit
-the lock so the pin resolves.
+arlen-theme revision it pins is published. The monorepo must be pushed first
+(arlen-theme's bundled-theme single-source change lives there); only then does
+`cargo build --lib` resolve the git dependency and compile.
 
 ### Contributing patches upstream
 
