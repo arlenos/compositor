@@ -1,11 +1,11 @@
-//! `org.lunaris.App1` D-Bus service.
+//! `org.arlen.App1` D-Bus service.
 //!
-//! Lunaris-aware apps call `RegisterApp` once at startup to declare
+//! Arlen-aware apps call `RegisterApp` once at startup to declare
 //! their Wayland `app_id`, a display name, and the set of actions they
 //! expose for rebinding. The registration is keyed by the client's
 //! D-Bus unique name, so the compositor can correlate:
 //!
-//! * a `RegisterBinding` call on `org.lunaris.InputManager1` — the
+//! * a `RegisterBinding` call on `org.arlen.InputManager1` — the
 //!   input manager looks up the caller's `app_id` here to enforce the
 //!   `app_focused` scope;
 //! * a focus change on a Wayland toplevel — the shell looks up whether
@@ -24,8 +24,8 @@ use std::{
 };
 use zbus::{message::Header, zvariant::Type};
 
-const OBJECT_PATH: &str = "/org/lunaris/App";
-const SERVICE_NAME: &str = "org.lunaris.App1";
+const OBJECT_PATH: &str = "/org/arlen/App";
+const SERVICE_NAME: &str = "org.arlen.App1";
 
 // ---------------------------------------------------------------------------
 // Wire types
@@ -229,7 +229,7 @@ impl AppInterface {
     }
 }
 
-#[zbus::interface(name = "org.lunaris.App1")]
+#[zbus::interface(name = "org.arlen.App1")]
 impl AppInterface {
     /// Register the calling client. `app_id` must match the Wayland
     /// `app_id` the client advertises on its toplevels — the

@@ -479,7 +479,7 @@ pub fn cursor_elements<'a, 'frame, R>(
     renderer: &mut R,
     seats: impl Iterator<Item = &'a Seat<State>>,
     zoom_state: Option<&ZoomState>,
-    lt: &lunaris_theme::LunarisTheme,
+    lt: &arlen_theme::ArlenTheme,
     now: Time<Monotonic>,
     output: &Output,
     mode: CursorMode,
@@ -742,7 +742,7 @@ where
     std::mem::drop(shell_ref);
 
     {
-        let lt = &shell.read().lunaris_theme.clone();
+        let lt = &shell.read().arlen_theme.clone();
         elements.extend(cursor_elements(
             renderer,
             seats.iter(),
@@ -793,7 +793,7 @@ where
     let is_active_space = workspace.output == focused_output;
     // Active hint border: only show in tiling mode.
     let active_hint = if workspace.layout_mode == crate::shell::LayoutMode::Tiling {
-        let theme_val = shell.lunaris_theme.wm.active_hint as u8;
+        let theme_val = shell.arlen_theme.wm.active_hint as u8;
         // Default to 3px if the theme doesn't set a value.
         if theme_val > 0 { theme_val } else { 3 }
     } else {

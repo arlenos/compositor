@@ -849,7 +849,7 @@ impl XwmHandler for State {
             // X11-DEBUG: emit the initial `window_header_show` right
             // here instead of waiting for the next `refresh` diff,
             // same as the Wayland map path in handlers/compositor.rs.
-            // That way a legacy Xterm-style app's Lunaris header
+            // That way a legacy Xterm-style app's Arlen header
             // lands at the same frame as the window itself, not one
             // frame later.
             //

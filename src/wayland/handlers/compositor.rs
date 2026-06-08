@@ -498,14 +498,14 @@ impl State {
                     let seat = shell.seats.last_active().clone();
                     let app_id = window.app_id();
 
-                    // Lunaris-Header: if the just-mapped window wants
+                    // Arlen-Header: if the just-mapped window wants
                     // SSD (Kitty et al.), emit the initial show event
                     // before dropping the shell read-guard — we need
                     // it live to look up the workspace/output geometry
                     // for the payload.
                     // Feature 4-C: only emit shell-bound header
                     // events for stacks; single windows get their
-                    // Lunaris header compositor-rendered via
+                    // Arlen header compositor-rendered via
                     // `CosmicWindow::header_render_element`.
                     if let Some(mapped) = shell.element_for_surface(window.wl_surface().as_deref().unwrap()).cloned()
                         && crate::shell::should_emit_shell_header_events(&mapped)

@@ -2,7 +2,7 @@
 
 //! Compositor-side window-header rendering (Feature 4-C).
 //!
-//! This module produces the Lunaris faux-titlebar ("window header")
+//! This module produces the Arlen faux-titlebar ("window header")
 //! entirely inside the compositor, as a `MemoryRenderBuffer` that
 //! the render pipeline composes alongside the window itself. Going
 //! compositor-rendered instead of the previous cross-process (shell
@@ -58,7 +58,7 @@ use tiny_skia::{
     Stroke, Transform as SkiaTransform,
 };
 
-use lunaris_theme::{LunarisTheme, Rgba};
+use arlen_theme::{ArlenTheme, Rgba};
 
 /// Fixed logical height of the header strip in CSS pixels. Matches
 /// `SSD_HEIGHT` in `shell::element::window`.
@@ -66,7 +66,7 @@ pub const HEADER_LOGICAL_HEIGHT: i32 = 36;
 /// Button width in logical pixels. Matches
 /// `.window-buttons :global(.control-btn) { width: 28px }`
 /// in `sdk/ui-kit/.../WindowControls.svelte` — the canonical
-/// Lunaris window-decoration button. Do NOT conflate with
+/// Arlen window-decoration button. Do NOT conflate with
 /// `BUTTON_HEIGHT` which is smaller — decorations are deliberately
 /// shorter than their bounding click area.
 pub const BUTTON_LOGICAL_WIDTH: f32 = 28.0;
@@ -188,7 +188,7 @@ pub struct HeaderVisualState {
     /// every `ThemeWatcher` reload. Paired with the `theme_ref`
     /// passed into `rasterize` to decide whether the buffer is
     /// stale. Keeps the cache key `Eq`-comparable without having
-    /// to include the entire `LunarisTheme` struct.
+    /// to include the entire `ArlenTheme` struct.
     pub theme_generation: u64,
 }
 
@@ -321,7 +321,7 @@ pub fn layout_buttons(state: &HeaderVisualState) -> Vec<ButtonRect> {
 
 /// Helper: convert a theme RGBA (0..=1 floats) into tiny-skia's
 /// premultiplied `Color`. Handles the straight-alpha RGBA stored
-/// in `LunarisTheme` (see `sdk/theme/src/lib.rs`).
+/// in `ArlenTheme` (see `sdk/theme/src/lib.rs`).
 fn to_skia(c: Rgba) -> Color {
     Color::from_rgba(c[0], c[1], c[2], c[3]).unwrap_or(Color::BLACK)
 }
@@ -376,14 +376,14 @@ fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
 const TRANSPARENT: Rgba = [0.0, 0.0, 0.0, 0.0];
 
 /// Theme-generation counter. Bumped whenever the compositor-wide
-/// `LunarisTheme` reloads (appearance.toml / theme.toml change).
+/// `ArlenTheme` reloads (appearance.toml / theme.toml change).
 /// Pair it into every cached `HeaderVisualState` so a theme swap
 /// invalidates every per-window rasterisation exactly once,
 /// automatically, with no cache-inspection logic required.
 static THEME_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 /// Call from the theme-reload path (see `crate::theme::watch_theme`)
-/// after `replace_lunaris_theme` lands the new theme. Safe to call
+/// after `replace_arlen_theme` lands the new theme. Safe to call
 /// more often than strictly necessary — the counter just needs to
 /// be monotonically advancing.
 pub fn bump_theme_generation() {
@@ -413,7 +413,7 @@ pub fn theme_generation() -> u64 {
 /// means the cache key is unstable (bug).
 pub fn rasterize_header(
     state: &HeaderVisualState,
-    theme: &LunarisTheme,
+    theme: &ArlenTheme,
 ) -> MemoryRenderBuffer {
     let scale = state.scale.max(0.1);
     let logical_w = state.width.max(60) as f32;
@@ -518,7 +518,7 @@ fn rgba_to_bgra_inplace(data: &mut [u8]) {
 fn draw_background(
     pixmap: &mut PixmapMut,
     state: &HeaderVisualState,
-    theme: &LunarisTheme,
+    theme: &ArlenTheme,
     scale: f64,
 ) {
     let mut pb = PathBuilder::new();
@@ -559,7 +559,7 @@ fn draw_background(
 fn draw_bottom_border(
     pixmap: &mut PixmapMut,
     state: &HeaderVisualState,
-    theme: &LunarisTheme,
+    theme: &ArlenTheme,
     scale: f64,
 ) {
     let w = state.width as f32;
@@ -585,7 +585,7 @@ fn draw_bottom_border(
 fn draw_buttons(
     pixmap: &mut PixmapMut,
     state: &HeaderVisualState,
-    theme: &LunarisTheme,
+    theme: &ArlenTheme,
     scale: f64,
     buttons: &[ButtonRect],
 ) {
@@ -688,7 +688,7 @@ fn draw_buttons(
 fn button_visual(
     button: HeaderButton,
     state: &HeaderVisualState,
-    theme: &LunarisTheme,
+    theme: &ArlenTheme,
 ) -> (Rgba, Rgba, f32) {
     let is_close = button == HeaderButton::Close;
 
@@ -889,7 +889,7 @@ fn draw_button_icon(
 // `blit_glyph`, in favour of a title-less header: the drag strip
 // is now a pure flat-colour region. `state.title` is retained in
 // `HeaderVisualState` because the shell's other code paths
-// (stack tabs via the `lunaris-shell-overlay` protocol) still
+// (stack tabs via the `arlen-shell-overlay` protocol) still
 // consume it — the rasteriser just never renders it.
 //
 // Restoring titles is additive: re-introduce the helper, call it
@@ -905,18 +905,14 @@ mod tests {
     use super::*;
 
     /// Build a usable test theme from the bundled dark.toml bytes.
-    /// Replaces the removed `LunarisTheme::lunaris_dark()` constant.
-    fn test_theme_dark() -> LunarisTheme {
-        const BUNDLED: &str =
-            include_str!("../../../../desktop-shell/src-tauri/themes/dark.toml");
-        LunarisTheme::from_bundled(BUNDLED).expect("bundled dark must parse")
+    /// Replaces the removed `ArlenTheme::arlen_dark()` constant.
+    fn test_theme_dark() -> ArlenTheme {
+        ArlenTheme::from_bundled(arlen_theme::DARK_TOML).expect("bundled dark must parse")
     }
 
     /// Light variant for tests.
-    fn test_theme_light() -> LunarisTheme {
-        const BUNDLED: &str =
-            include_str!("../../../../desktop-shell/src-tauri/themes/light.toml");
-        LunarisTheme::from_bundled(BUNDLED).expect("bundled light must parse")
+    fn test_theme_light() -> ArlenTheme {
+        ArlenTheme::from_bundled(arlen_theme::LIGHT_TOML).expect("bundled light must parse")
     }
 
     fn stub_state(width: i32, activated: bool) -> HeaderVisualState {

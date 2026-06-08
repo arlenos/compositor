@@ -638,7 +638,7 @@ pub fn window_items(
     .into_iter()
     .flatten()
     // Move-to-Workspace block rendered as a real submenu via
-    // `lunaris-shell-overlay-v1`'s `parent_index` / `has_submenu`
+    // `arlen-shell-overlay-v1`'s `parent_index` / `has_submenu`
     // fields. The shell builds a tree from the flat DFS stream
     // and renders the children with bits-ui `ContextMenu.Sub`.
     .chain(std::iter::once(Item::Separator))

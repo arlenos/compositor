@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Handler implementation for the `lunaris-shell-overlay-v1` protocol.
+//! Handler implementation for the `arlen-shell-overlay-v1` protocol.
 
 use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::seat::WaylandFocus;

@@ -319,13 +319,13 @@ pub struct Shell {
     /// Runtime mirror of `compositor.toml [layout] tiled_headers`.
     /// Read on `should_render_window_header` and `has_ssd` to
     /// decide whether single tiled SSD windows render the
-    /// compositor-rendered Lunaris header. Updated when the
+    /// compositor-rendered Arlen header. Updated when the
     /// compositor.toml watcher fires (see `toml_config_changed`)
     /// and we then `set_tiled_headers_enabled` which schedules a
     /// reconfigure of every tiled mapped window. Default `false`
     /// — tiling-WM convention.
     pub tiled_headers_enabled: bool,
-    pub lunaris_theme: lunaris_theme::LunarisTheme,
+    pub arlen_theme: arlen_theme::ArlenTheme,
     overview_mode: OverviewMode,
     swap_indicator: Option<SwapIndicator>,
     resize_mode: ResizeMode,
@@ -687,7 +687,7 @@ impl WorkspaceSet {
 
         // Remove empty workspaces only when safe for stable position labels.
         //
-        // Lunaris deviates from upstream cosmic here: the top-bar indicator
+        // Arlen deviates from upstream cosmic here: the top-bar indicator
         // labels workspaces by their position in the list (1, 2, 3, ...), so
         // trimming an empty workspace BEFORE the active one silently shifts
         // every subsequent label — the user clicks "Move to Workspace 2",
@@ -1462,7 +1462,7 @@ impl Workspaces {
     }
 
     /// Re-snapshot every pinned workspace into
-    /// `~/.local/state/lunaris/compositor/state.toml`.
+    /// `~/.local/state/arlen/compositor/state.toml`.
     ///
     /// `PinnedWorkspace` persists three fields per workspace:
     /// `output` (which monitor it lives on), `tiling_enabled`
@@ -1493,7 +1493,7 @@ impl Workspaces {
             .flat_map(|set| &set.workspaces)
             .flat_map(|w| w.to_pinned())
             .collect();
-        // Persist into the lunaris compositor runtime-state file.
+        // Persist into the arlen compositor runtime-state file.
         // The previous cosmic-config writeback path is gone with
         // compositor #29 / CC1; the state-file is the new home.
         // `Some(_)` marks this as an explicit override of the
@@ -1546,11 +1546,11 @@ impl Common {
         let mut shell = self.shell.write();
         let shell_ref = &mut *shell;
         shell_ref.active_hint = self.config.cosmic_conf.active_hint;
-        shell_ref.lunaris_theme = self.lunaris_theme.clone();
+        shell_ref.arlen_theme = self.arlen_theme.clone();
         // Feature 4-C: bump the window-header theme-generation
         // counter so every cached per-window pixmap invalidates on
         // the next frame. The rasteriser reads the current theme
-        // directly via `crate::theme::lunaris_theme()`.
+        // directly via `crate::theme::arlen_theme()`.
         crate::backend::render::window_header::bump_theme_generation();
         shell_ref.appearance_conf = self.config.cosmic_conf.appearance_settings;
         if let Some(zoom_state) = shell_ref.zoom_state.as_mut() {
@@ -1615,7 +1615,7 @@ impl Common {
         self.tick_fullscreen_reveal_timer();
     }
 
-    /// Per-frame sync for Lunaris-rendered window headers.
+    /// Per-frame sync for Arlen-rendered window headers.
     ///
     /// Covers three kinds of changes in one pass:
     /// - geometry (position / width) — from set_geometry calls
@@ -1755,7 +1755,7 @@ impl Common {
         // rendering is driven from `MoveGrabState` on the seat's
         // user-data. If we skipped them here the stale-check below
         // would emit `window_header_hide` every frame during a
-        // drag and the Lunaris header would visually disappear
+        // drag and the Arlen header would visually disappear
         // until release. Poll each seat's grab state and overlay
         // a live payload so (a) the dragged window stays in
         // `current` (no hide), and (b) its position is updated
@@ -2020,8 +2020,8 @@ impl Common {
     }
 }
 
-/// Decides whether the given window should receive a Lunaris-rendered
-/// header via the `lunaris-shell-overlay` `window_header_*` protocol.
+/// Decides whether the given window should receive a Arlen-rendered
+/// header via the `arlen-shell-overlay` `window_header_*` protocol.
 ///
 /// Four inclusion criteria (all must be true):
 ///
@@ -2130,7 +2130,7 @@ pub struct HeaderEligibilityInputs {
     /// Result of the per-protocol CSD check: Wayland xdg-decoration
     /// ServerSide / unset → true; X11 motif-hints + heuristic → true
     /// when window is undecorated by the client and eligible for
-    /// Lunaris chrome.
+    /// Arlen chrome.
     pub csd_branch_eligible: bool,
 }
 
@@ -2179,7 +2179,7 @@ pub fn should_emit_shell_header_events(mapped: &CosmicMapped) -> bool {
 ///    i.e., the app has NOT set Motif hints to `MWM_DECOR_NONE`.
 ///    Unset Motif hints default to "please decorate" (the Motif
 ///    spec default of `MWM_DECOR_ALL`), which is exactly the case
-///    where a Lunaris header is useful for legacy X11 apps that
+///    where a Arlen header is useful for legacy X11 apps that
 ///    have no native chrome. Apps that set `MWM_DECOR_NONE`
 ///    (modern GTK3+, Qt5 X11, Steam) draw their own title bar and
 ///    MUST NOT get a second one from us.
@@ -2299,7 +2299,7 @@ impl From<&WindowHeaderPayload> for CachedHeaderPayload {
 }
 
 /// Top bit used as a namespace marker for X11-originated surface ids
-/// in the `lunaris-shell-overlay::window_header_*` protocol. Wayland
+/// in the `arlen-shell-overlay::window_header_*` protocol. Wayland
 /// protocol ids (client-allocated, start at 2 and increment) never
 /// have this bit set in practice; X11 XIDs are 29-bit on all real X
 /// servers so masking with `0x7FFF_FFFF` doesn't lose information
@@ -2444,7 +2444,7 @@ impl Shell {
                 set_tiled_headers_global(config.layout.tiled_headers);
                 config.layout.tiled_headers
             },
-            lunaris_theme: crate::theme::lunaris_theme(),
+            arlen_theme: crate::theme::arlen_theme(),
             overview_mode: OverviewMode::None,
             swap_indicator: None,
             resize_mode: ResizeMode::None,
@@ -4393,7 +4393,7 @@ impl Shell {
     /// Handle a context menu request from a client or input grab.
     ///
     /// When a desktop-shell client is connected, the menu is sent via the
-    /// `lunaris-shell-overlay-v1` protocol and rendered by desktop-shell.
+    /// `arlen-shell-overlay-v1` protocol and rendered by desktop-shell.
     /// When no shell client is connected, the grab falls back to Iced rendering.
     pub fn menu_request(
         &self,
@@ -4822,7 +4822,7 @@ impl Shell {
             GrabStartData::Touch(start_data) => Trigger::Touch(start_data.slot),
         };
         let active_hint = if config.cosmic_conf.active_hint {
-            self.lunaris_theme.wm.active_hint as u8
+            self.arlen_theme.wm.active_hint as u8
         } else {
             0
         };
@@ -6497,7 +6497,7 @@ mod tiled_headers_policy_tests {
 
     #[test]
     fn floating_with_csd_client_never_renders() {
-        // Client-side-decorated app (Firefox, GTK4) — Lunaris
+        // Client-side-decorated app (Firefox, GTK4) — Arlen
         // never paints chrome regardless of toggle.
         for toggle in [true, false] {
             let i = inputs(false, false, false, toggle, false);

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package lunaris.eventbus;
+package arlen.eventbus;
 
 // Common envelope for all events on the bus.
 // The type-specific payload is encoded as a protobuf message

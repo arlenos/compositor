@@ -59,7 +59,7 @@ use types::WlXkbConfig;
 #[derive(Debug)]
 pub struct Config {
     pub dynamic_conf: DynamicConfig,
-    /// Path to the Lunaris TOML compositor config file.
+    /// Path to the Arlen TOML compositor config file.
     pub toml_path: PathBuf,
     /// Compositor configuration loaded from TOML.
     pub cosmic_conf: CosmicCompConfig,
@@ -76,7 +76,7 @@ pub struct Config {
     /// dropped in compositor #29 / CC3. The field remains as an
     /// always-empty `Vec` so call sites that already iterate over
     /// it (`shell/mod.rs::TilingExceptions::new`) compile without
-    /// change. Lunaris-side window-rule semantics live in
+    /// change. Arlen-side window-rule semantics live in
     /// `layout.window_rules`.
     pub tiling_exceptions: Vec<ApplicationException>,
     /// Layout and tiling configuration from TOML.
@@ -100,7 +100,7 @@ pub struct DynamicConfig {
     accessibility_filter: (Option<PathBuf>, ScreenFilter),
     /// Runtime-mutable compositor state (autotile toggle,
     /// pinned-workspace list). Persisted to TOML at
-    /// `~/.local/state/lunaris/compositor/state.toml` so the
+    /// `~/.local/state/arlen/compositor/state.toml` so the
     /// values survive a restart. Read on session start, written
     /// through `runtime_state_mut()` whenever a user action
     /// changes them.
@@ -108,7 +108,7 @@ pub struct DynamicConfig {
     /// The previous home for these was `cosmic_helper.set("autotile", _)`
     /// and `set("pinned_workspaces", _)` — the cosmic-config
     /// writeback we are removing as part of compositor #29.
-    runtime_state: (Option<PathBuf>, LunarisRuntimeState),
+    runtime_state: (Option<PathBuf>, ArlenRuntimeState),
 }
 
 #[derive(Default, Debug, Deserialize, Serialize)]
@@ -130,7 +130,7 @@ pub struct NumlockStateConfig {
 /// freshly-defaulted state file therefore cannot silently revert
 /// the user's TOML — fix for compositor #29 review HIGH 2.
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct LunarisRuntimeState {
+pub struct ArlenRuntimeState {
     /// Persisted autotile toggle. `None` ⇒ use TOML's value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autotile: Option<bool>,
@@ -244,7 +244,7 @@ pub struct LayoutConfig {
     pub outer_gap: i32,
     /// When true, no gaps are applied when a workspace has only one tiled window.
     pub smart_gaps: bool,
-    /// Render Lunaris window-control headers on **single tiled** SSD
+    /// Render Arlen window-control headers on **single tiled** SSD
     /// windows. Default `false` to match tiling-WM convention
     /// (i3, sway, hyprland) — tiled chrome is dead pixels in a
     /// keyboard-driven layout. Stacks always keep their tab-bar
@@ -358,13 +358,13 @@ pub fn parse_keybinding(binding: &str) -> Option<(KeyBindingModifiers, String)> 
 }
 
 /// Default TOML config path.
-const DEFAULT_TOML_PATH: &str = ".config/lunaris/compositor.toml";
+const DEFAULT_TOML_PATH: &str = ".config/arlen/compositor.toml";
 
 /// Display profile config (output management) lives in a dedicated
 /// file under `compositor.d/` so the compositor can rewrite it on
 /// every applied output change without disturbing the user-edited
 /// `compositor.toml`. See `docs/architecture/display-system.md` §A1.
-const DISPLAYS_TOML_PATH: &str = ".config/lunaris/compositor.d/displays.toml";
+const DISPLAYS_TOML_PATH: &str = ".config/arlen/compositor.d/displays.toml";
 
 /// Resolve the absolute path of the displays-config TOML, or `None`
 /// if `$HOME` is unset (which only happens in degenerate test rigs).
@@ -657,7 +657,7 @@ fn parse_system_actions(
 /// review (TOML hot-reload was reverting in-session toggles).
 fn apply_runtime_state_overrides(
     cosmic_conf: &mut CosmicCompConfig,
-    runtime_state: &LunarisRuntimeState,
+    runtime_state: &ArlenRuntimeState,
 ) {
     if let Some(autotile) = runtime_state.autotile {
         cosmic_conf.autotile = autotile;
@@ -667,14 +667,14 @@ fn apply_runtime_state_overrides(
     }
 }
 
-/// Convert our parsed Lunaris keybindings into the cosmic-shape
+/// Convert our parsed Arlen keybindings into the cosmic-shape
 /// `Shortcuts` table. Several dispatch paths
 /// (`input/mod.rs::handle_keyboard_event`, the resize-mode arrow
 /// handler, the tiling-swap grab, the resize indicator) iterate
 /// `(Binding, Action)` in cosmic terms; populating this from our
 /// TOML keeps those code paths working without a wide rewrite.
 ///
-/// Lunaris-private actions (`shell:`, `module:`, scratchpad,
+/// Arlen-private actions (`shell:`, `module:`, scratchpad,
 /// monocle, etc.) are filtered out here — the cosmic table only
 /// holds cosmic-`Action` variants. Private actions still dispatch
 /// through the `toml_keybindings` loop in input handling.
@@ -689,7 +689,7 @@ fn build_cosmic_shortcuts(toml_keybindings: &[KeyBinding]) -> Shortcuts {
         };
         let cosmic_action = match action {
             key_bindings::Action::Shortcut(a) => a,
-            // Lunaris-private actions are dispatched directly from
+            // Arlen-private actions are dispatched directly from
             // the toml_keybindings loop in input/mod.rs.
             key_bindings::Action::Private(_) => continue,
         };
@@ -707,7 +707,7 @@ fn build_cosmic_shortcuts(toml_keybindings: &[KeyBinding]) -> Shortcuts {
 }
 
 /// Map a cosmic-side `shortcuts::Action` value to the action
-/// string used inside Lunaris' `compositor.toml [keybindings]`
+/// string used inside Arlen' `compositor.toml [keybindings]`
 /// table. Inverse of the prefix-aware mapping in
 /// `key_bindings::action_from_str`. Used by `shortcut_for_action`
 /// to find the user-visible accelerator label for a context-menu
@@ -762,7 +762,7 @@ fn format_keybinding(mods: &KeyBindingModifiers, key: &str) -> String {
 ///
 /// The commands intentionally use generic CLI tools (`wpctl`,
 /// `playerctl`, `loginctl`, `xdg-open`) so the defaults work on a
-/// fresh Lunaris install without extra wiring. Distros or users
+/// fresh Arlen install without extra wiring. Distros or users
 /// can override individual entries via `[system_actions]`.
 pub fn default_system_actions() -> BTreeMap<shortcuts::action::System, String> {
     use shortcuts::action::System;
@@ -1133,7 +1133,7 @@ impl Config {
         let xdg = xdg::BaseDirectories::new();
 
         // Load compositor config from TOML.
-        let toml_path = std::env::var("LUNARIS_COMPOSITOR_CONFIG")
+        let toml_path = std::env::var("ARLEN_COMPOSITOR_CONFIG")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
                 let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
@@ -1211,7 +1211,7 @@ impl Config {
         // Build the system-actions map from defaults plus the
         // user's `[system_actions]` overrides. The
         // cosmic-settings-daemon source was removed in
-        // compositor #29 / CC3 — Lunaris no longer inherits
+        // compositor #29 / CC3 — Arlen no longer inherits
         // anything from `com.system76.CosmicSettings.*`.
         let mut system_actions = default_system_actions();
         for (action, command) in toml_config.system_actions.clone() {
@@ -1228,7 +1228,7 @@ impl Config {
 
         // tiling_exceptions formerly populated from
         // `com.system76.CosmicSettings.WindowRules`. That source is
-        // gone — Lunaris-side window rules live in
+        // gone — Arlen-side window rules live in
         // `compositor.toml [layout].window_rules` and flow through
         // the `Config.layout.window_rules` field instead. We keep
         // this Vec empty so `shell::TilingExceptions::new` and
@@ -1275,7 +1275,7 @@ impl Config {
 
     fn load_dynamic(xdg: &xdg::BaseDirectories) -> DynamicConfig {
         // Output config moved from `~/.local/state/cosmic-comp/outputs.ron`
-        // to `~/.config/lunaris/compositor.d/displays.toml`. See
+        // to `~/.config/arlen/compositor.d/displays.toml`. See
         // `docs/architecture/display-system.md` §A1. On first boot
         // after the change, the legacy RON is converted to TOML and
         // unlinked. The legacy path keeps working for `numlock` and
@@ -1306,7 +1306,7 @@ impl Config {
         let filter = Self::load_filter_state(&filter_path);
 
         let runtime_state_path = xdg
-            .place_state_file("lunaris/compositor/state.toml")
+            .place_state_file("arlen/compositor/state.toml")
             .ok();
         let runtime_state = Self::load_runtime_state(&runtime_state_path);
 
@@ -1318,32 +1318,32 @@ impl Config {
         }
     }
 
-    /// Read `~/.local/state/lunaris/compositor/state.toml`. Missing
+    /// Read `~/.local/state/arlen/compositor/state.toml`. Missing
     /// or unparseable file returns defaults — this state can always
     /// be regenerated from the next user toggle, so a corrupt file
     /// is logged-and-replaced rather than fatal.
-    fn load_runtime_state(path: &Option<PathBuf>) -> LunarisRuntimeState {
+    fn load_runtime_state(path: &Option<PathBuf>) -> ArlenRuntimeState {
         let Some(path) = path.as_deref() else {
-            return LunarisRuntimeState::default();
+            return ArlenRuntimeState::default();
         };
         if !path.exists() {
-            return LunarisRuntimeState::default();
+            return ArlenRuntimeState::default();
         }
         match std::fs::read_to_string(path) {
-            Ok(content) => match toml::from_str::<LunarisRuntimeState>(&content) {
+            Ok(content) => match toml::from_str::<ArlenRuntimeState>(&content) {
                 Ok(state) => state,
                 Err(err) => {
                     warn!(
                         ?err,
-                        "Failed to parse lunaris compositor runtime state, resetting.."
+                        "Failed to parse arlen compositor runtime state, resetting.."
                     );
                     let _ = std::fs::remove_file(path);
-                    LunarisRuntimeState::default()
+                    ArlenRuntimeState::default()
                 }
             },
             Err(err) => {
-                warn!(?err, "Failed to read lunaris compositor runtime state");
-                LunarisRuntimeState::default()
+                warn!(?err, "Failed to read arlen compositor runtime state");
+                ArlenRuntimeState::default()
             }
         }
     }
@@ -1779,7 +1779,7 @@ impl<T: Serialize> Drop for PersistenceGuard<'_, T> {
             };
 
             // Make sure the parent directory exists. The TOML
-            // outputs path lives under `~/.config/lunaris/compositor.d/`
+            // outputs path lives under `~/.config/arlen/compositor.d/`
             // which has no other guaranteed creator.
             let Some(parent) = path.parent() else {
                 warn!("PersistenceGuard target path has no parent: {}", path.display());
@@ -1866,24 +1866,24 @@ impl DynamicConfig {
         }
     }
 
-    pub fn runtime_state(&self) -> &LunarisRuntimeState {
+    pub fn runtime_state(&self) -> &ArlenRuntimeState {
         &self.runtime_state.1
     }
 
     /// Mutable handle to the runtime-state file. The returned
     /// guard writes back to `state.toml` atomically (tmp + rename)
-    /// when dropped. Use for any field on `LunarisRuntimeState`
+    /// when dropped. Use for any field on `ArlenRuntimeState`
     /// that needs to persist across sessions.
-    pub fn runtime_state_mut(&mut self) -> PersistenceGuard<'_, LunarisRuntimeState> {
+    pub fn runtime_state_mut(&mut self) -> PersistenceGuard<'_, ArlenRuntimeState> {
         PersistenceGuard {
             path: self.runtime_state.0.clone(),
             value: &mut self.runtime_state.1,
-            serialize: lunaris_runtime_serialize,
+            serialize: arlen_runtime_serialize,
         }
     }
 }
 
-fn lunaris_runtime_serialize(value: &LunarisRuntimeState) -> Result<String, String> {
+fn arlen_runtime_serialize(value: &ArlenRuntimeState) -> Result<String, String> {
     toml::to_string_pretty(value).map_err(|e| e.to_string())
 }
 
@@ -2232,7 +2232,7 @@ mod tests {
 
     #[test]
     fn test_load_sparse_toml() {
-        let dir = std::env::temp_dir().join("lunaris-config-test");
+        let dir = std::env::temp_dir().join("arlen-config-test");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("test-compositor.toml");
         std::fs::write(
@@ -2266,7 +2266,7 @@ workspace_layout = "Horizontal"
 
     #[test]
     fn test_load_empty_toml() {
-        let dir = std::env::temp_dir().join("lunaris-config-test-empty");
+        let dir = std::env::temp_dir().join("arlen-config-test-empty");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("test-empty.toml");
         std::fs::write(&path, "").unwrap();
@@ -2286,7 +2286,7 @@ workspace_layout = "Horizontal"
 
     #[test]
     fn test_load_layout_config() {
-        let dir = std::env::temp_dir().join("lunaris-config-test-layout");
+        let dir = std::env::temp_dir().join("arlen-config-test-layout");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("test-layout.toml");
         std::fs::write(
@@ -2322,7 +2322,7 @@ action = "float"
 
     #[test]
     fn test_load_keybindings() {
-        let dir = std::env::temp_dir().join("lunaris-config-test-kb");
+        let dir = std::env::temp_dir().join("arlen-config-test-kb");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("test-keybindings.toml");
         std::fs::write(
@@ -2394,7 +2394,7 @@ action = "float"
 
     #[test]
     fn load_keybinding_fragments_missing_dir_is_ok() {
-        let dir = std::env::temp_dir().join("lunaris-does-not-exist-xyz");
+        let dir = std::env::temp_dir().join("arlen-does-not-exist-xyz");
         let _ = std::fs::remove_dir_all(&dir);
         assert!(load_keybinding_fragments(&dir).is_empty());
     }
@@ -2445,25 +2445,25 @@ action = "float"
 
     #[test]
     fn keybinding_fragment_dir_is_sibling_of_toml() {
-        let toml = std::path::Path::new("/etc/lunaris/compositor.toml");
+        let toml = std::path::Path::new("/etc/arlen/compositor.toml");
         let frag = keybinding_fragment_dir(toml);
         assert_eq!(
             frag,
-            std::path::Path::new("/etc/lunaris/compositor.d/keybindings.d")
+            std::path::Path::new("/etc/arlen/compositor.d/keybindings.d")
         );
     }
 
-    /// Round-trip: serialize a `LunarisRuntimeState`, parse it back,
+    /// Round-trip: serialize a `ArlenRuntimeState`, parse it back,
     /// and confirm the fields survive. Catches accidental serde
     /// drift on the runtime-state schema.
     #[test]
     fn runtime_state_round_trips_through_toml() {
-        let original = LunarisRuntimeState {
+        let original = ArlenRuntimeState {
             autotile: Some(true),
             pinned_workspaces: Some(Vec::new()),
         };
-        let serialized = lunaris_runtime_serialize(&original).expect("serialize");
-        let parsed: LunarisRuntimeState =
+        let serialized = arlen_runtime_serialize(&original).expect("serialize");
+        let parsed: ArlenRuntimeState =
             toml::from_str(&serialized).expect("parse round-trip");
         assert_eq!(parsed.autotile, original.autotile);
         assert_eq!(
@@ -2478,7 +2478,7 @@ action = "float"
     /// silently revert a TOML setting it doesn't mention.
     #[test]
     fn runtime_state_missing_fields_use_defaults() {
-        let parsed: LunarisRuntimeState =
+        let parsed: ArlenRuntimeState =
             toml::from_str("").expect("empty body parses");
         assert_eq!(
             parsed.autotile, None,
@@ -2490,7 +2490,7 @@ action = "float"
         );
 
         // Partial: only autotile present.
-        let parsed: LunarisRuntimeState =
+        let parsed: ArlenRuntimeState =
             toml::from_str("autotile = true").expect("partial body parses");
         assert_eq!(parsed.autotile, Some(true));
         assert_eq!(parsed.pinned_workspaces, None);
@@ -2508,7 +2508,7 @@ action = "float"
 
         // Path that doesn't exist on disk.
         let nonexistent = Some(std::path::PathBuf::from(
-            "/tmp/nonexistent-lunaris-runtime-state.toml",
+            "/tmp/nonexistent-arlen-runtime-state.toml",
         ));
         let state = Config::load_runtime_state(&nonexistent);
         assert_eq!(state.autotile, None);
@@ -2585,7 +2585,7 @@ NotARealAction = "spawn:nope"
     }
 
     /// Cosmic-shape Shortcuts is built from our toml_keybindings.
-    /// Cosmic-`Action` variants flow through, Lunaris-private
+    /// Cosmic-`Action` variants flow through, Arlen-private
     /// actions (shell:, module:, scratchpad, etc.) are filtered
     /// out so only what the cosmic dispatch loops understand ends
     /// up in the table.
@@ -2620,7 +2620,7 @@ NotARealAction = "spawn:nope"
         ];
         let shortcuts = build_cosmic_shortcuts(&kbs);
         // close_window + fullscreen are cosmic actions → in the table.
-        // shell:waypointer_open is Lunaris-private → filtered out.
+        // shell:waypointer_open is Arlen-private → filtered out.
         assert_eq!(shortcuts.0.len(), 2);
         let actions: Vec<_> = shortcuts.0.values().collect();
         assert!(
@@ -2689,7 +2689,7 @@ BrightnessUp = "spawn:my-custom-brightness-helper"
     /// rather than crashing the compositor.
     #[test]
     fn load_runtime_state_corrupt_file_resets() {
-        let dir = std::env::temp_dir().join("lunaris-runtime-state-test");
+        let dir = std::env::temp_dir().join("arlen-runtime-state-test");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("corrupt.toml");
         std::fs::write(&path, "not = valid = toml = at = all").unwrap();
@@ -2711,7 +2711,7 @@ BrightnessUp = "spawn:my-custom-brightness-helper"
         let mut cosmic = CosmicCompConfig::default();
         cosmic.autotile = true;
 
-        let runtime = LunarisRuntimeState::default(); // None / None
+        let runtime = ArlenRuntimeState::default(); // None / None
         apply_runtime_state_overrides(&mut cosmic, &runtime);
 
         assert!(
@@ -2728,7 +2728,7 @@ BrightnessUp = "spawn:my-custom-brightness-helper"
         let mut cosmic = CosmicCompConfig::default();
         cosmic.autotile = false;
 
-        let runtime = LunarisRuntimeState {
+        let runtime = ArlenRuntimeState {
             autotile: Some(true),
             pinned_workspaces: None,
         };

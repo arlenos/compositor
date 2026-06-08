@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<protocol name="lunaris_titlebar_v1">
+<protocol name="arlen_titlebar_v1">
   <copyright>
-    Copyright (C) 2026 Lunaris OS Contributors
+    Copyright (C) 2026 Arlen OS Contributors
     SPDX-License-Identifier: GPL-3.0-only
   </copyright>
 
-  <description summary="Lunaris titlebar content declaration protocol">
+  <description summary="Arlen titlebar content declaration protocol">
     This protocol allows applications to declare titlebar content (tabs,
     buttons, breadcrumbs, search) while the compositor decides how and
     where to render it based on the window mode (floating, tiled,
@@ -18,18 +18,18 @@
   <!-- Manager global: binds to a surface to get a per-window titlebar    -->
   <!-- ================================================================== -->
 
-  <interface name="lunaris_titlebar_manager_v1" version="1">
+  <interface name="arlen_titlebar_manager_v1" version="1">
     <description summary="factory for per-window titlebar interfaces">
       Global singleton. Clients call get_titlebar to obtain a
-      lunaris_titlebar_v1 object tied to a specific wl_surface.
+      arlen_titlebar_v1 object tied to a specific wl_surface.
     </description>
 
     <request name="get_titlebar">
       <description summary="create a titlebar interface for a surface">
-        Creates a lunaris_titlebar_v1 object bound to the given surface.
+        Creates a arlen_titlebar_v1 object bound to the given surface.
         Only one titlebar object per surface is allowed.
       </description>
-      <arg name="id" type="new_id" interface="lunaris_titlebar_v1"/>
+      <arg name="id" type="new_id" interface="arlen_titlebar_v1"/>
       <arg name="surface" type="object" interface="wl_surface"/>
     </request>
 
@@ -40,7 +40,7 @@
   <!-- Per-window titlebar interface                                       -->
   <!-- ================================================================== -->
 
-  <interface name="lunaris_titlebar_v1" version="1">
+  <interface name="arlen_titlebar_v1" version="1">
     <description summary="per-window titlebar content declaration">
       Bound to a single wl_surface. The client uses requests to declare
       titlebar content; the compositor sends events when the user

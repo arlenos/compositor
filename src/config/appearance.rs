@@ -2,16 +2,16 @@
 
 //! Appearance config loader and watcher.
 //!
-//! Reads `~/.config/lunaris/appearance.toml` — the single-source config
+//! Reads `~/.config/arlen/appearance.toml` — the single-source config
 //! file shared with the shell and the Settings app — and applies the
 //! relevant `[window]` section to the compositor's effective theme.
 //!
 //! ## Scope
 //!
-//! * `[window].corner_radius`      -> `LunarisTheme::radius_s`
-//! * `[window].border_width`       -> `LunarisTheme::active_hint`
+//! * `[window].corner_radius`      -> `ArlenTheme::radius_s`
+//! * `[window].border_width`       -> `ArlenTheme::active_hint`
 //! * `[window].gap_inner / gap_outer / gap_smart` -> tiling layer gaps
-//! * `[window.border].focused`    -> `LunarisTheme::window_hint`
+//! * `[window.border].focused`    -> `ArlenTheme::window_hint`
 //!   (accepts hex `#rrggbb[aa]` or the sentinel `"$accent"`)
 //! * `[window.border].unfocused`  -> currently parsed but not rendered
 //!   (Phase 4 render-loop patch; see project plan)
@@ -23,9 +23,9 @@
 //! theme as:
 //!
 //! ```text
-//! LunarisTheme::load()  // base, from theme.toml
+//! ArlenTheme::load()  // base, from theme.toml
 //!     -> apply_to_theme(overrides)  // from appearance.toml
-//!     -> set_lunaris_theme()        // global
+//!     -> set_arlen_theme()        // global
 //! ```
 //!
 //! That way a user who edits either file sees the same composed result,
@@ -61,18 +61,18 @@ pub const ACCENT_FOREGROUND_SENTINEL: &str = "$foreground";
 const MONO_DARK: [f32; 3] = [0xfa as f32 / 255.0, 0xfa as f32 / 255.0, 0xfa as f32 / 255.0];
 const MONO_LIGHT: [f32; 3] = [0x17 as f32 / 255.0, 0x17 as f32 / 255.0, 0x17 as f32 / 255.0];
 
-/// Default appearance.toml path (`$XDG_CONFIG_HOME/lunaris/appearance.toml`),
-/// falling back to `$HOME/.config/lunaris/appearance.toml`.
+/// Default appearance.toml path (`$XDG_CONFIG_HOME/arlen/appearance.toml`),
+/// falling back to `$HOME/.config/arlen/appearance.toml`.
 pub fn default_path() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
-            return PathBuf::from(xdg).join("lunaris").join("appearance.toml");
+            return PathBuf::from(xdg).join("arlen").join("appearance.toml");
         }
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
         .join(".config")
-        .join("lunaris")
+        .join("arlen")
         .join("appearance.toml")
 }
 
@@ -190,7 +190,7 @@ pub fn current_appearance() -> Option<AppearanceConfig> {
 /// Apply overrides from `appearance.toml` to a resolved theme.
 /// Called both from the theme watcher (when theme.toml changes)
 /// and the appearance watcher (when appearance.toml changes).
-pub fn apply_to_theme(theme: &mut lunaris_theme::LunarisTheme, cfg: &AppearanceConfig) {
+pub fn apply_to_theme(theme: &mut arlen_theme::ArlenTheme, cfg: &AppearanceConfig) {
     let w = &cfg.window;
 
     // Radius intensity is the user knob; theme defines the absolute
@@ -265,8 +265,8 @@ pub fn apply_to_theme(theme: &mut lunaris_theme::LunarisTheme, cfg: &AppearanceC
 
 /// Resolve the effective accent colour the user sees everywhere else.
 /// Honours `[overrides].accent` first (including `$foreground`), then
-/// falls back to the legacy `LunarisTheme::accent_rgb()` from theme.toml.
-pub fn effective_accent(cfg: &AppearanceConfig, theme: &lunaris_theme::LunarisTheme) -> [f32; 3] {
+/// falls back to the legacy `ArlenTheme::accent_rgb()` from theme.toml.
+pub fn effective_accent(cfg: &AppearanceConfig, theme: &arlen_theme::ArlenTheme) -> [f32; 3] {
     if let Some(ref acc) = cfg.overrides.accent {
         if acc == ACCENT_FOREGROUND_SENTINEL {
             return monochrome_for_mode(&cfg.theme);
@@ -298,7 +298,7 @@ fn monochrome_for_mode(theme: &ThemeSection) -> [f32; 3] {
 fn resolve_focused(
     value: &str,
     cfg: &AppearanceConfig,
-    theme: &lunaris_theme::LunarisTheme,
+    theme: &arlen_theme::ArlenTheme,
 ) -> Option<[f32; 3]> {
     if value == BORDER_FOCUSED_SENTINEL {
         return Some(effective_accent(cfg, theme));
@@ -415,7 +415,7 @@ pub fn watch(loop_handle: LoopHandle<'_, State>) {
 }
 
 /// Reload appearance.toml from disk and apply the new overrides to:
-///   1. the composed LunarisTheme (radius, hint width, hint colour)
+///   1. the composed ArlenTheme (radius, hint width, hint colour)
 ///   2. the tiling layer gaps on all workspaces (with recalculate)
 ///
 /// Runs on the calloop main thread, so we can borrow `State` freely.
@@ -426,11 +426,11 @@ fn handle_reload(path: &Path, state: &mut State) {
 
     // Re-compose the theme through the SAME path the compositor
     // uses at startup (`crate::theme::compose_effective_theme` via
-    // the `replace_lunaris_theme` setter below). That path picks
-    // the Lunaris Dark / Light preset from `[theme] mode`, merges
+    // the `replace_arlen_theme` setter below). That path picks
+    // the Arlen Dark / Light preset from `[theme] mode`, merges
     // `theme.toml` on top, and THEN applies the appearance.toml
     // overrides. Previously this function took the
-    // `lunaris_theme::LunarisTheme::load()` shortcut — which
+    // `arlen_theme::ArlenTheme::load()` shortcut — which
     // silently fell through to the Panda preset when `theme.toml`
     // was empty, producing a Panda-coloured window header whenever
     // the user touched `appearance.toml`. See the Theme Integration
@@ -459,11 +459,11 @@ fn handle_reload(path: &Path, state: &mut State) {
         theme.typography.font_sans,
     );
 
-    crate::theme::replace_lunaris_theme(theme.clone());
-    state.common.lunaris_theme = theme.clone();
+    crate::theme::replace_arlen_theme(theme.clone());
+    state.common.arlen_theme = theme.clone();
     {
         let mut shell = state.common.shell.write();
-        shell.lunaris_theme = theme;
+        shell.arlen_theme = theme;
     }
 
     // Feature 4-C: window-header rasteriser keeps a per-window
@@ -570,14 +570,14 @@ mod tests {
     /// Builds a sane test theme from the bundled dark.toml bytes.
     /// We use a minimal-meta document; the resolver fills sane
     /// defaults for everything else.
-    fn test_theme() -> lunaris_theme::LunarisTheme {
+    fn test_theme() -> arlen_theme::ArlenTheme {
         let bytes = r##"
 [meta]
 id = "dark"
-name = "Lunaris Dark"
+name = "Arlen Dark"
 variant = "dark"
 "##;
-        lunaris_theme::LunarisTheme::from_bundled(bytes).unwrap()
+        arlen_theme::ArlenTheme::from_bundled(bytes).unwrap()
     }
 
     #[test]

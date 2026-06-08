@@ -165,12 +165,12 @@ unsafe impl Sync for ClientState {}
 
 impl ClientState {
     /// We treat a client as "sandboxed" if it has a security context for any sandbox engine
-    /// other than `dev.lunaris.desktop-shell`
+    /// other than `dev.arlen.desktop-shell`
     pub fn not_sandboxed(&self) -> bool {
         self.security_context
             .as_ref()
             .is_none_or(|security_context| {
-                security_context.sandbox_engine.as_deref() == Some("dev.lunaris.desktop-shell")
+                security_context.sandbox_engine.as_deref() == Some("dev.arlen.desktop-shell")
             })
     }
 }
@@ -251,9 +251,9 @@ pub struct Common {
     pub gesture_state: Option<GestureState>,
 
     pub kiosk_child: Option<Child>,
-    pub lunaris_theme: lunaris_theme::LunarisTheme,
+    pub arlen_theme: arlen_theme::ArlenTheme,
 
-    /// Per-frame cache for the Lunaris window-header diff loop.
+    /// Per-frame cache for the Arlen window-header diff loop.
     /// Keyed by `wl_surface.protocol_id()`. `refresh_window_headers`
     /// computes the current payload for every SSD window each frame
     /// and only emits `window_header_update` on actual change. See
@@ -293,7 +293,7 @@ pub struct Common {
     pub overlap_notify_state: OverlapNotifyState,
     pub shell_overlay_state: ShellOverlayState,
     pub titlebar_manager_state: TitlebarManagerState,
-    /// State backing the `lunaris-window-attach-v1` protocol. See
+    /// State backing the `arlen-window-attach-v1` protocol. See
     /// Feature 4 (latency-sync) groundwork. v1 keeps the bindings
     /// index dormant until the phase-2 renderer consumes it.
     pub window_attach_state:
@@ -316,13 +316,13 @@ pub struct Common {
     pub pending_menu_callbacks: HashMap<u32, Vec<crate::shell::grabs::menu::Item>>,
     pub a11y_state: A11yState,
     pub a11y_keyboard_monitor_state: A11yKeyboardMonitorState,
-    /// Registration table backing the `org.lunaris.App1` D-Bus
+    /// Registration table backing the `org.arlen.App1` D-Bus
     /// service. Shared with `input_manager_state` so focused-scope
     /// keybinding registrations can be validated against the
     /// registration.
     pub app_registry_state: AppRegistryState,
     /// Dynamic keybinding registry backing the
-    /// `org.lunaris.InputManager1` D-Bus service. Shared with
+    /// `org.arlen.InputManager1` D-Bus service. Shared with
     /// `binding_resolver` — do not duplicate.
     pub input_manager_state: InputManagerState,
     /// Resolver merging static TOML bindings with dynamic D-Bus ones.
@@ -792,7 +792,7 @@ impl State {
 
         let a11y_keyboard_monitor_state = A11yKeyboardMonitorState::new(&async_executor);
 
-        // Start the org.lunaris.InputManager1 D-Bus service and seed the
+        // Start the org.arlen.InputManager1 D-Bus service and seed the
         // resolver with the bindings currently declared in TOML. The
         // resolver shares its dynamic store with the service so
         // registrations become visible to dispatch without copying.
@@ -844,7 +844,7 @@ impl State {
                 gesture_state: None,
 
                 kiosk_child: None,
-                lunaris_theme: crate::theme::lunaris_theme(),
+                arlen_theme: crate::theme::arlen_theme(),
                 window_header_cache: std::collections::HashMap::new(),
 
                 compositor_state,

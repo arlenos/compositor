@@ -206,7 +206,7 @@ impl Shell {
             state.common.shell.write().append_focus_stack(target, seat);
         }
 
-        // Emit window.focused event to the Lunaris Event Bus.
+        // Emit window.focused event to the Arlen Event Bus.
         let app_id = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => mapped.active_window().app_id(),
             Some(KeyboardFocusTarget::Fullscreen(s)) => format!("fullscreen:{:?}", s),

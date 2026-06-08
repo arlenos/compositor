@@ -28,7 +28,7 @@ Everything related to the Wayland compositor core:
 
 ### `src/event_bus.rs`
 
-Non-blocking Event Bus integration. Opens a Unix socket connection to the Lunaris
+Non-blocking Event Bus integration. Opens a Unix socket connection to the Arlen
 Event Bus in a background thread and emits structured events without touching the
 compositor render loop.
 
@@ -41,9 +41,9 @@ compositor render loop.
 | `window.closed` | Toplevel surface destroyed | `wayland` |
 | `clipboard.copy` | Selection changes on clipboard target | `wayland` |
 
-The socket path is read from `LUNARIS_PRODUCER_SOCKET` (default:
-`/run/lunaris/event-bus-producer.sock`). The session ID is read from
-`LUNARIS_SESSION_ID` (default: a fresh UUID v7 generated at startup).
+The socket path is read from `ARLEN_PRODUCER_SOCKET` (default:
+`/run/arlen/event-bus-producer.sock`). The session ID is read from
+`ARLEN_SESSION_ID` (default: a fresh UUID v7 generated at startup).
 
 **Design constraint:** All Event Bus calls are non-blocking. The compositor event
 loop must never stall waiting for I/O. The background thread absorbs all socket
@@ -106,9 +106,9 @@ Smithay's `implied_exclusive_edge_for_anchor()` returns `None` for 4-anchor surf
 exclusive zone. The desktop-shell uses all 4 anchors for its full-screen overlay
 surface with a 36px top bar. Without this fix, windows slide under the bar.
 
-### lunaris-shell-overlay protocol: tab bar and indicator events
+### arlen-shell-overlay protocol: tab bar and indicator events
 
-`resources/protocols/lunaris-shell-overlay.xml` -- Extended with tab bar events
+`resources/protocols/arlen-shell-overlay.xml` -- Extended with tab bar events
 (`tab_bar_show`, `tab_bar_hide`, `tab_added`, `tab_removed`, `tab_activated`,
 `tab_title_changed`, `tab_activate` request), indicator events (`indicator_show`,
 `indicator_hide` with `indicator_kind` enum for stack hover, swap, and resize), and
@@ -165,8 +165,8 @@ zoom.rs context menus still use it.
 ### Config: TOML loader replaces cosmic-config for CosmicComp
 
 `src/config/mod.rs` -- The `com.system76.CosmicComp` cosmic-config store and its
-`ConfigWatchSource` are replaced by a TOML file at `~/.config/lunaris/compositor.toml`
-(configurable via `LUNARIS_COMPOSITOR_CONFIG`). A `notify` file watcher on the parent
+`ConfigWatchSource` are replaced by a TOML file at `~/.config/arlen/compositor.toml`
+(configurable via `ARLEN_COMPOSITOR_CONFIG`). A `notify` file watcher on the parent
 directory detects changes (including atomic editor renames) and sends them to the
 calloop event loop via a channel. The `toml_config_changed()` function reloads the
 entire TOML file, compares each field against the previous config, and triggers the
@@ -189,7 +189,7 @@ cosmic-config code paths.
 
 `src/state.rs` -- `ClientState::not_sandboxed()` previously checked for
 `com.system76.CosmicPanel` as the sandbox engine. Changed to
-`dev.lunaris.desktop-shell` to match the Lunaris desktop shell identity.
+`dev.arlen.desktop-shell` to match the Arlen desktop shell identity.
 
 ### IcedElement replacement for CosmicStack and CosmicWindow
 
@@ -213,7 +213,7 @@ implementations are removed.
 
 ### Window header protocol extension
 
-`lunaris-shell-overlay.xml` extended with `window_header_show`,
+`arlen-shell-overlay.xml` extended with `window_header_show`,
 `window_header_update`, `window_header_hide` events and `window_header_action`
 request. The `window_header_action_type` enum covers minimize, maximize, close,
 and move. Desktop-shell renders header bars with title, activation state, and
@@ -240,11 +240,11 @@ the shell overlay protocol. When no desktop-shell client is connected,
 `send_context_menu` returns `None` and the menu simply does not appear rather
 than falling back to in-compositor Iced rendering.
 
-### LunarisTheme global and cosmic::Theme removal
+### ArlenTheme global and cosmic::Theme removal
 
-`src/theme.rs` contains a `RwLock<Option<LunarisTheme>>` global updated by a
-`lunaris-theme::ThemeWatcher`. All color, radius, gap, and hint reads across the
-compositor use `crate::theme::lunaris_theme()` instead of `cosmic::Theme`
+`src/theme.rs` contains a `RwLock<Option<ArlenTheme>>` global updated by a
+`arlen-theme::ThemeWatcher`. All color, radius, gap, and hint reads across the
+compositor use `crate::theme::arlen_theme()` instead of `cosmic::Theme`
 methods. The `cosmic::Theme` field has been removed from `Common`, `Shell`,
 `CosmicStackInternal`, `CosmicWindowInternal`, `FloatingLayout`,
 `TilingLayout`, `Workspaces`, and all constructors that previously accepted it.
@@ -265,7 +265,7 @@ config infrastructure, which is deferred.
 
 The `CosmicTk` config watcher in `config/mod.rs` (which tracked the COSMIC
 toolkit icon theme) is removed. `cosmic::icon_theme::set_default()` calls are
-deleted. XWayland falls back to the `"hicolor"` icon theme. A Lunaris-native
+deleted. XWayland falls back to the `"hicolor"` icon theme. A Arlen-native
 icon theme system is planned for Phase 4.
 
 ## Technical debt
@@ -277,7 +277,7 @@ watcher (`cosmic_settings_config::shortcuts::context()` returns a
 `cosmic_config::Config`) and the WindowRules watcher. The `cosmic_helper` field
 on `Config` is also retained for legacy zoom config write-back. Removing
 `cosmic-config` requires replacing the shortcut and window-rule configuration
-infrastructure with a Lunaris-native TOML-based system.
+infrastructure with a Arlen-native TOML-based system.
 
 ## Upstream sync process
 
@@ -301,7 +301,7 @@ git rebase --continue
 
 ### Contributing patches upstream
 
-Any change that is not Lunaris-specific should be submitted as a pull request to
+Any change that is not Arlen-specific should be submitted as a pull request to
 cosmic-comp upstream. A shorter patch series means less rebase work on every
 upstream update. Check before committing whether a change belongs upstream.
 

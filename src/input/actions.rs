@@ -1132,7 +1132,7 @@ impl State {
                         shell_ref.workspaces.persist(&mut self.common.config);
                     }
                     // Persist the new toggle value to
-                    // `~/.local/state/lunaris/compositor/state.toml`
+                    // `~/.local/state/arlen/compositor/state.toml`
                     // so the next session starts in the same mode.
                     // `Some(_)` marks this as an explicit user
                     // override — the field-level precedence in
@@ -1250,7 +1250,7 @@ impl State {
             "waypointer_open" | "waypointer_toggle" => {
                 self.common.shell_overlay_state.send_waypointer_open();
             }
-            // Canonical name is `workspace_map_open` since Lunaris
+            // Canonical name is `workspace_map_open` since Arlen
             // renamed the overlay UI to "Workspace Map". The old
             // `workspace_overlay_*` names remain aliased so
             // existing user configs (and the catalog entry with

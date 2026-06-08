@@ -1,7 +1,7 @@
-//! `org.lunaris.InputManager1` D-Bus service.
+//! `org.arlen.InputManager1` D-Bus service.
 //!
 //! Apps register keybindings here dynamically. Static bindings continue
-//! to live in `~/.config/lunaris/compositor.toml`; dynamic bindings are
+//! to live in `~/.config/arlen/compositor.toml`; dynamic bindings are
 //! ephemeral and disappear automatically when the registering client
 //! disconnects (cleaned up via `NameOwnerChanged`).
 //!
@@ -35,8 +35,8 @@ use zbus::{
 use super::app_interface::AppRegistry;
 use super::name_owners::NameOwners;
 
-const OBJECT_PATH: &str = "/org/lunaris/InputManager1";
-const SERVICE_NAME: &str = "org.lunaris.InputManager1";
+const OBJECT_PATH: &str = "/org/arlen/InputManager1";
+const SERVICE_NAME: &str = "org.arlen.InputManager1";
 
 // ---------------------------------------------------------------------------
 // Wire types
@@ -144,7 +144,7 @@ pub struct InputManagerState {
     pub bindings: Arc<Mutex<DynamicBindings>>,
     /// Shared app registration store. Used by `register_binding` to
     /// verify that a claimed `app_id` matches the caller's
-    /// `org.lunaris.App1` registration.
+    /// `org.arlen.App1` registration.
     pub app_registry: Arc<Mutex<AppRegistry>>,
     /// Background executor used to drive async signal emissions from
     /// the (synchronous) input path.
@@ -332,7 +332,7 @@ fn registration_dominates(existing: &BindingInfo, new_scope: &str, new_app_id: &
     existing.app_id == new_app_id
 }
 
-#[zbus::interface(name = "org.lunaris.InputManager1")]
+#[zbus::interface(name = "org.arlen.InputManager1")]
 impl InputManager {
     /// Register a keybinding for the calling client.
     ///
@@ -369,7 +369,7 @@ impl InputManager {
         }
 
         // For app_focused, the claimed `app_id` must match the one
-        // the caller registered via `org.lunaris.App1::RegisterApp`.
+        // the caller registered via `org.arlen.App1::RegisterApp`.
         // Without this check any client could claim any app_id and
         // thereby intercept shortcuts meant for another app as soon
         // as that app gets focus.
@@ -385,7 +385,7 @@ impl InputManager {
                 }
                 None => {
                     return Err(zbus::fdo::Error::AccessDenied(
-                        "app_focused scope requires RegisterApp on org.lunaris.App1 first"
+                        "app_focused scope requires RegisterApp on org.arlen.App1 first"
                             .into(),
                     ));
                 }

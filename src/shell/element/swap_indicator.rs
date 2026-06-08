@@ -26,7 +26,7 @@ use smithay::desktop::space::SpaceElement;
 /// Lightweight indicator element shown during window swap operations.
 ///
 /// Previously backed by `IcedElement`; now a standalone struct. Rendering
-/// is handled by `desktop-shell` via `lunaris-shell-overlay`, so all
+/// is handled by `desktop-shell` via `arlen-shell-overlay`, so all
 /// `render_elements` calls return an empty `Vec`.
 #[derive(Clone)]
 pub struct SwapIndicator {

@@ -139,7 +139,7 @@ impl CosmicStackInternal {
 }
 
 /// Vertical space a CosmicStack reserves at the top of its
-/// bounding box for the integrated Lunaris window header (tabs +
+/// bounding box for the integrated Arlen window header (tabs +
 /// min/max/close buttons, see Feature 3).
 ///
 /// This MUST match `crate::shell::element::window::SSD_HEIGHT`
@@ -742,7 +742,7 @@ impl CosmicStack {
         if tiled && !appearance.shadow_tiled_windows {
             return None;
         }
-        let lt = crate::theme::lunaris_theme();
+        let lt = crate::theme::arlen_theme();
         let radii = if round {
             lt.effective_window_corners()
                 .map(|x| if x < 4.0 { x } else { x + 4.0 })
@@ -818,7 +818,7 @@ impl CosmicStack {
             let tiled = p.tiled.load(Ordering::Acquire);
             let maximized = windows[active].is_maximized(false);
 
-            let lt = crate::theme::lunaris_theme();
+            let lt = crate::theme::arlen_theme();
             let round = (appearance.clip_tiled_windows || !tiled) && !maximized;
             let radii = round.then(|| {
                 lt.effective_window_corners()
@@ -982,7 +982,7 @@ impl CosmicStack {
         let maximized = active_window.is_maximized(false);
 
         let round = (appearance.clip_tiled_windows || !is_tiled) && !maximized;
-        let radii = crate::theme::lunaris_theme()
+        let radii = crate::theme::arlen_theme()
             .effective_window_corners()
             .map(|x| if x < 4.0 { x } else { x + 4.0 })
             .map(|val| val.round() as u8);

@@ -80,7 +80,7 @@ pub fn init_backend_auto(
             .add_seat(initial_seat.clone());
 
         // cosmic-greeter accessibility-state inheritance was here.
-        // Removed as part of compositor #29 / CC1: Lunaris ships
+        // Removed as part of compositor #29 / CC1: Arlen ships
         // its own Phase 10A greeter, the cross-process sync via
         // cosmic-config.GreeterAccessibilityState was load-bearing
         // only for cosmic-greeter installs. Accessibility settings

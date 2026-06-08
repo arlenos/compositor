@@ -114,7 +114,7 @@ pub struct CosmicWindowInternal {
     last_title: Mutex<String>,
     tiled: AtomicBool,
     appearance_conf: Mutex<AppearanceConfig>,
-    /// Compositor-rendered Lunaris header cache (Feature 4-C).
+    /// Compositor-rendered Arlen header cache (Feature 4-C).
     /// Holds the last-rasterised `MemoryRenderBuffer` paired with
     /// the `HeaderVisualState` snapshot that produced it. On every
     /// frame, `CosmicWindow::header_render_element` builds a fresh
@@ -241,7 +241,7 @@ impl CosmicWindowInternal {
         if self.window.is_decorated(pending) {
             return false;
         }
-        // CSD-tracking says we should have a Lunaris header. Now the
+        // CSD-tracking says we should have a Arlen header. Now the
         // tiled-toggle override applies only when the window is
         // actually placed in the tiling layer — `is_tiled` reads the
         // workspace-level placement flag. The xdg-toplevel tiled
@@ -474,7 +474,7 @@ impl CosmicWindow {
         if !should_draw_shadow {
             return None;
         }
-        let lt = crate::theme::lunaris_theme();
+        let lt = crate::theme::arlen_theme();
         let mut radii = lt
             .effective_window_corners()
             .map(|x| if x < 4.0 { x } else { x + 4.0 })
@@ -537,7 +537,7 @@ impl CosmicWindow {
     {
         let (has_ssd, is_tiled, is_maximized, mut radii, appearance) = {
             let p = self.p();
-            let raw_radius = crate::theme::lunaris_theme().effective_window_corners();
+            let raw_radius = crate::theme::arlen_theme().effective_window_corners();
             let mapped = raw_radius
                 .map(|x| if x < 4.0 { x } else { x + 4.0 })
                 .map(|x| x.round() as u8);
@@ -623,7 +623,7 @@ impl CosmicWindow {
 
         // SSD header rendering removed: desktop-shell renders headers via protocol.
 
-        // Feature 4-C: prepend the compositor-rasterised Lunaris
+        // Feature 4-C: prepend the compositor-rasterised Arlen
         // window header so it paints ON TOP of the client content.
         // `elements[0]` is topmost in smithay's render order, so we
         // insert at position 0. The header is eligible only for
@@ -821,7 +821,7 @@ impl CosmicWindow {
     }
 
     /// Produce a single `MemoryRenderBufferRenderElement` containing
-    /// the compositor-rasterised Lunaris header (Feature 4-C) at
+    /// the compositor-rasterised Arlen header (Feature 4-C) at
     /// `physical_location`. Returns `None` when this window is not
     /// eligible for a header (CSD / stacked / fullscreen — see
     /// `crate::shell::should_render_window_header` for the full
@@ -855,7 +855,7 @@ impl CosmicWindow {
 
         let (title, activated, width_logical, interaction, buttons) = {
             let p = self.p();
-            // Only windows with SSD decorations get a Lunaris header
+            // Only windows with SSD decorations get a Arlen header
             // (the `Shell::should_render_window_header` policy is
             // already applied by the caller for the WAYLAND path;
             // for X11 callers will gate via the same helper).
@@ -899,7 +899,7 @@ impl CosmicWindow {
                 Some((cached_state, _)) => cached_state != &state,
             };
             if needs_rerasterise {
-                let theme = crate::theme::lunaris_theme();
+                let theme = crate::theme::arlen_theme();
                 let new_buffer = rasterize_header(&state, &theme);
                 *cache = Some((state.clone(), new_buffer));
             }
@@ -985,7 +985,7 @@ impl CosmicWindow {
             (!is_tiled || appearance.clip_tiled_windows) && !p.window.is_maximized(false);
         let radii = if round {
             {
-                crate::theme::lunaris_theme()
+                crate::theme::arlen_theme()
                     .effective_window_corners()
                     .map(|x| if x < 4.0 { x } else { x + 4.0 })
                     .map(|x| x.round() as u8)

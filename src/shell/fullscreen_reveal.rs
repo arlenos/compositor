@@ -1,7 +1,7 @@
 /// Fullscreen titlebar edge-reveal state machine.
 ///
 /// Detects pointer at the top screen edge during fullscreen and drives
-/// reveal/hide events sent to the desktop shell via `lunaris-shell-overlay`.
+/// reveal/hide events sent to the desktop shell via `arlen-shell-overlay`.
 ///
 /// Timing (from `docs/architecture/titlebar-protocol.md`):
 /// - Pointer enters top edge (y <= 2px): immediate reveal

@@ -137,6 +137,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "arlen-theme"
+version = "0.1.0"
+dependencies = [
+ "dirs 5.0.1",
+ "notify 7.0.0",
+ "serde",
+ "thiserror 1.0.69",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -705,6 +716,7 @@ name = "cosmic-comp"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "arlen-theme",
  "bitflags 2.11.0",
  "calloop 0.14.4",
  "cgmath",
@@ -728,7 +740,6 @@ dependencies = [
  "libsystemd",
  "log-panics",
  "logind-zbus",
- "lunaris-theme",
  "notify 7.0.0",
  "parking_lot",
  "png 0.18.1",
@@ -2473,17 +2484,6 @@ dependencies = [
  "scoped-tls",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "lunaris-theme"
-version = "0.1.0"
-dependencies = [
- "dirs 5.0.1",
- "notify 7.0.0",
- "serde",
- "thiserror 1.0.69",
- "toml 0.8.23",
 ]
 
 [[package]]

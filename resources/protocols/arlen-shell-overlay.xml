@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<protocol name="lunaris_shell_overlay">
+<protocol name="arlen_shell_overlay">
   <copyright>
     SPDX-License-Identifier: GPL-2.0-or-later
   </copyright>
 
-  <description summary="Lunaris shell overlay protocol">
-    This protocol allows the Lunaris compositor to delegate rendering of
+  <description summary="Arlen shell overlay protocol">
+    This protocol allows the Arlen compositor to delegate rendering of
     shell overlay elements (context menus, tab bars, indicators) to the
     desktop-shell process.
 
@@ -13,7 +13,7 @@
     and receives overlay events. The desktop-shell sends back user actions.
   </description>
 
-  <interface name="lunaris_shell_overlay_v1" version="1">
+  <interface name="arlen_shell_overlay_v1" version="1">
     <description summary="shell overlay manager">
       Singleton global. The desktop-shell binds this interface once at
       startup to receive overlay events from the compositor.
@@ -308,7 +308,7 @@
     </event>
 
     <event name="window_header_content">
-      <description summary="titlebar content update from the lunaris-titlebar-v1 protocol">
+      <description summary="titlebar content update from the arlen-titlebar-v1 protocol">
         Sent when an application updates its declared titlebar content
         (tabs, buttons, breadcrumbs, search mode). The payload is a JSON
         object matching the TitlebarState schema. The shell uses this to

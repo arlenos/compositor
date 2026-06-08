@@ -160,8 +160,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let surface = compositor.create_surface(&qh, ());
     let xdg_surface = xdg_wm_base.get_xdg_surface(&surface, &qh, ());
     let xdg_toplevel = xdg_surface.get_toplevel(&qh, ());
-    xdg_toplevel.set_title("lunaris-test-client".to_string());
-    xdg_toplevel.set_app_id("lunaris.test-client".to_string());
+    xdg_toplevel.set_title("arlen-test-client".to_string());
+    xdg_toplevel.set_app_id("arlen.test-client".to_string());
     surface.commit();
 
     state.surface = Some(surface.clone());

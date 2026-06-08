@@ -1,9 +1,10 @@
-//! Lunaris theme integration for the compositor.
+//! Arlen theme integration for the compositor.
 //!
-//! Resolves `LunarisTheme` from the canonical bundled bytes
-//! (`include_str!` cross-crate from desktop-shell/src-tauri/themes/)
-//! merged with the user's `~/.config/lunaris/theme.toml` overlay,
-//! then layered with `~/.config/lunaris/appearance.toml`
+//! Resolves `ArlenTheme` from the canonical bundled bytes
+//! (`arlen_theme::DARK_TOML` / `LIGHT_TOML`, the single source shared
+//! with the desktop-shell) merged with the user's
+//! `~/.config/arlen/theme.toml` overlay,
+//! then layered with `~/.config/arlen/appearance.toml`
 //! preferences (active theme id, accent override, radius
 //! intensity, accessibility).
 //!
@@ -19,53 +20,50 @@ use std::sync::RwLock;
 
 use crate::state::State;
 
-/// Bundled bytes — same files the desktop-shell embeds so the two
-/// binaries observe identical canonical defaults. Cross-crate
-/// `include_str!` is the SSoT mechanism: a refactor that moves
-/// the files breaks compile in BOTH crates immediately.
-const DARK_TOML: &str =
-    include_str!("../../desktop-shell/src-tauri/themes/dark.toml");
-const LIGHT_TOML: &str =
-    include_str!("../../desktop-shell/src-tauri/themes/light.toml");
+/// Bundled bytes from the shared `arlen-theme` crate — the single source the
+/// desktop-shell embeds too, so the two binaries observe identical canonical
+/// defaults without either reaching into the other's tree.
+const DARK_TOML: &str = arlen_theme::DARK_TOML;
+const LIGHT_TOML: &str = arlen_theme::LIGHT_TOML;
 
-static LUNARIS_THEME: RwLock<Option<lunaris_theme::LunarisTheme>> =
+static ARLEN_THEME: RwLock<Option<arlen_theme::ArlenTheme>> =
     RwLock::new(None);
 
-/// Read the global LunarisTheme. Falls back to a freshly-resolved
+/// Read the global ArlenTheme. Falls back to a freshly-resolved
 /// dark theme if the watcher hasn't run yet (early startup
 /// frames).
-pub fn lunaris_theme() -> lunaris_theme::LunarisTheme {
-    LUNARIS_THEME
+pub fn arlen_theme() -> arlen_theme::ArlenTheme {
+    ARLEN_THEME
         .read()
         .unwrap()
         .clone()
         .unwrap_or_else(default_dark_theme)
 }
 
-fn default_dark_theme() -> lunaris_theme::LunarisTheme {
-    lunaris_theme::LunarisTheme::from_bundled(DARK_TOML)
+fn default_dark_theme() -> arlen_theme::ArlenTheme {
+    arlen_theme::ArlenTheme::from_bundled(DARK_TOML)
         .expect("bundled dark.toml must parse — bundled bytes are static")
 }
 
-fn default_light_theme() -> lunaris_theme::LunarisTheme {
-    lunaris_theme::LunarisTheme::from_bundled(LIGHT_TOML)
+fn default_light_theme() -> arlen_theme::ArlenTheme {
+    arlen_theme::ArlenTheme::from_bundled(LIGHT_TOML)
         .expect("bundled light.toml must parse — bundled bytes are static")
 }
 
-fn set_lunaris_theme(theme: lunaris_theme::LunarisTheme) {
-    *LUNARIS_THEME.write().unwrap() = Some(theme);
+fn set_arlen_theme(theme: arlen_theme::ArlenTheme) {
+    *ARLEN_THEME.write().unwrap() = Some(theme);
 }
 
 /// Public setter used by the appearance watcher after composing
 /// the effective theme. Kept distinct from the private setter so
 /// the call-site intent is explicit.
-pub fn replace_lunaris_theme(theme: lunaris_theme::LunarisTheme) {
-    set_lunaris_theme(theme);
+pub fn replace_arlen_theme(theme: arlen_theme::ArlenTheme) {
+    set_arlen_theme(theme);
 }
 
-/// Active window hint color from LunarisTheme as `[r, g, b]`.
+/// Active window hint color from ArlenTheme as `[r, g, b]`.
 /// Falls back to the theme's accent if `[wm].window_hint` is unset.
-pub(crate) fn lunaris_hint_rgb(lt: &lunaris_theme::LunarisTheme) -> [f32; 3] {
+pub(crate) fn arlen_hint_rgb(lt: &arlen_theme::ArlenTheme) -> [f32; 3] {
     if let Some(hint) = lt.wm.window_hint {
         [hint[0], hint[1], hint[2]]
     } else {
@@ -82,7 +80,7 @@ pub(crate) fn lunaris_hint_rgb(lt: &lunaris_theme::LunarisTheme) -> [f32; 3] {
 /// `try_recompose_effective_theme` instead** — the watcher must
 /// keep the previous good theme on parse error rather than
 /// painting the bundled default across every output.
-pub fn recompose_effective_theme() -> lunaris_theme::LunarisTheme {
+pub fn recompose_effective_theme() -> arlen_theme::ArlenTheme {
     try_recompose_effective_theme().unwrap_or_else(|err| {
         tracing::warn!(
             "theme: initial compose failed ({err}); using bundled dark default"
@@ -99,7 +97,7 @@ pub fn recompose_effective_theme() -> lunaris_theme::LunarisTheme {
 /// On Err, the caller should keep the previously-published global
 /// theme and skip render scheduling — the next successful save
 /// fires the watcher again.
-pub fn try_recompose_effective_theme() -> Result<lunaris_theme::LunarisTheme, String> {
+pub fn try_recompose_effective_theme() -> Result<arlen_theme::ArlenTheme, String> {
     let appearance = crate::config::appearance::current_appearance();
 
     // 1. Pick the bundled base from the user's `[theme].active`.
@@ -121,7 +119,7 @@ pub fn try_recompose_effective_theme() -> Result<lunaris_theme::LunarisTheme, St
     //    semantics so compositor + shell agree on which file is
     //    the active theme. (Codex post-Sprint review HIGH-2 fix.)
     let user_theme = if active_id != "dark" && active_id != "light" {
-        let user_path = lunaris_theme::LunarisTheme::user_theme_path(&active_id);
+        let user_path = arlen_theme::ArlenTheme::user_theme_path(&active_id);
         match std::fs::read_to_string(&user_path) {
             Ok(s) => Some(s),
             Err(e) => {
@@ -137,16 +135,16 @@ pub fn try_recompose_effective_theme() -> Result<lunaris_theme::LunarisTheme, St
         None
     };
 
-    // 3. Read user's `~/.config/lunaris/theme.toml` overlay if
+    // 3. Read user's `~/.config/arlen/theme.toml` overlay if
     //    present.
-    let custom_path = lunaris_theme::LunarisTheme::user_customization_path();
+    let custom_path = arlen_theme::ArlenTheme::user_customization_path();
     let customization = std::fs::read_to_string(&custom_path).ok();
 
-    // 4. `LunarisTheme::resolve()` merges bundled + user_theme +
+    // 4. `ArlenTheme::resolve()` merges bundled + user_theme +
     //    customization. Parse failure propagates as Err — callers
     //    decide how to handle it (startup falls back to bundled,
     //    runtime reload keeps the last-good theme).
-    let mut composed = lunaris_theme::LunarisTheme::resolve(
+    let mut composed = arlen_theme::ArlenTheme::resolve(
         bundled,
         user_theme.as_deref(),
         customization.as_deref(),
@@ -182,7 +180,7 @@ pub fn try_recompose_effective_theme() -> Result<lunaris_theme::LunarisTheme, St
 }
 
 /// Start a file watcher for live theme updates. Watches **only**
-/// `~/.config/lunaris/theme.toml` — the user-customisation overlay.
+/// `~/.config/arlen/theme.toml` — the user-customisation overlay.
 ///
 /// `appearance.toml` is intentionally NOT watched here: it has its
 /// own watcher in `crate::config::appearance::watch()` that loads
@@ -217,14 +215,14 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) {
             }
         };
 
-        set_lunaris_theme(lt.clone());
-        state.common.lunaris_theme = lt.clone();
+        set_arlen_theme(lt.clone());
+        state.common.arlen_theme = lt.clone();
         {
             let mut shell = state.common.shell.write();
-            shell.lunaris_theme = lt;
+            shell.arlen_theme = lt;
         }
         // Feature 4-C: window-header renderer pulls
-        // `lunaris_theme()` directly but caches the rasterised
+        // `arlen_theme()` directly but caches the rasterised
         // pixmap; bump generation so every window re-rasterises.
         crate::backend::render::window_header::bump_theme_generation();
 
@@ -241,14 +239,14 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) {
             state.backend.schedule_render(&output);
         }
     }) {
-        tracing::error!("failed to insert lunaris theme ping source: {e}");
+        tracing::error!("failed to insert arlen theme ping source: {e}");
     }
     // Watch ONLY theme.toml (user-customisation). appearance.toml
     // has its own watcher path in `crate::config::appearance::watch()`
     // — see HIGH-1 docstring above for the race that motivated
     // splitting these.
-    let theme_path = lunaris_theme::LunarisTheme::user_customization_path();
-    let lt_watcher = lunaris_theme::ThemeWatcher::start_at(
+    let theme_path = arlen_theme::ArlenTheme::user_customization_path();
+    let lt_watcher = arlen_theme::ThemeWatcher::start_at(
         vec![theme_path],
         move || {
             lt_ping_tx.ping();
@@ -256,6 +254,6 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) {
     );
     match lt_watcher {
         Ok(w) => std::mem::forget(w),
-        Err(e) => tracing::warn!("failed to start lunaris theme watcher: {e}"),
+        Err(e) => tracing::warn!("failed to start arlen theme watcher: {e}"),
     }
 }

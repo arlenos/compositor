@@ -4488,7 +4488,7 @@ where
     // tiles they represent. Hardcoded `8.0` would freeze them at the
     // bundled default and ignore the appearance-page intensity slider.
     let lt_backdrop_radius =
-        crate::theme::lunaris_theme().effective_window_corners()[0];
+        crate::theme::arlen_theme().effective_window_corners()[0];
 
     let focused = seat
         .and_then(|seat| {
@@ -5141,8 +5141,8 @@ where
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
 {
-    let lt = crate::theme::lunaris_theme();
-    let window_hint = crate::theme::lunaris_hint_rgb(&lt);
+    let lt = crate::theme::arlen_theme();
+    let window_hint = crate::theme::arlen_hint_rgb(&lt);
     let mut elements = Vec::default();
     let mut shadow_elements = Vec::default();
 
@@ -5435,8 +5435,8 @@ where
     let (swap_indicator, swap_tree) = overview.1.unzip();
     let swap_desc = swap_desc.filter(|_| is_active_output);
     let swap_tree = swap_tree.flatten().filter(|_| is_active_output);
-    let lt = crate::theme::lunaris_theme();
-    let window_hint = crate::theme::lunaris_hint_rgb(&lt);
+    let lt = crate::theme::arlen_theme();
+    let window_hint = crate::theme::arlen_hint_rgb(&lt);
     let group_color = GROUP_COLOR;
 
     // render placeholder, if we are swapping to an empty workspace
@@ -5476,7 +5476,7 @@ where
         .unwrap();
         let scale = swap_geo.size.to_f64() / origin.size.to_f64();
 
-        let radius = crate::theme::lunaris_theme()
+        let radius = crate::theme::arlen_theme()
             .effective_window_corners()
             .map(|x| if x < 4.0 { x } else { x + 4.0 })
             .map(|val| (val * scale.x.min(scale.y) as f32).round() as u8);
@@ -5551,7 +5551,7 @@ where
                                 .corner_radius(geo.size.as_logical(), indicator_thickness)
                                 .map(|val| (val as f64 * scale.x.min(scale.y)).round() as u8)
                         }
-                        _ => crate::theme::lunaris_theme()
+                        _ => crate::theme::arlen_theme()
                             .effective_window_corners()
                             .map(|x| if x < 4.0 { x } else { x + 4.0 })
                             .map(|val| (val * scale.x.min(scale.y) as f32).round() as u8),

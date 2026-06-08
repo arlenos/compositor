@@ -3,7 +3,7 @@
 //! The compositor has three sources of bindings today:
 //! 1. Hardcoded system bindings (reserved, not rebindable).
 //! 2. `[keybindings]` in `compositor.toml` (the user's static map).
-//! 3. Dynamic registrations on the `org.lunaris.InputManager1` D-Bus
+//! 3. Dynamic registrations on the `org.arlen.InputManager1` D-Bus
 //!    service (per-app and per-process).
 //!
 //! A fourth source — `compositor.d/keybindings.d/*.toml` module

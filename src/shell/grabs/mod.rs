@@ -224,7 +224,7 @@ impl PointerGrab<State> for ResizeGrab {
             ResizeGrab::Tiling(grab) => PointerGrab::motion(grab, data, handle, focus, event),
         }
         // ATTACH-DEBUG: mirror the Move-grab synchronous header
-        // emit so resize-from-edge also keeps the Lunaris header
+        // emit so resize-from-edge also keeps the Arlen header
         // on-beat (Feature 4: latency-sync). Full refresh here
         // (not targeted) because the ResizeGrab enum doesn't
         // expose the inner mapped window without an extra

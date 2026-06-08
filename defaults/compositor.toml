@@ -1,5 +1,5 @@
-# Lunaris Compositor Configuration
-# System defaults. User overrides in ~/.config/lunaris/compositor.toml
+# Arlen Compositor Configuration
+# System defaults. User overrides in ~/.config/arlen/compositor.toml
 
 [keyboard]
 layout = ""        # XKB layout (e.g. "us", "de"). Empty = system default

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Non-blocking Event Bus integration for the Lunaris compositor.
+//! Non-blocking Event Bus integration for the Arlen compositor.
 
 mod proto {
-    include!(concat!(env!("OUT_DIR"), "/lunaris.eventbus.rs"));
+    include!(concat!(env!("OUT_DIR"), "/arlen.eventbus.rs"));
 }
 
 use prost::Message as _;
@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use tracing::{debug, warn};
 
-const DEFAULT_PRODUCER_SOCKET: &str = "/run/lunaris/event-bus-producer.sock";
+const DEFAULT_PRODUCER_SOCKET: &str = "/run/arlen/event-bus-producer.sock";
 const CHANNEL_CAPACITY: usize = 4096;
 
 pub struct EventBusMessage(pub Vec<u8>);
@@ -257,9 +257,9 @@ impl EventBusHandle {
 }
 
 pub fn spawn() -> EventBusHandle {
-    let socket_path = std::env::var("LUNARIS_PRODUCER_SOCKET")
+    let socket_path = std::env::var("ARLEN_PRODUCER_SOCKET")
         .unwrap_or_else(|_| DEFAULT_PRODUCER_SOCKET.to_string());
-    let session_id = std::env::var("LUNARIS_SESSION_ID")
+    let session_id = std::env::var("ARLEN_SESSION_ID")
         .unwrap_or_else(|_| uuid::Uuid::now_v7().to_string());
     let (tx, rx) = mpsc::sync_channel::<EventBusMessage>(CHANNEL_CAPACITY);
     thread::Builder::new()

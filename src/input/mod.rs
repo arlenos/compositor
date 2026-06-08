@@ -2058,7 +2058,7 @@ impl State {
         }
 
         // Check dynamic D-Bus bindings registered via
-        // org.lunaris.InputManager1. Precedence: app_global fires
+        // org.arlen.InputManager1. Precedence: app_global fires
         // regardless of focus; app_focused only fires when the focused
         // toplevel's app_id matches the registration. Static TOML above
         // always wins over dynamic — if we got here the user has not

@@ -2,7 +2,7 @@
 
 ## Already Done
 
-The main compositor config (`CosmicCompConfig`) already loads from `~/.config/lunaris/compositor.toml` with notify-based hot reload. This covers:
+The main compositor config (`CosmicCompConfig`) already loads from `~/.config/arlen/compositor.toml` with notify-based hot reload. This covers:
 
 - XKB keyboard layout (layout, model, variant, options, repeat rate/delay)
 - Input settings (natural scroll, tap-to-click, accel profile, scroll method)
@@ -23,14 +23,14 @@ These settings are fully migrated. The TOML loading happens in `src/config/mod.r
 Uses `cosmic_settings_config::Shortcuts` and `cosmic_config::calloop::ConfigWatchSource` to load keybindings from `com.system76.CosmicSettings.Shortcuts`.
 
 **Migration path:**
-- Create `~/.config/lunaris/keybindings.toml` with `[compositor]` section
-- Parse with `lunaris-config::keybindings::parse_keybindings()`
-- Replace `Shortcuts` type with Lunaris `KeybindingConfig`
+- Create `~/.config/arlen/keybindings.toml` with `[compositor]` section
+- Parse with `arlen-config::keybindings::parse_keybindings()`
+- Replace `Shortcuts` type with Arlen `KeybindingConfig`
 - Replace `ConfigWatchSource` with notify file watcher
-- Map Lunaris `Action` to existing compositor action dispatch
+- Map Arlen `Action` to existing compositor action dispatch
 
 **Blockers:**
-- Need to define Lunaris keybinding action types that cover all current cosmic shortcuts
+- Need to define Arlen keybinding action types that cover all current cosmic shortcuts
 - The `shortcuts::action::System` enum has ~30 actions (lock, suspend, screenshot, etc.)
 - Existing code uses `shortcuts::action::Direction`, `shortcuts::action::ResizeDirection` etc.
 
@@ -42,8 +42,8 @@ Uses `cosmic_settings_config::window_rules` to load tiling exceptions.
 
 **Migration path:**
 - Add `[tiling_exceptions]` to `compositor.toml`
-- Define Lunaris `TilingException` struct (app_id pattern, exception type)
-- Replace `ApplicationException` with Lunaris type
+- Define Arlen `TilingException` struct (app_id pattern, exception type)
+- Replace `ApplicationException` with Arlen type
 
 **Blockers:**
 - Simple struct, relatively easy to migrate
@@ -56,7 +56,7 @@ Uses `cosmic_settings_config::window_rules` to load tiling exceptions.
 Legacy `cosmic_config::Config::new("com.system76.CosmicComp", 1)` used by `zoom.rs` to persist zoom state.
 
 **Migration path:**
-- Write zoom state to a Lunaris state file instead
+- Write zoom state to a Arlen state file instead
 - Use `src/config/dynamic.rs` pattern (already saves outputs/numlock state)
 
 **Blockers:** None, straightforward.

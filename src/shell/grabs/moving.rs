@@ -67,7 +67,7 @@ pub struct MoveGrabState {
 
 impl MoveGrabState {
     #[profiling::function]
-    pub fn render<I, R>(&self, renderer: &mut R, output: &Output, lt: &lunaris_theme::LunarisTheme) -> Vec<I>
+    pub fn render<I, R>(&self, renderer: &mut R, output: &Output, lt: &arlen_theme::ArlenTheme) -> Vec<I>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
@@ -107,7 +107,7 @@ impl MoveGrabState {
             + self.window_offset
             - scaling_offset;
 
-        let hint_rgb = crate::theme::lunaris_hint_rgb(lt);
+        let hint_rgb = crate::theme::arlen_hint_rgb(lt);
         let radius = self
             .element()
             .corner_radius(window_geo.size, self.indicator_thickness);
@@ -368,7 +368,7 @@ pub struct MoveGrab {
     evlh: NotSend<LoopHandle<'static, State>>,
     /// Captured at grab-create time, used to emit a matching
     /// `window_drag_end` on drop. `None` for windows with no
-    /// Lunaris header (e.g. CSD toolboxes) — the drag/end events
+    /// Arlen header (e.g. CSD toolboxes) — the drag/end events
     /// are a no-op in that case.
     drag_surface_id: Option<u32>,
 }
@@ -842,7 +842,7 @@ impl MoveGrab {
     }
 
     /// Opaque surface id the caller passes to `send_window_drag_start`.
-    /// `None` for windows that don't get a Lunaris header (CSD or
+    /// `None` for windows that don't get a Arlen header (CSD or
     /// ineligible X11 types).
     pub fn drag_surface_id(&self) -> Option<u32> {
         self.drag_surface_id

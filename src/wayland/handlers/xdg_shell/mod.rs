@@ -276,7 +276,7 @@ impl XdgShellHandler for State {
 
         match shell.fullscreen_request(&surface, output.clone(), &self.common.event_loop_handle) {
             Some(target) => {
-                // Lunaris-Header: fullscreen → hide the header.
+                // Arlen-Header: fullscreen → hide the header.
                 // Fullscreen windows should claim the entire output
                 // without a 36px strip at the top.
                 let header_id = {
@@ -316,7 +316,7 @@ impl XdgShellHandler for State {
             });
 
         if let Some(target) = shell.unfullscreen_request(&surface, &self.common.event_loop_handle) {
-            // Lunaris-Header: compute payload BEFORE dropping the
+            // Arlen-Header: compute payload BEFORE dropping the
             // shell read-guard so geometry lookup still works.
             // Feature 4-C: only emit shell-bound header for stacks;
             // non-stacked windows get compositor-rendered headers.
@@ -359,7 +359,7 @@ impl XdgShellHandler for State {
         let app_id = CosmicSurface::from(surface.clone()).app_id();
         self.common.event_bus.emit_window_closed(&app_id);
 
-        // Lunaris-Header: tell the shell to forget about this window's
+        // Arlen-Header: tell the shell to forget about this window's
         // header. Done BEFORE the unmap + surface destruction so the
         // wl_surface is still queryable for its protocol_id. The shell
         // treats hide-of-an-unknown-id as a no-op, so this is safe even

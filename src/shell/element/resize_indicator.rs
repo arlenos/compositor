@@ -37,7 +37,7 @@ unsafe impl Sync for ResizeIndicator {}
 ///
 /// Previously backed by `IcedElement`; now a standalone struct that stores
 /// resize metadata and exposes the same public API surface. Rendering is
-/// handled by `desktop-shell` via `lunaris-shell-overlay`, so all
+/// handled by `desktop-shell` via `arlen-shell-overlay`, so all
 /// `render_elements` calls return an empty `Vec`.
 #[derive(Clone)]
 pub struct ResizeIndicator {

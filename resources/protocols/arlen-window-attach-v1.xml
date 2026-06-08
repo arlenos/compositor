@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<protocol name="lunaris_window_attach">
+<protocol name="arlen_window_attach">
   <copyright>
     SPDX-License-Identifier: GPL-2.0-or-later
   </copyright>
 
-  <description summary="Lunaris compositor-managed window attachments">
+  <description summary="Arlen compositor-managed window attachments">
     Ground-work protocol for eliminating the one-frame visible lag
     between a CosmicSurface (xdg_toplevel) and its shell-rendered
-    Lunaris header.
+    Arlen header.
 
     Conceptually the shell declares "my wl_surface X should render
     as if it were a synchronized subsurface of the toplevel whose
     opaque `window_id` was last reported via the
-    `lunaris-shell-overlay::window_header_show` event". During
+    `arlen-shell-overlay::window_header_show` event". During
     drag/resize the compositor then has enough local state to place
     the header atomically together with the window on every frame,
     without requiring another IPC round-trip per pointer motion.
@@ -30,10 +30,10 @@
       forward-compat contract for phase 2 rendering.
   </description>
 
-  <interface name="lunaris_window_attach_manager_v1" version="1">
+  <interface name="arlen_window_attach_manager_v1" version="1">
     <description summary="attachment manager">
       Singleton global. The shell binds it once and uses it to
-      create one `lunaris_window_attachment_v1` object per header
+      create one `arlen_window_attachment_v1` object per header
       `wl_surface` it wants the compositor to co-manage.
     </description>
 
@@ -55,16 +55,16 @@
         It is a protocol error for the shell to request two
         attachment objects for the same wl_surface.
       </description>
-      <arg name="id" type="new_id" interface="lunaris_window_attachment_v1"/>
+      <arg name="id" type="new_id" interface="arlen_window_attachment_v1"/>
       <arg name="surface" type="object" interface="wl_surface"
            summary="the shell-side surface to co-manage"/>
     </request>
   </interface>
 
-  <interface name="lunaris_window_attachment_v1" version="1">
+  <interface name="arlen_window_attachment_v1" version="1">
     <description summary="a single bound attachment">
       Binds a shell surface to a compositor-managed window via the
-      opaque `window_id` that the `lunaris-shell-overlay` protocol
+      opaque `window_id` that the `arlen-shell-overlay` protocol
       carries. Once bound, the compositor treats the attachment as
       declared state: on every frame the attachment can be placed
       at `(window.x + offset_x, window.y + offset_y)` with the
@@ -85,7 +85,7 @@
     <request name="attach_to_window">
       <description summary="bind this attachment to a compositor window">
         `window_id` is the same opaque u32 that the
-        `lunaris-shell-overlay::window_header_show` event carries
+        `arlen-shell-overlay::window_header_show` event carries
         (see `Shell::window_header_surface_id` on the compositor).
         `offset_x`, `offset_y` are the attachment's origin relative
         to the window's origin; `width` and `height` declare the

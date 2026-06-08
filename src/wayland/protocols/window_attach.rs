@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Server-side implementation of the `lunaris-window-attach-v1`
+//! Server-side implementation of the `arlen-window-attach-v1`
 //! Wayland protocol. This protocol is ground-work for eliminating
 //! the one-frame lag between a compositor-managed window and its
-//! shell-rendered Lunaris header — see Feature 4 in `docs/`.
+//! shell-rendered Arlen header — see Feature 4 in `docs/`.
 //!
 //! v1 implements the **binding state** only: the shell can claim an
 //! attachment object for one of its `wl_surface`s, bind it to an
 //! opaque `window_id` (the same id carried by
-//! `lunaris-shell-overlay::window_header_show`), and adjust the
+//! `arlen-shell-overlay::window_header_show`), and adjust the
 //! offset/size over the attachment's lifetime. v1 does NOT yet
 //! change how the compositor renders those surfaces — that's
 //! phase 2, gated on subsurface-style atomic commit across two
@@ -30,13 +30,13 @@ use smithay::reexports::wayland_server::{
 };
 use wayland_backend::server::GlobalId;
 
-pub use generated::lunaris_window_attach_manager_v1;
-pub use generated::lunaris_window_attachment_v1;
-use generated::lunaris_window_attach_manager_v1::{
-    LunarisWindowAttachManagerV1, Request as ManagerRequest,
+pub use generated::arlen_window_attach_manager_v1;
+pub use generated::arlen_window_attachment_v1;
+use generated::arlen_window_attach_manager_v1::{
+    ArlenWindowAttachManagerV1, Request as ManagerRequest,
 };
-use generated::lunaris_window_attachment_v1::{
-    LunarisWindowAttachmentV1, Request as AttachmentRequest,
+use generated::arlen_window_attachment_v1::{
+    ArlenWindowAttachmentV1, Request as AttachmentRequest,
 };
 
 #[allow(non_snake_case, non_upper_case_globals, non_camel_case_types)]
@@ -47,21 +47,21 @@ mod generated {
         use smithay::reexports::wayland_server::protocol::__interfaces::*;
         use wayland_backend;
         wayland_scanner::generate_interfaces!(
-            "resources/protocols/lunaris-window-attach-v1.xml"
+            "resources/protocols/arlen-window-attach-v1.xml"
         );
     }
 
     use self::__interfaces::*;
 
     wayland_scanner::generate_server_code!(
-        "resources/protocols/lunaris-window-attach-v1.xml"
+        "resources/protocols/arlen-window-attach-v1.xml"
     );
 }
 
 // ===== Global data =====
 
 /// Per-global data for the attach manager. Same `client_has_no_
-/// security_context` filter pattern as the other Lunaris shell
+/// security_context` filter pattern as the other Arlen shell
 /// protocols.
 pub struct WindowAttachGlobalData {
     pub filter: Box<dyn for<'a> Fn(&'a Client) -> bool + Send + Sync>,
@@ -70,7 +70,7 @@ pub struct WindowAttachGlobalData {
 // ===== Per-attachment user data =====
 
 /// Opaque window id (matches the `surface_id` in
-/// `lunaris-shell-overlay::window_header_show`) and last-known
+/// `arlen-shell-overlay::window_header_show`) and last-known
 /// geometry an attachment declares. `None` on `window_id` means the
 /// attachment was created but `attach_to_window` hasn't been called
 /// yet.
@@ -97,30 +97,30 @@ impl AttachmentUserData {
 
 // ===== State =====
 
-/// Server-side state for `lunaris-window-attach-v1`. Tracks live
+/// Server-side state for `arlen-window-attach-v1`. Tracks live
 /// manager globals and lets the compositor iterate bound
 /// attachments grouped by window_id.
 #[derive(Debug, Default)]
 pub struct WindowAttachState {
-    managers: Vec<LunarisWindowAttachManagerV1>,
+    managers: Vec<ArlenWindowAttachManagerV1>,
     global: Option<GlobalId>,
     /// Reverse lookup: window_id → attachments bound to it. Useful
     /// for the phase-2 renderer and for emitting `unbound` when a
     /// window disappears.
-    bindings: HashMap<u32, Vec<LunarisWindowAttachmentV1>>,
+    bindings: HashMap<u32, Vec<ArlenWindowAttachmentV1>>,
 }
 
 impl WindowAttachState {
     pub fn new<D, F>(dh: &DisplayHandle, client_filter: F) -> Self
     where
-        D: GlobalDispatch<LunarisWindowAttachManagerV1, WindowAttachGlobalData>
-            + Dispatch<LunarisWindowAttachManagerV1, ()>
-            + Dispatch<LunarisWindowAttachmentV1, AttachmentUserData>
+        D: GlobalDispatch<ArlenWindowAttachManagerV1, WindowAttachGlobalData>
+            + Dispatch<ArlenWindowAttachManagerV1, ()>
+            + Dispatch<ArlenWindowAttachmentV1, AttachmentUserData>
             + WindowAttachHandler
             + 'static,
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
-        let global = dh.create_global::<D, LunarisWindowAttachManagerV1, _>(
+        let global = dh.create_global::<D, ArlenWindowAttachManagerV1, _>(
             1,
             WindowAttachGlobalData {
                 filter: Box::new(client_filter),
@@ -205,18 +205,18 @@ pub struct AttachmentSnapshot {
 /// Hook trait for the attach protocol. Mostly a formality today
 /// because v1 doesn't dispatch any interesting callbacks back to
 /// the compositor's main state — it's here for consistency with
-/// the other Lunaris protocols and to anchor phase-2 extension.
+/// the other Arlen protocols and to anchor phase-2 extension.
 pub trait WindowAttachHandler {
     fn window_attach_state(&mut self) -> &mut WindowAttachState;
 }
 
 // ===== Global dispatch =====
 
-impl<D> GlobalDispatch<LunarisWindowAttachManagerV1, WindowAttachGlobalData, D> for WindowAttachState
+impl<D> GlobalDispatch<ArlenWindowAttachManagerV1, WindowAttachGlobalData, D> for WindowAttachState
 where
-    D: GlobalDispatch<LunarisWindowAttachManagerV1, WindowAttachGlobalData>
-        + Dispatch<LunarisWindowAttachManagerV1, ()>
-        + Dispatch<LunarisWindowAttachmentV1, AttachmentUserData>
+    D: GlobalDispatch<ArlenWindowAttachManagerV1, WindowAttachGlobalData>
+        + Dispatch<ArlenWindowAttachManagerV1, ()>
+        + Dispatch<ArlenWindowAttachmentV1, AttachmentUserData>
         + WindowAttachHandler
         + 'static,
 {
@@ -224,13 +224,13 @@ where
         state: &mut D,
         _handle: &DisplayHandle,
         _client: &Client,
-        resource: New<LunarisWindowAttachManagerV1>,
+        resource: New<ArlenWindowAttachManagerV1>,
         _global_data: &WindowAttachGlobalData,
         data_init: &mut DataInit<'_, D>,
     ) {
         let manager = data_init.init(resource, ());
         tracing::info!(
-            "ATTACH-DEBUG manager bound (client bound lunaris_window_attach_manager_v1)"
+            "ATTACH-DEBUG manager bound (client bound arlen_window_attach_manager_v1)"
         );
         state.window_attach_state().managers.push(manager);
     }
@@ -242,17 +242,17 @@ where
 
 // ===== Manager dispatch =====
 
-impl<D> Dispatch<LunarisWindowAttachManagerV1, (), D> for WindowAttachState
+impl<D> Dispatch<ArlenWindowAttachManagerV1, (), D> for WindowAttachState
 where
-    D: Dispatch<LunarisWindowAttachManagerV1, ()>
-        + Dispatch<LunarisWindowAttachmentV1, AttachmentUserData>
+    D: Dispatch<ArlenWindowAttachManagerV1, ()>
+        + Dispatch<ArlenWindowAttachmentV1, AttachmentUserData>
         + WindowAttachHandler
         + 'static,
 {
     fn request(
         state: &mut D,
         _client: &Client,
-        _resource: &LunarisWindowAttachManagerV1,
+        _resource: &ArlenWindowAttachManagerV1,
         request: ManagerRequest,
         _data: &(),
         _dh: &DisplayHandle,
@@ -284,7 +284,7 @@ where
     fn destroyed(
         state: &mut D,
         _client: wayland_backend::server::ClientId,
-        resource: &LunarisWindowAttachManagerV1,
+        resource: &ArlenWindowAttachManagerV1,
         _data: &(),
     ) {
         tracing::debug!("ATTACH-DEBUG manager destroyed");
@@ -297,16 +297,16 @@ where
 
 // ===== Attachment dispatch =====
 
-impl<D> Dispatch<LunarisWindowAttachmentV1, AttachmentUserData, D> for WindowAttachState
+impl<D> Dispatch<ArlenWindowAttachmentV1, AttachmentUserData, D> for WindowAttachState
 where
-    D: Dispatch<LunarisWindowAttachmentV1, AttachmentUserData>
+    D: Dispatch<ArlenWindowAttachmentV1, AttachmentUserData>
         + WindowAttachHandler
         + 'static,
 {
     fn request(
         state: &mut D,
         _client: &Client,
-        resource: &LunarisWindowAttachmentV1,
+        resource: &ArlenWindowAttachmentV1,
         request: AttachmentRequest,
         data: &AttachmentUserData,
         _dh: &DisplayHandle,
@@ -394,7 +394,7 @@ where
     fn destroyed(
         state: &mut D,
         _client: wayland_backend::server::ClientId,
-        resource: &LunarisWindowAttachmentV1,
+        resource: &ArlenWindowAttachmentV1,
         data: &AttachmentUserData,
     ) {
         tracing::debug!("ATTACH-DEBUG attachment object destroyed");
@@ -413,20 +413,20 @@ where
 
 // ===== Delegate macro =====
 
-/// Delegate `lunaris_window_attach_manager_v1` and
-/// `lunaris_window_attachment_v1` dispatch to [`WindowAttachState`].
+/// Delegate `arlen_window_attach_manager_v1` and
+/// `arlen_window_attachment_v1` dispatch to [`WindowAttachState`].
 #[macro_export]
 macro_rules! delegate_window_attach {
     ($ty:ty) => {
         smithay::reexports::wayland_server::delegate_global_dispatch!($ty: [
-            $crate::wayland::protocols::window_attach::lunaris_window_attach_manager_v1::LunarisWindowAttachManagerV1:
+            $crate::wayland::protocols::window_attach::arlen_window_attach_manager_v1::ArlenWindowAttachManagerV1:
                 $crate::wayland::protocols::window_attach::WindowAttachGlobalData
         ] => $crate::wayland::protocols::window_attach::WindowAttachState);
         smithay::reexports::wayland_server::delegate_dispatch!($ty: [
-            $crate::wayland::protocols::window_attach::lunaris_window_attach_manager_v1::LunarisWindowAttachManagerV1: ()
+            $crate::wayland::protocols::window_attach::arlen_window_attach_manager_v1::ArlenWindowAttachManagerV1: ()
         ] => $crate::wayland::protocols::window_attach::WindowAttachState);
         smithay::reexports::wayland_server::delegate_dispatch!($ty: [
-            $crate::wayland::protocols::window_attach::lunaris_window_attachment_v1::LunarisWindowAttachmentV1:
+            $crate::wayland::protocols::window_attach::arlen_window_attachment_v1::ArlenWindowAttachmentV1:
                 $crate::wayland::protocols::window_attach::AttachmentUserData
         ] => $crate::wayland::protocols::window_attach::WindowAttachState);
     };

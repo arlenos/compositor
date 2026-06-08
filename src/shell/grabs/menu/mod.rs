@@ -214,7 +214,7 @@ impl Item {
 
 /// Active menu grab.
 ///
-/// The menu is always rendered by desktop-shell via the `lunaris-shell-overlay`
+/// The menu is always rendered by desktop-shell via the `arlen-shell-overlay`
 /// protocol. Pointer events are forwarded to `shell_focus` so that the
 /// desktop-shell client can detect clicks on the rendered menu.
 pub struct MenuGrab {

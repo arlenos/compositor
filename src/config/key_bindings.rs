@@ -141,7 +141,7 @@ pub fn action_from_str(s: &str) -> Option<Action> {
         "maximize" | "toggle_maximize" => Action::Shortcut(shortcuts::Action::Maximize),
         "minimize" => Action::Shortcut(shortcuts::Action::Minimize),
 
-        // Lunaris extensions
+        // Arlen extensions
         "scratchpad_toggle" => Action::Private(PrivateAction::ScratchpadToggle),
         "scratchpad_move" => Action::Private(PrivateAction::ScratchpadMove),
         "toggle_monocle" => Action::Private(PrivateAction::ToggleMonocle),

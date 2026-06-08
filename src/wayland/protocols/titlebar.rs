@@ -1,4 +1,4 @@
-/// Server-side implementation of the `lunaris-titlebar-v1` Wayland protocol.
+/// Server-side implementation of the `arlen-titlebar-v1` Wayland protocol.
 ///
 /// Apps declare titlebar content (tabs, buttons, breadcrumbs); the
 /// compositor decides rendering based on window mode.
@@ -11,8 +11,8 @@ use smithay::reexports::wayland_server::{
     backend::GlobalId, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
 };
 
-pub use generated::lunaris_titlebar_v1;
-pub use generated::lunaris_titlebar_manager_v1;
+pub use generated::arlen_titlebar_v1;
+pub use generated::arlen_titlebar_manager_v1;
 
 // ---------------------------------------------------------------------------
 // Scanner bindings
@@ -26,14 +26,14 @@ mod generated {
         use smithay::reexports::wayland_server::protocol::__interfaces::*;
         use wayland_backend;
         wayland_scanner::generate_interfaces!(
-            "resources/protocols/lunaris-titlebar-v1.xml"
+            "resources/protocols/arlen-titlebar-v1.xml"
         );
     }
 
     use self::__interfaces::*;
 
     wayland_scanner::generate_server_code!(
-        "resources/protocols/lunaris-titlebar-v1.xml"
+        "resources/protocols/arlen-titlebar-v1.xml"
     );
 }
 
@@ -43,7 +43,7 @@ mod generated {
 
 /// Titlebar mode as seen by the compositor.
 ///
-/// Matches the `mode` enum in `lunaris-titlebar-v1.xml`.
+/// Matches the `mode` enum in `arlen-titlebar-v1.xml`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u32)]
 pub enum TitlebarMode {
@@ -98,19 +98,19 @@ pub struct TitlebarManagerState {
     /// Per-surface titlebar state.
     pub surfaces: HashMap<u64, TitlebarState>,
     /// Per-surface protocol resources for sending events back to the client.
-    resources: HashMap<u64, generated::lunaris_titlebar_v1::LunarisTitlebarV1>,
+    resources: HashMap<u64, generated::arlen_titlebar_v1::ArlenTitlebarV1>,
 }
 
 impl TitlebarManagerState {
     /// Register the global and return the state.
     pub fn new(display: &DisplayHandle) -> Self
     where
-        crate::state::State: GlobalDispatch<generated::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1, ()>
-            + Dispatch<generated::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1, ()>
-            + Dispatch<generated::lunaris_titlebar_v1::LunarisTitlebarV1, u64>
+        crate::state::State: GlobalDispatch<generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1, ()>
+            + Dispatch<generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1, ()>
+            + Dispatch<generated::arlen_titlebar_v1::ArlenTitlebarV1, u64>
             + 'static,
     {
-        let global = display.create_global::<crate::state::State, generated::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1, ()>(1, ());
+        let global = display.create_global::<crate::state::State, generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1, ()>(1, ());
         Self {
             global,
             surfaces: HashMap::new(),
@@ -132,7 +132,7 @@ impl TitlebarManagerState {
     pub fn register_resource(
         &mut self,
         surface_id: u64,
-        resource: generated::lunaris_titlebar_v1::LunarisTitlebarV1,
+        resource: generated::arlen_titlebar_v1::ArlenTitlebarV1,
     ) {
         self.resources.insert(surface_id, resource);
     }
@@ -155,10 +155,10 @@ impl TitlebarManagerState {
         tb.mode = mode;
         if let Some(resource) = self.resources.get(&surface_id) {
             let proto_mode = match mode {
-                TitlebarMode::Floating => generated::lunaris_titlebar_v1::Mode::Floating,
-                TitlebarMode::Tiled => generated::lunaris_titlebar_v1::Mode::Tiled,
-                TitlebarMode::Fullscreen => generated::lunaris_titlebar_v1::Mode::Fullscreen,
-                TitlebarMode::Frameless => generated::lunaris_titlebar_v1::Mode::Frameless,
+                TitlebarMode::Floating => generated::arlen_titlebar_v1::Mode::Floating,
+                TitlebarMode::Tiled => generated::arlen_titlebar_v1::Mode::Tiled,
+                TitlebarMode::Fullscreen => generated::arlen_titlebar_v1::Mode::Fullscreen,
+                TitlebarMode::Frameless => generated::arlen_titlebar_v1::Mode::Frameless,
             };
             resource.mode_changed(proto_mode);
         }
@@ -200,15 +200,15 @@ pub trait TitlebarHandler {
 }
 
 // ---------------------------------------------------------------------------
-// GlobalDispatch: lunaris_titlebar_manager_v1
+// GlobalDispatch: arlen_titlebar_manager_v1
 // ---------------------------------------------------------------------------
 
-impl<D> GlobalDispatch<generated::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1, (), D>
+impl<D> GlobalDispatch<generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1, (), D>
     for TitlebarManagerState
 where
-    D: GlobalDispatch<generated::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1, ()>
-        + Dispatch<generated::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1, ()>
-        + Dispatch<generated::lunaris_titlebar_v1::LunarisTitlebarV1, u64>
+    D: GlobalDispatch<generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1, ()>
+        + Dispatch<generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1, ()>
+        + Dispatch<generated::arlen_titlebar_v1::ArlenTitlebarV1, u64>
         + TitlebarHandler
         + 'static,
 {
@@ -216,7 +216,7 @@ where
         _state: &mut D,
         _dh: &DisplayHandle,
         _client: &Client,
-        resource: New<generated::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1>,
+        resource: New<generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1>,
         _global_data: &(),
         data_init: &mut DataInit<'_, D>,
     ) {
@@ -225,28 +225,28 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch: lunaris_titlebar_manager_v1 (factory requests)
+// Dispatch: arlen_titlebar_manager_v1 (factory requests)
 // ---------------------------------------------------------------------------
 
-impl<D> Dispatch<generated::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1, (), D>
+impl<D> Dispatch<generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1, (), D>
     for TitlebarManagerState
 where
-    D: Dispatch<generated::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1, ()>
-        + Dispatch<generated::lunaris_titlebar_v1::LunarisTitlebarV1, u64>
+    D: Dispatch<generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1, ()>
+        + Dispatch<generated::arlen_titlebar_v1::ArlenTitlebarV1, u64>
         + TitlebarHandler
         + 'static,
 {
     fn request(
         state: &mut D,
         _client: &Client,
-        _resource: &generated::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1,
-        request: generated::lunaris_titlebar_manager_v1::Request,
+        _resource: &generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1,
+        request: generated::arlen_titlebar_manager_v1::Request,
         _data: &(),
         _dh: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            generated::lunaris_titlebar_manager_v1::Request::GetTitlebar { id, surface } => {
+            generated::arlen_titlebar_manager_v1::Request::GetTitlebar { id, surface } => {
                 // Use wl_surface ID as our surface key.
                 let surface_id = surface.id().protocol_id() as u64;
                 let mgr = state.titlebar_manager_state();
@@ -255,28 +255,28 @@ where
                 let resource = data_init.init(id, surface_id);
                 state.titlebar_manager_state().register_resource(surface_id, resource);
             }
-            generated::lunaris_titlebar_manager_v1::Request::Destroy => {}
+            generated::arlen_titlebar_manager_v1::Request::Destroy => {}
             _ => {}
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch: lunaris_titlebar_v1 (per-surface requests)
+// Dispatch: arlen_titlebar_v1 (per-surface requests)
 // ---------------------------------------------------------------------------
 
-impl<D> Dispatch<generated::lunaris_titlebar_v1::LunarisTitlebarV1, u64, D>
+impl<D> Dispatch<generated::arlen_titlebar_v1::ArlenTitlebarV1, u64, D>
     for TitlebarManagerState
 where
-    D: Dispatch<generated::lunaris_titlebar_v1::LunarisTitlebarV1, u64>
+    D: Dispatch<generated::arlen_titlebar_v1::ArlenTitlebarV1, u64>
         + TitlebarHandler
         + 'static,
 {
     fn request(
         state: &mut D,
         _client: &Client,
-        _resource: &generated::lunaris_titlebar_v1::LunarisTitlebarV1,
-        request: generated::lunaris_titlebar_v1::Request,
+        _resource: &generated::arlen_titlebar_v1::ArlenTitlebarV1,
+        request: generated::arlen_titlebar_v1::Request,
         surface_id: &u64,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
@@ -290,16 +290,16 @@ where
             let tb = state.titlebar_manager_state().get_or_create(sid);
 
             match request {
-                generated::lunaris_titlebar_v1::Request::SetTitle { title } => {
+                generated::arlen_titlebar_v1::Request::SetTitle { title } => {
                     tb.title = title;
                 }
-                generated::lunaris_titlebar_v1::Request::SetBreadcrumb { segments_json } => {
+                generated::arlen_titlebar_v1::Request::SetBreadcrumb { segments_json } => {
                     tb.breadcrumb_json = segments_json;
                 }
-                generated::lunaris_titlebar_v1::Request::SetCenterContent { content } => {
+                generated::arlen_titlebar_v1::Request::SetCenterContent { content } => {
                     tb.center_content = content.into();
                 }
-                generated::lunaris_titlebar_v1::Request::AddTab {
+                generated::arlen_titlebar_v1::Request::AddTab {
                     id,
                     title,
                     icon,
@@ -307,19 +307,19 @@ where
                 } => {
                     handle_add_tab(tb, &id, &title, icon.as_deref(), status.into());
                 }
-                generated::lunaris_titlebar_v1::Request::RemoveTab { id } => {
+                generated::arlen_titlebar_v1::Request::RemoveTab { id } => {
                     handle_remove_tab(tb, &id);
                 }
-                generated::lunaris_titlebar_v1::Request::UpdateTab { id, title, status } => {
+                generated::arlen_titlebar_v1::Request::UpdateTab { id, title, status } => {
                     handle_update_tab(tb, &id, &title, status.into());
                 }
-                generated::lunaris_titlebar_v1::Request::ActivateTab { id } => {
+                generated::arlen_titlebar_v1::Request::ActivateTab { id } => {
                     handle_activate_tab(tb, &id);
                 }
-                generated::lunaris_titlebar_v1::Request::ReorderTabs { ids_json } => {
+                generated::arlen_titlebar_v1::Request::ReorderTabs { ids_json } => {
                     handle_reorder_tabs(tb, &ids_json);
                 }
-                generated::lunaris_titlebar_v1::Request::AddButton {
+                generated::arlen_titlebar_v1::Request::AddButton {
                     id,
                     icon,
                     tooltip,
@@ -327,16 +327,16 @@ where
                 } => {
                     handle_add_button(tb, &id, &icon, &tooltip, position.into());
                 }
-                generated::lunaris_titlebar_v1::Request::RemoveButton { id } => {
+                generated::arlen_titlebar_v1::Request::RemoveButton { id } => {
                     handle_remove_button(tb, &id);
                 }
-                generated::lunaris_titlebar_v1::Request::SetButtonEnabled { id, enabled } => {
+                generated::arlen_titlebar_v1::Request::SetButtonEnabled { id, enabled } => {
                     handle_set_button_enabled(tb, &id, enabled != 0);
                 }
-                generated::lunaris_titlebar_v1::Request::SetSearchMode { enabled } => {
+                generated::arlen_titlebar_v1::Request::SetSearchMode { enabled } => {
                     tb.search_mode = enabled != 0;
                 }
-                generated::lunaris_titlebar_v1::Request::Destroy => {
+                generated::arlen_titlebar_v1::Request::Destroy => {
                     changed = false;
                 }
                 _ => {
@@ -355,7 +355,7 @@ where
     fn destroyed(
         state: &mut D,
         _client: wayland_backend::server::ClientId,
-        _resource: &generated::lunaris_titlebar_v1::LunarisTitlebarV1,
+        _resource: &generated::arlen_titlebar_v1::ArlenTitlebarV1,
         surface_id: &u64,
     ) {
         let sid = *surface_id;
@@ -376,13 +376,13 @@ where
 macro_rules! delegate_titlebar {
     ($ty:ty) => {
         smithay::reexports::wayland_server::delegate_global_dispatch!($ty: [
-            $crate::wayland::protocols::titlebar::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1: ()
+            $crate::wayland::protocols::titlebar::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1: ()
         ] => $crate::wayland::protocols::titlebar::TitlebarManagerState);
         smithay::reexports::wayland_server::delegate_dispatch!($ty: [
-            $crate::wayland::protocols::titlebar::lunaris_titlebar_manager_v1::LunarisTitlebarManagerV1: ()
+            $crate::wayland::protocols::titlebar::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1: ()
         ] => $crate::wayland::protocols::titlebar::TitlebarManagerState);
         smithay::reexports::wayland_server::delegate_dispatch!($ty: [
-            $crate::wayland::protocols::titlebar::lunaris_titlebar_v1::LunarisTitlebarV1: u64
+            $crate::wayland::protocols::titlebar::arlen_titlebar_v1::ArlenTitlebarV1: u64
         ] => $crate::wayland::protocols::titlebar::TitlebarManagerState);
     };
 }

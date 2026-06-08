@@ -1,8 +1,8 @@
-/// Handler for the `lunaris-titlebar-v1` Wayland protocol.
+/// Handler for the `arlen-titlebar-v1` Wayland protocol.
 ///
 /// Receives titlebar content declarations from apps and updates the
 /// per-surface TitlebarState. The actual rendering is delegated to the
-/// desktop shell via the `lunaris-shell-overlay` protocol's
+/// desktop shell via the `arlen-shell-overlay` protocol's
 /// `window_header_*` events.
 ///
 /// See `docs/architecture/titlebar-protocol.md`.

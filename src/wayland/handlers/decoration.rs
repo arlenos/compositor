@@ -85,7 +85,7 @@ impl XdgDecorationHandler for State {
         // GTK/Qt stay unaffected (they don't bind the protocol, so
         // Smithay's `is_decorated` defaults to true → client draws
         // CSD as before). Terminals (Kitty/Foot/Alacritty) explicitly
-        // call `set_mode(ServerSide)` → they get SSD → Lunaris-
+        // call `set_mode(ServerSide)` → they get SSD → Arlen-
         // rendered header appears for them. Option B as specified.
     }
 

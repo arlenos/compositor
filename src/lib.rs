@@ -155,7 +155,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     // Pre-resolve the effective theme BEFORE State::new so the
     // compositor-rendered window header / hint border / tile gaps
     // start on the correct theme from frame 1. Without this, the
-    // global LUNARIS_THEME stays None until `watch_theme` runs
+    // global ARLEN_THEME stays None until `watch_theme` runs
     // later, and `State::new` / `Shell::new` end up caching the
     // hardcoded default-dark fallback. The watcher callback only
     // refreshes those caches on a *subsequent* file change, so
@@ -167,11 +167,11 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
             &config::appearance::default_path(),
         ),
     );
-    theme::replace_lunaris_theme(theme::recompose_effective_theme());
+    theme::replace_arlen_theme(theme::recompose_effective_theme());
 
-    // init state — `lunaris_theme()` now returns the freshly
-    // composed theme, so `state.common.lunaris_theme` and
-    // `shell.lunaris_theme` are both correct at construction.
+    // init state — `arlen_theme()` now returns the freshly
+    // composed theme, so `state.common.arlen_theme` and
+    // `shell.arlen_theme` are both correct at construction.
     let mut state = state::State::new(
         &display,
         socket,

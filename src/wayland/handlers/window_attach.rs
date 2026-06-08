@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Handler implementation for the `lunaris-window-attach-v1`
+//! Handler implementation for the `arlen-window-attach-v1`
 //! protocol. v1 has no interesting main-state dispatch — all
 //! request handling lives in the protocol module — but the
 //! `WindowAttachHandler` impl on `State` is the contract that ties

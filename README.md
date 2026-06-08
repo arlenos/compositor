@@ -1,6 +1,6 @@
 # compositor
 
-Lunaris compositor is a fork of [cosmic-comp](https://github.com/pop-os/cosmic-comp), the Wayland compositor from System76's COSMIC desktop. It adds an Event Bus integration layer that emits structured events for window and clipboard activity.
+Arlen compositor is a fork of [cosmic-comp](https://github.com/pop-os/cosmic-comp), the Wayland compositor from System76's COSMIC desktop. It adds an Event Bus integration layer that emits structured events for window and clipboard activity.
 
 This repo is not a GitHub fork. It is a standalone repo with cosmic-comp tracked as a git remote so we can pull upstream changes without being coupled to their branching model.
 
@@ -8,7 +8,7 @@ This repo is not a GitHub fork. It is a standalone repo with cosmic-comp tracked
 
 All changes are documented in [PORTING.md](PORTING.md). The short version:
 
-- **`src/event_bus.rs`**: new file. Background thread that connects to the Lunaris Event Bus and emits events. Non-blocking: if the Event Bus is not running, events are dropped silently.
+- **`src/event_bus.rs`**: new file. Background thread that connects to the Arlen Event Bus and emits events. Non-blocking: if the Event Bus is not running, events are dropped silently.
 - **`src/state.rs`**: `EventBusHandle` added to `Common`
 - **`src/shell/focus/mod.rs`**: emits `window.focused`
 - **`src/wayland/handlers/compositor.rs`**: emits `window.opened` after map
@@ -29,8 +29,8 @@ All changes are documented in [PORTING.md](PORTING.md). The short version:
 
 | Variable | Default | Description |
 |---|---|---|
-| `LUNARIS_PRODUCER_SOCKET` | `/run/lunaris/event-bus-producer.sock` | Event Bus producer socket |
-| `LUNARIS_SESSION_ID` | `unknown` | Session ID attached to all events |
+| `ARLEN_PRODUCER_SOCKET` | `/run/arlen/event-bus-producer.sock` | Event Bus producer socket |
+| `ARLEN_SESSION_ID` | `unknown` | Session ID attached to all events |
 
 ## Staying in sync with upstream
 
@@ -45,7 +45,7 @@ git rebase upstream/master
 
 ## Development
 
-Window decorations are currently handled by cosmic-comp's built-in Iced/cosmic implementation. Replacing them with Lunaris CSD via ui-kit is tracked in issue #11 and planned for Phase 2B.
+Window decorations are currently handled by cosmic-comp's built-in Iced/cosmic implementation. Replacing them with Arlen CSD via ui-kit is tracked in issue #11 and planned for Phase 2B.
 
 ## Testing
 
@@ -58,4 +58,4 @@ Integration tests require a running X11/Wayland session and are located in `dist
 
 ## Part of
 
-[Lunaris](https://github.com/lunaris-sys): a Linux desktop OS built around a system-wide knowledge graph.
+[Arlen](https://github.com/arlen-sys): a Linux desktop OS built around a system-wide knowledge graph.

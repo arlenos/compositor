@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Server-side implementation of the `lunaris-shell-overlay-v1` Wayland protocol.
+//! Server-side implementation of the `arlen-shell-overlay-v1` Wayland protocol.
 //!
-//! This protocol allows the Lunaris compositor to delegate rendering of shell
+//! This protocol allows the Arlen compositor to delegate rendering of shell
 //! overlay elements (context menus, tab bars, indicators) to the desktop-shell
 //! process. The compositor sends overlay events; the desktop-shell sends back
 //! user actions.
@@ -12,8 +12,8 @@ use smithay::reexports::wayland_server::{
 };
 use wayland_backend::server::GlobalId;
 
-pub use generated::lunaris_shell_overlay_v1;
-use generated::lunaris_shell_overlay_v1::{LunarisShellOverlayV1, Request as OverlayRequest};
+pub use generated::arlen_shell_overlay_v1;
+use generated::arlen_shell_overlay_v1::{ArlenShellOverlayV1, Request as OverlayRequest};
 
 #[allow(non_snake_case, non_upper_case_globals, non_camel_case_types)]
 mod generated {
@@ -23,20 +23,20 @@ mod generated {
         use smithay::reexports::wayland_server::protocol::__interfaces::*;
         use wayland_backend;
         wayland_scanner::generate_interfaces!(
-            "resources/protocols/lunaris-shell-overlay.xml"
+            "resources/protocols/arlen-shell-overlay.xml"
         );
     }
 
     use self::__interfaces::*;
 
     wayland_scanner::generate_server_code!(
-        "resources/protocols/lunaris-shell-overlay.xml"
+        "resources/protocols/arlen-shell-overlay.xml"
     );
 }
 
 // ===== Global data =====
 
-/// Per-global data for the `lunaris_shell_overlay_v1` global.
+/// Per-global data for the `arlen_shell_overlay_v1` global.
 ///
 /// Holds the client filter that determines which clients may bind this global.
 pub struct ShellOverlayGlobalData {
@@ -46,13 +46,13 @@ pub struct ShellOverlayGlobalData {
 
 // ===== State =====
 
-/// Server-side state for the `lunaris-shell-overlay-v1` protocol.
+/// Server-side state for the `arlen-shell-overlay-v1` protocol.
 ///
 /// Tracks all bound instances and assigns monotonically increasing menu IDs
 /// to each context menu sequence.
 #[derive(Debug)]
 pub struct ShellOverlayState {
-    instances: Vec<LunarisShellOverlayV1>,
+    instances: Vec<ArlenShellOverlayV1>,
     global: GlobalId,
     next_menu_id: u32,
 }
@@ -64,13 +64,13 @@ impl ShellOverlayState {
     /// allow the client to bind the global.
     pub fn new<D, F>(dh: &DisplayHandle, client_filter: F) -> ShellOverlayState
     where
-        D: GlobalDispatch<LunarisShellOverlayV1, ShellOverlayGlobalData>
-            + Dispatch<LunarisShellOverlayV1, ()>
+        D: GlobalDispatch<ArlenShellOverlayV1, ShellOverlayGlobalData>
+            + Dispatch<ArlenShellOverlayV1, ()>
             + ShellOverlayHandler
             + 'static,
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
-        let global = dh.create_global::<D, LunarisShellOverlayV1, _>(
+        let global = dh.create_global::<D, ArlenShellOverlayV1, _>(
             1,
             ShellOverlayGlobalData {
                 filter: Box::new(client_filter),
@@ -92,7 +92,7 @@ impl ShellOverlayState {
     ///
     /// Used by the compositor to identify the desktop-shell client for
     /// pointer focus routing during context menu grabs.
-    pub fn overlay_instance(&self) -> Option<&LunarisShellOverlayV1> {
+    pub fn overlay_instance(&self) -> Option<&ArlenShellOverlayV1> {
         self.instances.first()
     }
 
@@ -145,7 +145,7 @@ impl ShellOverlayState {
 /// index of the submenu header this level belongs to, or `u32::MAX` at the
 /// top level.
 fn send_items_recursive(
-    instance: &LunarisShellOverlayV1,
+    instance: &ArlenShellOverlayV1,
     menu_id: u32,
     items: &[ContextMenuItem],
     parent_index: u32,
@@ -168,8 +168,8 @@ fn send_items_recursive(
                 instance.context_menu_item(
                     menu_id,
                     my_index,
-                    lunaris_shell_overlay_v1::WindowAction::try_from(*action as u32)
-                        .unwrap_or(lunaris_shell_overlay_v1::WindowAction::None),
+                    arlen_shell_overlay_v1::WindowAction::try_from(*action as u32)
+                        .unwrap_or(arlen_shell_overlay_v1::WindowAction::None),
                     *toggled as u32,
                     *disabled as u32,
                     shortcut.clone().unwrap_or_default(),
@@ -186,7 +186,7 @@ fn send_items_recursive(
                 instance.context_menu_item(
                     menu_id,
                     my_index,
-                    lunaris_shell_overlay_v1::WindowAction::None,
+                    arlen_shell_overlay_v1::WindowAction::None,
                     0,
                     *disabled as u32,
                     String::new(),
@@ -265,7 +265,7 @@ impl ShellOverlayState {
         shortcut1: String,
         shortcut2: String,
     ) {
-        let kind_enum = lunaris_shell_overlay_v1::IndicatorKind::try_from(kind);
+        let kind_enum = arlen_shell_overlay_v1::IndicatorKind::try_from(kind);
         let Ok(kind_enum) = kind_enum else { return };
         for instance in &self.instances {
             instance.indicator_show(kind_enum, edges, direction, shortcut1.clone(), shortcut2.clone());
@@ -274,7 +274,7 @@ impl ShellOverlayState {
 
     /// Notify connected shells that an indicator should be hidden.
     pub fn send_indicator_hide(&self, kind: u32) {
-        let kind_enum = lunaris_shell_overlay_v1::IndicatorKind::try_from(kind);
+        let kind_enum = arlen_shell_overlay_v1::IndicatorKind::try_from(kind);
         let Ok(kind_enum) = kind_enum else { return };
         for instance in &self.instances {
             instance.indicator_hide(kind_enum);
@@ -287,7 +287,7 @@ impl ShellOverlayState {
 impl ShellOverlayState {
     /// Notify connected shells to show the zoom toolbar.
     pub fn send_zoom_toolbar_show(&self, level: f64, increment: u32, movement: u32) {
-        let movement_enum = lunaris_shell_overlay_v1::ZoomMovement::try_from(movement);
+        let movement_enum = arlen_shell_overlay_v1::ZoomMovement::try_from(movement);
         let Ok(movement_enum) = movement_enum else { return };
         for instance in &self.instances {
             instance.zoom_toolbar_show(level, increment, movement_enum);
@@ -422,10 +422,10 @@ impl ShellOverlayState {
     /// Notify connected shells of a layout mode change.
     pub fn send_layout_mode_changed(&self, mode: u32) {
         let layout_mode = match mode {
-            0 => lunaris_shell_overlay_v1::LayoutModeType::Floating,
-            1 => lunaris_shell_overlay_v1::LayoutModeType::Tiling,
-            2 => lunaris_shell_overlay_v1::LayoutModeType::Monocle,
-            _ => lunaris_shell_overlay_v1::LayoutModeType::Floating,
+            0 => arlen_shell_overlay_v1::LayoutModeType::Floating,
+            1 => arlen_shell_overlay_v1::LayoutModeType::Tiling,
+            2 => arlen_shell_overlay_v1::LayoutModeType::Monocle,
+            _ => arlen_shell_overlay_v1::LayoutModeType::Floating,
         };
         for instance in &self.instances {
             instance.layout_mode_changed(layout_mode);
@@ -575,7 +575,7 @@ pub enum ContextMenuItem {
 
 // ===== Handler trait =====
 
-/// Handler trait for `lunaris-shell-overlay-v1` compositor-side logic.
+/// Handler trait for `arlen-shell-overlay-v1` compositor-side logic.
 ///
 /// Implement this on your compositor state to receive shell overlay events.
 pub trait ShellOverlayHandler {
@@ -629,11 +629,11 @@ pub trait ShellOverlayHandler {
 
 // ===== GlobalDispatch =====
 
-impl<D> GlobalDispatch<LunarisShellOverlayV1, ShellOverlayGlobalData, D>
+impl<D> GlobalDispatch<ArlenShellOverlayV1, ShellOverlayGlobalData, D>
     for ShellOverlayState
 where
-    D: GlobalDispatch<LunarisShellOverlayV1, ShellOverlayGlobalData>
-        + Dispatch<LunarisShellOverlayV1, ()>
+    D: GlobalDispatch<ArlenShellOverlayV1, ShellOverlayGlobalData>
+        + Dispatch<ArlenShellOverlayV1, ()>
         + ShellOverlayHandler
         + 'static,
 {
@@ -641,7 +641,7 @@ where
         state: &mut D,
         _dh: &DisplayHandle,
         _client: &Client,
-        resource: New<LunarisShellOverlayV1>,
+        resource: New<ArlenShellOverlayV1>,
         _global_data: &ShellOverlayGlobalData,
         data_init: &mut DataInit<'_, D>,
     ) {
@@ -656,14 +656,14 @@ where
 
 // ===== Dispatch =====
 
-impl<D> Dispatch<LunarisShellOverlayV1, (), D> for ShellOverlayState
+impl<D> Dispatch<ArlenShellOverlayV1, (), D> for ShellOverlayState
 where
-    D: Dispatch<LunarisShellOverlayV1, ()> + ShellOverlayHandler + 'static,
+    D: Dispatch<ArlenShellOverlayV1, ()> + ShellOverlayHandler + 'static,
 {
     fn request(
         state: &mut D,
         _client: &Client,
-        _resource: &LunarisShellOverlayV1,
+        _resource: &ArlenShellOverlayV1,
         request: OverlayRequest,
         _data: &(),
         _dh: &DisplayHandle,
@@ -741,7 +741,7 @@ where
     fn destroyed(
         state: &mut D,
         _client: wayland_backend::server::ClientId,
-        resource: &LunarisShellOverlayV1,
+        resource: &ArlenShellOverlayV1,
         _data: &(),
     ) {
         state
@@ -753,18 +753,18 @@ where
 
 // ===== Delegate macro =====
 
-/// Delegate `lunaris_shell_overlay_v1` dispatch to [`ShellOverlayState`].
+/// Delegate `arlen_shell_overlay_v1` dispatch to [`ShellOverlayState`].
 ///
 /// Call this macro once in the crate that implements the compositor state.
 #[macro_export]
 macro_rules! delegate_shell_overlay {
     ($ty:ty) => {
         smithay::reexports::wayland_server::delegate_global_dispatch!($ty: [
-            $crate::wayland::protocols::shell_overlay::lunaris_shell_overlay_v1::LunarisShellOverlayV1:
+            $crate::wayland::protocols::shell_overlay::arlen_shell_overlay_v1::ArlenShellOverlayV1:
                 $crate::wayland::protocols::shell_overlay::ShellOverlayGlobalData
         ] => $crate::wayland::protocols::shell_overlay::ShellOverlayState);
         smithay::reexports::wayland_server::delegate_dispatch!($ty: [
-            $crate::wayland::protocols::shell_overlay::lunaris_shell_overlay_v1::LunarisShellOverlayV1: ()
+            $crate::wayland::protocols::shell_overlay::arlen_shell_overlay_v1::ArlenShellOverlayV1: ()
         ] => $crate::wayland::protocols::shell_overlay::ShellOverlayState);
     };
 }
