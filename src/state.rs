@@ -229,6 +229,7 @@ pub struct State {
     pub ready: Once,
     pub last_refresh: LastRefresh,
 }
+smithay::delegate_dispatch2!(State);
 
 #[derive(Debug)]
 pub struct Common {
@@ -349,6 +350,7 @@ pub struct Common {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum BackendData {
     X11(X11State),
     Winit(WinitState),
@@ -1041,6 +1043,7 @@ impl Common {
                 surface,
                 output,
                 states,
+                None,
                 render_element_states,
                 primary_scanout_output_compare,
             );
@@ -1095,8 +1098,8 @@ impl Common {
 
         // normal windows
         for space in shell.workspaces.spaces() {
-            if let Some(window) = space.get_fullscreen() {
-                window.with_surfaces(processor);
+            if let Some(fs) = space.get_fullscreen(shell.seats.last_active()) {
+                fs.surface.with_surfaces(processor);
             }
             space.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
@@ -1261,15 +1264,16 @@ impl Common {
             });
 
         if let Some(active) = shell.active_space(output) {
-            if let Some(window) = active.get_fullscreen()
-                && let Some(feedback) = window
+            if let Some(fs) = active.get_fullscreen(shell.seats.last_active())
+                && let Some(feedback) = fs
+                    .surface
                     .wl_surface()
                     .and_then(|wl_surface| {
                         advertised_node_for_surface(&wl_surface, &self.display_handle)
                     })
                     .and_then(&mut dmabuf_feedback)
             {
-                window.send_dmabuf_feedback(
+                fs.surface.send_dmabuf_feedback(
                     output,
                     &feedback,
                     render_element_states,
@@ -1455,8 +1459,9 @@ impl Common {
             });
 
         if let Some(active) = shell.active_space(output) {
-            if let Some(window) = active.get_fullscreen() {
-                window.send_frame(output, time, throttle(window), should_send);
+            if let Some(fs) = active.get_fullscreen(shell.seats.last_active()) {
+                fs.surface
+                    .send_frame(output, time, throttle(&fs.surface), should_send);
             }
             active.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
@@ -1476,9 +1481,9 @@ impl Common {
                 .spaces_for_output(output)
                 .filter(|w| w.handle != active.handle)
             {
-                if let Some(window) = space.get_fullscreen() {
-                    let throttle = min(throttle(space), throttle(window));
-                    window.send_frame(output, time, throttle, |_, _| None);
+                if let Some(fs) = space.get_fullscreen(shell.seats.last_active()) {
+                    let throttle = min(throttle(space), throttle(&fs.surface));
+                    fs.surface.send_frame(output, time, throttle, |_, _| None);
                 }
                 space.mapped().for_each(|mapped| {
                     for (window, _) in mapped.windows() {

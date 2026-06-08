@@ -1469,35 +1469,32 @@ impl TilingLayout {
         let _ = tree.remove_node(node.clone(), RemoveBehavior::DropChildren);
 
         // fixup parent node
-        match parent_id {
-            Some(id) => {
-                let position = position.unwrap();
-                let group = tree.get_mut(&id).unwrap().data_mut();
-                assert!(group.is_group());
+        if let Some(id) = parent_id {
+            let position = position.unwrap();
+            let group = tree.get_mut(&id).unwrap().data_mut();
+            assert!(group.is_group());
 
-                if group.len() > 2 {
-                    group.remove_window(position);
-                } else {
-                    trace!("Removing Group");
-                    let other_child = tree.children_ids(&id).unwrap().next().cloned().unwrap();
-                    let fork_pos = parent_parent_id.as_ref().and_then(|parent_id| {
-                        tree.children_ids(parent_id).unwrap().position(|i| i == &id)
-                    });
-                    let _ = tree.remove_node(id.clone(), RemoveBehavior::OrphanChildren);
-                    tree.move_node(
-                        &other_child,
-                        parent_parent_id
-                            .as_ref()
-                            .map(MoveBehavior::ToParent)
-                            .unwrap_or(MoveBehavior::ToRoot),
-                    )
-                    .unwrap();
-                    if let Some(old_pos) = fork_pos {
-                        tree.make_nth_sibling(&other_child, old_pos).unwrap();
-                    }
+            if group.len() > 2 {
+                group.remove_window(position);
+            } else {
+                trace!("Removing Group");
+                let other_child = tree.children_ids(&id).unwrap().next().cloned().unwrap();
+                let fork_pos = parent_parent_id.as_ref().and_then(|parent_id| {
+                    tree.children_ids(parent_id).unwrap().position(|i| i == &id)
+                });
+                let _ = tree.remove_node(id.clone(), RemoveBehavior::OrphanChildren);
+                tree.move_node(
+                    &other_child,
+                    parent_parent_id
+                        .as_ref()
+                        .map(MoveBehavior::ToParent)
+                        .unwrap_or(MoveBehavior::ToRoot),
+                )
+                .unwrap();
+                if let Some(old_pos) = fork_pos {
+                    tree.make_nth_sibling(&other_child, old_pos).unwrap();
                 }
             }
-            None => {} // root
         }
     }
 
@@ -2963,7 +2960,7 @@ impl TilingLayout {
         // if the focus is currently on a popup, treat it's toplevel as the target
         if let KeyboardFocusTarget::Popup(popup) = target {
             let toplevel_surface = match popup {
-                PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                PopupKind::Xdg(_) => get_popup_toplevel(&popup),
                 PopupKind::InputMethod(_) => unreachable!(),
             }?;
             let root_id = tree.root_node_id()?;
@@ -3260,6 +3257,7 @@ impl TilingLayout {
     pub fn popup_element_under(
         &self,
         location_f64: Point<f64, Local>,
+        seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
         let location = location_f64.to_i32_round();
 
@@ -3272,6 +3270,7 @@ impl TilingLayout {
                 .focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                     WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 )
                 .is_some()
             {
@@ -3285,6 +3284,7 @@ impl TilingLayout {
     pub fn toplevel_element_under(
         &self,
         location_f64: Point<f64, Local>,
+        seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
         let location = location_f64.to_i32_round();
 
@@ -3297,6 +3297,7 @@ impl TilingLayout {
                 .focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                     WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 )
                 .is_some()
             {
@@ -3311,6 +3312,7 @@ impl TilingLayout {
         &self,
         location_f64: Point<f64, Local>,
         overview: OverviewMode,
+        seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         let location = location_f64.to_i32_round();
 
@@ -3325,6 +3327,7 @@ impl TilingLayout {
                 if let Some((target, surface_offset)) = mapped.focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                     WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 ) {
                     return Some((
                         target,
@@ -3342,6 +3345,7 @@ impl TilingLayout {
         &self,
         location_f64: Point<f64, Local>,
         overview: OverviewMode,
+        seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         let tree = &self.queue.trees.back().unwrap().0;
         let root = tree.root_node_id()?;
@@ -3358,6 +3362,7 @@ impl TilingLayout {
                 if let Some((target, surface_offset)) = mapped.focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                     WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 ) {
                     return Some((
                         target,
@@ -3408,6 +3413,7 @@ impl TilingLayout {
                         .focus_under(
                             test_point,
                             WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                            seat,
                         )
                         .map(|(surface, surface_offset)| {
                             (

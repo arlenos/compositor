@@ -59,6 +59,7 @@ pub enum PointerFocusTarget {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum PointerFocusToplevel {
     Surface(CosmicSurface),
     Popup(PopupKind),
@@ -192,7 +193,7 @@ impl PointerFocusTarget {
             PointerFocusTarget::WlSurface {
                 toplevel: Some(PointerFocusToplevel::Popup(PopupKind::Xdg(popup))),
                 ..
-            } => get_popup_toplevel(popup)
+            } => get_popup_toplevel(&PopupKind::Xdg(popup.clone()))
                 .and_then(|s| shell.element_for_surface(&s).map(|mapped| (mapped, s)))
                 .and_then(|(m, s)| {
                     m.windows()
@@ -238,7 +239,7 @@ impl KeyboardFocusTarget {
         match self {
             KeyboardFocusTarget::Element(mapped) => mapped.wl_surface(),
             KeyboardFocusTarget::Popup(PopupKind::Xdg(xdg)) => {
-                get_popup_toplevel(xdg).map(Cow::Owned)
+                get_popup_toplevel(&PopupKind::Xdg(xdg.clone())).map(Cow::Owned)
             }
             _ => None,
         }
@@ -272,6 +273,18 @@ impl KeyboardFocusTarget {
     pub fn is_xwm(&self, xwm: XwmId) -> bool {
         if let Some(surface) = self.x11_surface() {
             surface.xwm_id().unwrap() == xwm
+        } else {
+            false
+        }
+    }
+
+    pub fn has_surface(&self, shell: &Shell, surface: &WlSurface) -> bool {
+        if let Some(fe) = shell.focused_element(self) {
+            fe.has_surface(surface, WindowSurfaceType::ALL)
+        } else if let KeyboardFocusTarget::Fullscreen(s) = self {
+            s.has_surface(surface, WindowSurfaceType::ALL)
+        } else if let Some(root) = WaylandFocus::wl_surface(self) {
+            CosmicSurface::surface_tree_offset(&root, surface).is_some()
         } else {
             false
         }

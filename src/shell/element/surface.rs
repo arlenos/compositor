@@ -22,7 +22,7 @@ use smithay::{
         },
     },
     desktop::{
-        PopupManager, Window, WindowSurface, WindowSurfaceType, space::SpaceElement,
+        PopupManager, WeakWindow, Window, WindowSurface, WindowSurfaceType, space::SpaceElement,
         utils::OutputPresentationFeedback,
     },
     input::{
@@ -45,7 +45,10 @@ use smithay::{
         IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, user_data::UserDataMap,
     },
     wayland::{
-        compositor::{SurfaceData, TraversalAction, with_states, with_surface_tree_downward},
+        compositor::{
+            SubsurfaceCachedState, SurfaceData, TraversalAction, with_states,
+            with_surface_tree_downward,
+        },
         seat::WaylandFocus,
         shell::xdg::{
             SurfaceCachedState, ToplevelCachedState, ToplevelSurface, XdgToplevelSurfaceData,
@@ -66,6 +69,9 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct CosmicSurface(pub Window);
+
+#[derive(Debug, Clone)]
+pub struct WeakCosmicSurface(pub WeakWindow);
 
 impl From<ToplevelSurface> for CosmicSurface {
     fn from(s: ToplevelSurface) -> Self {
@@ -100,6 +106,12 @@ impl PartialEq<ToplevelSurface> for CosmicSurface {
 impl PartialEq<X11Surface> for CosmicSurface {
     fn eq(&self, other: &X11Surface) -> bool {
         self.x11_surface() == Some(other)
+    }
+}
+
+impl PartialEq<WeakCosmicSurface> for CosmicSurface {
+    fn eq(&self, other: &WeakCosmicSurface) -> bool {
+        other.upgrade().is_some_and(|other| other == *self)
     }
 }
 
@@ -182,6 +194,21 @@ impl CosmicSurface {
         }
     }
 
+    pub fn last_server_size(&self) -> Option<Size<i32, Logical>> {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {
+                let attributes = states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap();
+                attributes.current_server_state().size
+            }),
+            WindowSurface::X11(_) => None,
+        }
+    }
+
     pub fn global_geometry(&self) -> Option<Rectangle<i32, Global>> {
         *self
             .0
@@ -211,7 +238,7 @@ impl CosmicSurface {
                 toplevel.with_pending_state(|state| state.size = Some(geo.size.as_logical()))
             }
             WindowSurface::X11(surface) => {
-                let _ = surface.configure(geo.as_logical());
+                let _ = surface.configure_with_sync(geo.as_logical(), None);
             }
         }
     }
@@ -318,7 +345,7 @@ impl CosmicSurface {
                     state.is_some_and(|state| state.states.contains(ToplevelState::Resizing))
                 }))
             }
-            WindowSurface::X11(_surface) => None,
+            WindowSurface::X11(surface) => surface.pending_configure().map(|_| true),
         }
     }
 
@@ -429,10 +456,6 @@ impl CosmicSurface {
             .store(minimized, Ordering::SeqCst);
         if let WindowSurface::X11(surface) = self.0.underlying_surface() {
             let _ = surface.set_hidden(minimized);
-            if !minimized && surface.is_fullscreen() {
-                let _ = surface.set_mapped(false);
-                let _ = surface.set_mapped(true);
-            }
         }
     }
 
@@ -450,6 +473,9 @@ impl CosmicSurface {
             .get_or_insert_threadsafe(Sticky::default)
             .0
             .store(sticky, Ordering::SeqCst);
+        if let WindowSurface::X11(surface) = self.0.underlying_surface() {
+            let _ = surface.set_sticky(sticky);
+        }
     }
 
     pub fn set_suspended(&self, suspended: bool) {
@@ -565,7 +591,7 @@ impl CosmicSurface {
                     }
                 })
             }
-            WindowSurface::X11(_) => true,
+            WindowSurface::X11(surface) => surface.pending_configure().is_none(),
         }
     }
 
@@ -627,6 +653,68 @@ impl CosmicSurface {
         } else {
             false
         }
+    }
+
+    pub fn surface_offset(&self, surface: &WlSurface) -> Option<Point<i32, Logical>> {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                Self::surface_tree_offset(toplevel.wl_surface(), surface)
+            }
+            WindowSurface::X11(surface_x11) => {
+                if surface_x11.wl_surface().as_ref() == Some(surface) {
+                    Some(Point::default())
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    pub fn surface_tree_offset(
+        root: &WlSurface,
+        surface: &WlSurface,
+    ) -> Option<Point<i32, Logical>> {
+        if root == surface {
+            return Some(Point::default());
+        }
+
+        let found = AtomicBool::new(false);
+        let mut found_offset = Point::<i32, Logical>::default();
+
+        with_surface_tree_downward(
+            root,
+            Point::<i32, Logical>::default(),
+            |s, states, parent_offset| {
+                let mut offset = *parent_offset;
+                if s != root {
+                    offset += states
+                        .cached_state
+                        .get::<SubsurfaceCachedState>()
+                        .current()
+                        .location;
+                }
+                TraversalAction::DoChildren(offset)
+            },
+            |s, _, offset| {
+                if s == surface {
+                    found_offset = *offset;
+                    found.store(true, Ordering::SeqCst);
+                }
+            },
+            |_, _, _| !found.load(Ordering::SeqCst),
+        );
+
+        if found.load(Ordering::SeqCst) {
+            return Some(found_offset);
+        }
+
+        for (popup, popup_offset) in PopupManager::popups_for_surface(root) {
+            if let Some(offset) = Self::surface_tree_offset(popup.wl_surface(), surface) {
+                return Some(popup_offset + offset);
+            }
+        }
+
+        None
     }
 
     pub fn focus_under(
@@ -833,6 +921,16 @@ impl CosmicSurface {
 
     pub fn x11_surface(&self) -> Option<&X11Surface> {
         self.0.x11_surface()
+    }
+
+    pub fn downgrade(&self) -> WeakCosmicSurface {
+        WeakCosmicSurface(self.0.downgrade())
+    }
+}
+
+impl WeakCosmicSurface {
+    pub fn upgrade(&self) -> Option<CosmicSurface> {
+        self.0.upgrade().map(CosmicSurface)
     }
 }
 

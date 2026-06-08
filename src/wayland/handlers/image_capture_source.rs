@@ -3,8 +3,7 @@
 use crate::{
     state::State,
     wayland::protocols::{
-        image_capture_source::{ImageCaptureSourceKind, delegate_cosmic_image_capture_source},
-        toplevel_info::window_from_ext,
+        image_capture_source::ImageCaptureSourceKind, toplevel_info::window_from_ext,
     },
 };
 use smithay::{
@@ -45,15 +44,9 @@ impl ToplevelCaptureSourceHandler for State {
         toplevel: ForeignToplevelHandle,
     ) {
         let data = match window_from_ext(self, toplevel) {
-            Some(toplevel) => ImageCaptureSourceKind::Toplevel(toplevel.clone()),
+            Some(toplevel) => ImageCaptureSourceKind::Toplevel(toplevel.downgrade()),
             None => ImageCaptureSourceKind::Destroyed,
         };
         source.user_data().insert_if_missing(|| data);
     }
 }
-
-smithay::delegate_image_capture_source!(State);
-smithay::delegate_output_capture_source!(State);
-smithay::delegate_toplevel_capture_source!(State);
-
-delegate_cosmic_image_capture_source!(State);

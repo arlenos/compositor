@@ -778,6 +778,8 @@ impl MoveGrab {
         release: ReleaseMode,
         evlh: LoopHandle<'static, State>,
     ) -> MoveGrab {
+        // false-positive: `Output`s hash is based on it's inner ptr
+        #[allow(clippy::mutable_key_type)]
         let mut outputs = HashSet::new();
         outputs.insert(cursor_output.clone());
         window.output_enter(&cursor_output, window.geometry()); // not accurate but...
@@ -854,6 +856,8 @@ impl Drop for MoveGrab {
         // No more buttons are pressed, release the grab.
         let output = self.cursor_output.clone();
         let seat = self.seat.clone();
+        // false-positive: `Output`s hash is based on it's inner ptr
+        #[allow(clippy::mutable_key_type)]
         let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
         let previous = self.previous;
         let window = self.window.clone();
@@ -929,7 +933,7 @@ impl Drop for MoveGrab {
 
                             let target_window = workspace
                                 .tiling_layer
-                                .toplevel_element_under(cursor_local)
+                                .toplevel_element_under(cursor_local, &seat)
                                 .and_then(|focus| match focus {
                                     KeyboardFocusTarget::Element(m)
                                         if m != grab_state.window =>
@@ -965,12 +969,22 @@ impl Drop for MoveGrab {
                             if matches!(previous, ManagedLayer::Floating)
                                 && let Some(sz) = grab_state.snapping_zone
                             {
+                                // `last_geometry` was set to the pre-drag geometry(in FloatingLayout::unmap).
+                                // Snapshot it here and restore it after so "restore-to-floating" goes back to where the user had the window.
+                                let pre_drag_geometry = *window.last_geometry.lock().unwrap();
+
                                 if sz == SnappingZone::Maximize {
                                     shell.maximize_toggle(
                                         &window,
                                         &seat,
                                         &state.common.event_loop_handle,
                                     );
+                                    if let Some(geo) = pre_drag_geometry
+                                        && let Some(state) =
+                                            window.maximized_state.lock().unwrap().as_mut()
+                                    {
+                                        state.original_geometry = geo;
+                                    }
                                 } else {
                                     let directions = match sz {
                                         SnappingZone::Maximize => vec![],
@@ -998,6 +1012,9 @@ impl Drop for MoveGrab {
                                             ManagedLayer::Floating,
                                             &window,
                                         );
+                                    }
+                                    if let Some(geo) = pre_drag_geometry {
+                                        *window.last_geometry.lock().unwrap() = Some(geo);
                                     }
                                 }
                             }
@@ -1035,6 +1052,7 @@ impl Drop for MoveGrab {
                     if let Some((target, offset)) = mapped.focus_under(
                         current_location - position.as_logical().to_f64(),
                         WindowSurfaceType::ALL,
+                        &seat,
                     ) {
                         pointer.motion(
                             state,

@@ -46,12 +46,13 @@ mod types;
 
 pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
-    CosmicCompConfig, XkbConfig,
+    ActivationPolicy, AppearanceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig,
+    XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
     input::{
         AccelConfig, DeviceState as InputDeviceState, InputConfig, ScrollConfig, TapConfig,
         TouchpadOverride,
     },
-    output::comp::{OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef},
+    output::comp::{OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef, load_outputs},
 };
 pub use key_bindings::{Action, PrivateAction, action_from_str, keysym_from_str};
 use types::WlXkbConfig;
@@ -1454,8 +1455,7 @@ impl Config {
                 .collect::<Vec<_>>();
 
             let mut found_outputs = Vec::new();
-            for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
-            {
+            for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs) {
                 let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
                 let enabled = output_config.enabled.clone();
                 *output
@@ -1479,11 +1479,7 @@ impl Config {
             ) {
                 warn!(?err, "Failed to set new config.");
                 found_outputs.clear();
-                for (output, output_config) in outputs
-                    .clone()
-                    .into_iter()
-                    .zip(known_good_configs.into_iter())
-                {
+                for (output, output_config) in outputs.clone().into_iter().zip(known_good_configs) {
                     let enabled = output_config.enabled.clone();
                     *output
                         .user_data()
@@ -1720,7 +1716,7 @@ impl Config {
             &self.cosmic_conf.input_default
         };
 
-        let mut device_config = self.cosmic_conf.input_devices.get(device.name()).cloned();
+        let mut device_config = self.cosmic_conf.input_devices.get(&*device.name()).cloned();
         if is_touchpad && self.cosmic_conf.input_touchpad_override == TouchpadOverride::ForceDisable
         {
             device_config = Some({

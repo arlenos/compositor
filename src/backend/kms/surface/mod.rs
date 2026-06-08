@@ -440,6 +440,7 @@ impl Surface {
         self.overlay_plane_formats = overlay_plane_formats;
         self.feedback.clear();
         self.active.store(true, Ordering::SeqCst);
+        self.dpms = true;
 
         let _ = self
             .thread_command
@@ -463,7 +464,7 @@ impl Surface {
 
     pub fn drop_and_join(mut self) {
         let thread = self.thread.take();
-        let _ = self;
+        std::mem::drop(self);
         if let Some(thread) = thread {
             let name = thread.thread().name().unwrap().to_string();
             let _ = thread.join();
@@ -511,8 +512,10 @@ fn surface_thread(
     let egui = {
         let state =
             smithay_egui::EguiState::new(smithay::utils::Rectangle::from_size((400, 800).into()));
-        let mut visuals: egui::style::Visuals = Default::default();
-        visuals.window_shadow = egui::Shadow::NONE;
+        let visuals = egui::style::Visuals {
+            window_shadow: egui::Shadow::NONE,
+            ..Default::default()
+        };
         state.context().set_visuals(visuals);
         state
     };
@@ -1021,14 +1024,18 @@ impl SurfaceThreadState {
             let animations_going = shell.animations_going();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
             if let Some((_, workspace)) = shell.workspaces.active(output) {
-                if let Some(fullscreen_surface) = workspace.get_fullscreen() {
+                let seat = shell.seats.last_active();
+                if let Some(fullscreen_surface) = workspace.get_fullscreen(seat) {
                     const _30_FPS: Duration = Duration::from_nanos(1_000_000_000 / 30);
                     (
                         true,
-                        fullscreen_surface.wl_surface().is_some_and(|surface| {
-                            recursive_frame_time_estimation(&self.clock, &surface)
-                                .is_some_and(|dur| dur <= _30_FPS)
-                        }),
+                        fullscreen_surface
+                            .surface
+                            .wl_surface()
+                            .is_some_and(|surface| {
+                                recursive_frame_time_estimation(&self.clock, &surface)
+                                    .is_some_and(|dur| dur <= _30_FPS)
+                            }),
                         animations_going,
                     )
                 } else {
@@ -1487,18 +1494,21 @@ fn render_node_for_output(
     let Some(workspace) = shell.active_space(output) else {
         return *target_node;
     };
-    let nodes = workspace
-        .get_fullscreen()
-        .map(|w| vec![w.clone()])
-        .unwrap_or_else(|| {
-            workspace
-                .mapped()
-                .map(|mapped| mapped.active_window())
-                .collect::<Vec<_>>()
-        })
-        .into_iter()
-        .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s)))
-        .collect::<Vec<_>>();
+    let fullscreens: Vec<_> = workspace
+        .get_fullscreen_surfaces()
+        .map(|f| f.surface.clone())
+        .collect();
+    let nodes = if !fullscreens.is_empty() {
+        fullscreens
+    } else {
+        workspace
+            .mapped()
+            .map(|mapped| mapped.active_window())
+            .collect::<Vec<_>>()
+    }
+    .into_iter()
+    .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s)))
+    .collect::<Vec<_>>();
 
     if nodes.contains(target_node) || nodes.is_empty() {
         *target_node

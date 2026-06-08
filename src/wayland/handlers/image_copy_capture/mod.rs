@@ -21,8 +21,9 @@ use smithay::{
         dmabuf::get_dmabuf,
         image_capture_source::ImageCaptureSource,
         image_copy_capture::{
-            BufferConstraints, CursorSession, CursorSessionRef, DmabufConstraints, Frame, FrameRef,
-            ImageCopyCaptureHandler, ImageCopyCaptureState, Session, SessionRef,
+            BufferConstraints, CaptureFailureReason, CursorSession, CursorSessionRef,
+            DmabufConstraints, Frame, FrameRef, ImageCopyCaptureHandler, ImageCopyCaptureState,
+            Session, SessionRef,
         },
         seat::WaylandFocus,
     },
@@ -49,20 +50,23 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn capture_constraints(&mut self, source: &ImageCaptureSource) -> Option<BufferConstraints> {
-        let kind = source.user_data().get::<ImageCaptureSourceKind>().unwrap();
-        match kind {
+        match ImageCaptureSourceKind::from_source(source) {
             ImageCaptureSourceKind::Output(weak) => weak
                 .upgrade()
                 .and_then(|output| constraints_for_output(&output, &mut self.backend)),
             ImageCaptureSourceKind::Workspace(handle) => {
                 let shell = self.common.shell.read();
-                let output = shell.workspaces.space_for_handle(handle)?.output();
+                let output = shell.workspaces.space_for_handle(&handle)?.output();
                 constraints_for_output(output, &mut self.backend)
             }
             ImageCaptureSourceKind::Toplevel(window) => {
-                constraints_for_toplevel(window, &mut self.backend)
+                if let Some(window) = window.upgrade() {
+                    constraints_for_toplevel(&window, &mut self.backend)
+                } else {
+                    None
+                }
             }
-            _ => None,
+            ImageCaptureSourceKind::Destroyed => None,
         }
     }
 
@@ -92,13 +96,7 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn new_session(&mut self, session: Session) {
-        let kind = session
-            .source()
-            .user_data()
-            .get::<ImageCaptureSourceKind>()
-            .unwrap()
-            .clone();
-        match kind {
+        match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     session.stop();
@@ -127,7 +125,12 @@ impl ImageCopyCaptureHandler for State {
                 });
                 workspace.add_session(session);
             }
-            ImageCaptureSourceKind::Toplevel(mut toplevel) => {
+            ImageCaptureSourceKind::Toplevel(toplevel) => {
+                let Some(mut toplevel) = toplevel.upgrade() else {
+                    session.stop();
+                    return;
+                };
+
                 let size = toplevel.geometry().size.to_physical(1);
                 session.user_data().insert_if_missing_threadsafe(|| {
                     Mutex::new(SessionUserData::new(OutputDamageTracker::new(
@@ -138,7 +141,9 @@ impl ImageCopyCaptureHandler for State {
                 });
                 toplevel.add_session(session);
             }
-            ImageCaptureSourceKind::Destroyed => unreachable!(),
+            ImageCaptureSourceKind::Destroyed => {
+                session.stop();
+            }
         }
     }
 
@@ -168,13 +173,7 @@ impl ImageCopyCaptureHandler for State {
             )))
         });
 
-        let kind = session
-            .source()
-            .user_data()
-            .get::<ImageCaptureSourceKind>()
-            .unwrap()
-            .clone();
-        match kind {
+        match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     return;
@@ -235,7 +234,11 @@ impl ImageCopyCaptureHandler for State {
 
                 workspace.add_cursor_session(session);
             }
-            ImageCaptureSourceKind::Toplevel(mut toplevel) => {
+            ImageCaptureSourceKind::Toplevel(toplevel) => {
+                let Some(mut toplevel) = toplevel.upgrade() else {
+                    return;
+                };
+
                 let shell = self.common.shell.read();
                 if let Some(element) = shell.element_for_surface(&toplevel)
                     && element.has_active_window(&toplevel)
@@ -258,18 +261,14 @@ impl ImageCopyCaptureHandler for State {
 
                 toplevel.add_cursor_session(session);
             }
-            ImageCaptureSourceKind::Destroyed => unreachable!(),
+            ImageCaptureSourceKind::Destroyed => {
+                session.stop();
+            }
         }
     }
 
     fn frame(&mut self, session: &SessionRef, frame: Frame) {
-        let kind = session
-            .source()
-            .user_data()
-            .get::<ImageCaptureSourceKind>()
-            .unwrap()
-            .clone();
-        match kind {
+        match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     return;
@@ -282,9 +281,15 @@ impl ImageCopyCaptureHandler for State {
                 render_workspace_to_buffer(self, session, frame, handle)
             }
             ImageCaptureSourceKind::Toplevel(toplevel) => {
+                let Some(toplevel) = toplevel.upgrade() else {
+                    return;
+                };
+
                 render_window_to_buffer(self, session, frame, &toplevel)
             }
-            ImageCaptureSourceKind::Destroyed => unreachable!(),
+            ImageCaptureSourceKind::Destroyed => {
+                frame.fail(CaptureFailureReason::Stopped);
+            }
         }
     }
 
@@ -306,13 +311,7 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn session_destroyed(&mut self, session: SessionRef) {
-        let kind = session
-            .source()
-            .user_data()
-            .get::<ImageCaptureSourceKind>()
-            .unwrap()
-            .clone();
-        match kind {
+        match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
                     output.remove_session(&session);
@@ -329,19 +328,17 @@ impl ImageCopyCaptureHandler for State {
                     workspace.remove_session(&session)
                 }
             }
-            ImageCaptureSourceKind::Toplevel(mut toplevel) => toplevel.remove_session(&session),
-            ImageCaptureSourceKind::Destroyed => unreachable!(),
+            ImageCaptureSourceKind::Toplevel(toplevel) => {
+                if let Some(mut toplevel) = toplevel.upgrade() {
+                    toplevel.remove_session(&session);
+                }
+            }
+            ImageCaptureSourceKind::Destroyed => {}
         }
     }
 
     fn cursor_session_destroyed(&mut self, session: CursorSessionRef) {
-        let kind = session
-            .source()
-            .user_data()
-            .get::<ImageCaptureSourceKind>()
-            .unwrap()
-            .clone();
-        match kind {
+        match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
                     output.remove_cursor_session(&session);
@@ -358,10 +355,12 @@ impl ImageCopyCaptureHandler for State {
                     workspace.remove_cursor_session(&session)
                 }
             }
-            ImageCaptureSourceKind::Toplevel(mut toplevel) => {
-                toplevel.remove_cursor_session(&session)
+            ImageCaptureSourceKind::Toplevel(toplevel) => {
+                if let Some(mut toplevel) = toplevel.upgrade() {
+                    toplevel.remove_cursor_session(&session)
+                }
             }
-            ImageCaptureSourceKind::Destroyed => unreachable!(),
+            ImageCaptureSourceKind::Destroyed => {}
         }
     }
 }
@@ -450,5 +449,3 @@ fn constraints_for_renderer(
 
     constraints
 }
-
-smithay::delegate_image_copy_capture!(State);
