@@ -350,11 +350,41 @@ pub struct RestoreTilingState {
     pub sizes: Vec<i32>,
 }
 
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+
+/// Global mirror of the configured tiling gaps, seeded at `Shell::new` from
+/// `compositor.toml [layout]` and updated by the config watcher. A `TilingLayout`
+/// created at startup or on output hotplug reads these, so a configured gap
+/// applies immediately instead of waiting for the first post-startup config edit.
+/// Same construction-seeded-global pattern as `tiled_headers_enabled_global`.
+static CONFIGURED_INNER_GAP: AtomicI32 = AtomicI32::new(8);
+static CONFIGURED_OUTER_GAP: AtomicI32 = AtomicI32::new(8);
+static CONFIGURED_SMART_GAPS: AtomicBool = AtomicBool::new(true);
+
+/// Seed or update the global tiling-gap configuration. Called from `Shell::new`
+/// (before the workspaces are created) and from the config watcher, so every
+/// newly-created [`TilingLayout`] starts at the configured gaps.
+pub(crate) fn set_configured_gaps_global(inner: i32, outer: i32, smart: bool) {
+    CONFIGURED_INNER_GAP.store(inner, Ordering::Relaxed);
+    CONFIGURED_OUTER_GAP.store(outer, Ordering::Relaxed);
+    CONFIGURED_SMART_GAPS.store(smart, Ordering::Relaxed);
+}
+
+/// The currently-configured tiling gaps as `(inner, outer, smart)`.
+fn configured_gaps_global() -> (i32, i32, bool) {
+    (
+        CONFIGURED_INNER_GAP.load(Ordering::Relaxed),
+        CONFIGURED_OUTER_GAP.load(Ordering::Relaxed),
+        CONFIGURED_SMART_GAPS.load(Ordering::Relaxed),
+    )
+}
+
 impl TilingLayout {
     pub fn new(
         appearance: AppearanceConfig,
         output: &Output,
     ) -> TilingLayout {
+        let (inner_gap, outer_gap, smart_gaps) = configured_gaps_global();
         TilingLayout {
             queue: TreeQueue {
                 trees: {
@@ -369,9 +399,9 @@ impl TilingLayout {
             swapping_stack_surface_id: Id::new(),
             last_overview_hover: None,
             appearance,
-            inner_gap: 8,
-            outer_gap: 8,
-            smart_gaps: true,
+            inner_gap,
+            outer_gap,
+            smart_gaps,
         }
     }
 

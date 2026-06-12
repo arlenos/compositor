@@ -2501,6 +2501,16 @@ impl Shell {
     pub fn new(config: &Config) -> Self {
         let tiling_exceptions = layout::TilingExceptions::new(config.tiling_exceptions.iter());
 
+        // Seed the configured tiling gaps before the workspaces are created, so a
+        // fresh start applies them. Previously gaps were only set by the config
+        // watcher (`toml_config_changed`), so a configured gap was ignored until
+        // the first post-startup config edit.
+        layout::tiling::set_configured_gaps_global(
+            config.layout.inner_gap,
+            config.layout.outer_gap,
+            config.layout.smart_gaps,
+        );
+
         Shell {
             workspaces: Workspaces::new(config),
             seats: Seats::new(),

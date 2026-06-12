@@ -2069,6 +2069,13 @@ fn toml_config_changed(toml_path: &std::path::Path, state: &mut State) {
     // Propagate gap settings and window rules to the shell.
     {
         let layout = &state.common.config.layout;
+        // Keep the construction-time gap default in sync so a workspace created
+        // after this edit (e.g. on output hotplug) starts at the new gaps.
+        crate::shell::layout::tiling::set_configured_gaps_global(
+            layout.inner_gap,
+            layout.outer_gap,
+            layout.smart_gaps,
+        );
         let mut shell = state.common.shell.write();
         for workspace in shell.workspaces.spaces_mut() {
             workspace.tiling_layer.set_gaps(
