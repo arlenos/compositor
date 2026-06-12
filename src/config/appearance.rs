@@ -10,11 +10,15 @@
 //!
 //! * `[window].corner_radius`      -> `ArlenTheme::radius_s`
 //! * `[window].border_width`       -> `ArlenTheme::active_hint`
-//! * `[window].gap_inner / gap_outer / gap_smart` -> tiling layer gaps
 //! * `[window.border].focused`    -> `ArlenTheme::window_hint`
 //!   (accepts hex `#rrggbb[aa]` or the sentinel `"$accent"`)
 //! * `[window.border].unfocused`  -> currently parsed but not rendered
 //!   (Phase 4 render-loop patch; see project plan)
+//!
+//! Tiling gaps are NOT handled here. They live in `compositor.toml [layout]`
+//! as `inner_gap` / `outer_gap` / `smart_gaps` and are read and applied by
+//! `crate::config::toml_config_changed` (the shell's Settings writes the same
+//! `[layout]` keys); appearance.toml carries no gap fields.
 //!
 //! ## Pipeline
 //!
