@@ -951,6 +951,15 @@ impl CosmicWindow {
         // line from `rasterize_header` (which logs the buffer pixel
         // dims + scale) to see the full position/size picture under a
         // fractional output scale and/or output transform.
+        //
+        // The window geometry is read ONCE into a local: `self.p()`
+        // returns a non-reentrant `std::sync::MutexGuard`, so calling it
+        // repeatedly inside one statement (whose temporaries all live to
+        // the statement end) self-deadlocks. Acquire, copy out, release.
+        let win_geo = {
+            let p = self.p();
+            p.window.geometry()
+        };
         tracing::info!(
             "HEADER-POS-DEBUG output_scale={:.3} phys_loc=({},{}) logical_loc=({:.1},{:.1}) \
              width_logical={} ssd_h={} win_geo_loc=({},{}) win_geo_size=({},{})",
@@ -961,10 +970,10 @@ impl CosmicWindow {
             logical_loc.y,
             width_logical,
             SSD_HEIGHT,
-            self.p().window.geometry().loc.x,
-            self.p().window.geometry().loc.y,
-            self.p().window.geometry().size.w,
-            self.p().window.geometry().size.h,
+            win_geo.loc.x,
+            win_geo.loc.y,
+            win_geo.size.w,
+            win_geo.size.h,
         );
         let element =
             smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement::from_buffer(
