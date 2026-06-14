@@ -2234,15 +2234,13 @@ pub fn header_eligibility_pure(i: HeaderEligibilityInputs) -> bool {
 
 /// Should this window's header events (`window_header_show` /
 /// `window_header_update` / `window_header_hide`) be sent to the
-/// desktop-shell process for Svelte rendering? Since Feature 4-C
-/// moves single-window headers into the compositor, the shell only
-/// needs events for **stacks** — its WindowHeader.svelte is still
-/// the thing drawing the tab strip integrated with the window
-/// controls (Feature 3). Non-stacked single-window headers are
-/// now fully handled by `CosmicWindow::header_render_element`
-/// during the GL render pass and the shell never sees them.
+/// desktop-shell process for Svelte rendering? The compositor no
+/// longer rasterises any header itself, so the shell draws every
+/// eligible header: plain single-window titlebars and the tab strip
+/// integrated with the window controls for stacks (Feature 3). The
+/// emission gate is therefore exactly the render-eligibility policy.
 pub fn should_emit_shell_header_events(mapped: &CosmicMapped) -> bool {
-    mapped.is_stack() && should_render_window_header(mapped)
+    should_render_window_header(mapped)
 }
 
 /// Hybrid X11 header-eligibility heuristic. See blueprint Limitation 1
