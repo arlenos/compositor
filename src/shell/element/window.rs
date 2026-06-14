@@ -117,20 +117,6 @@ pub struct CosmicWindowInternal {
     last_title: Mutex<String>,
     tiled: AtomicBool,
     appearance_conf: Mutex<AppearanceConfig>,
-    /// Compositor-rendered Arlen header cache (Feature 4-C).
-    /// Holds the last-rasterised `MemoryRenderBuffer` paired with
-    /// the `HeaderVisualState` snapshot that produced it. On every
-    /// frame, `CosmicWindow::header_render_element` builds a fresh
-    /// `HeaderVisualState` from current inputs; if it equals the
-    /// cached snapshot we reuse the existing buffer — no tiny-skia
-    /// / cosmic-text work — otherwise we rasterise anew and
-    /// replace. Keeps hot-path drag rendering at GPU-blit speed.
-    pub(crate) header_cache: Mutex<
-        Option<(
-            crate::backend::render::window_header::HeaderVisualState,
-            smithay::backend::renderer::element::memory::MemoryRenderBuffer,
-        )>,
-    >,
     /// Current pointer interaction with the window-control buttons,
     /// updated by `PointerTarget::motion` / `PointerTarget::button`
     /// when `current_focus() == Some(Focus::Header)`. Read by the
@@ -297,7 +283,6 @@ impl CosmicWindow {
                 last_title: Mutex::new(String::new()),
                 tiled: AtomicBool::new(false),
                 appearance_conf: Mutex::new(appearance),
-                header_cache: Mutex::new(None),
                 header_button_interaction: Mutex::new(
                     crate::backend::render::window_header::ButtonInteraction::Idle,
                 ),
@@ -645,26 +630,10 @@ impl CosmicWindow {
             }
         }));
 
-        // SSD header rendering removed: desktop-shell renders headers via protocol.
-
-        // Feature 4-C: prepend the compositor-rasterised Arlen
-        // window header so it paints ON TOP of the client content.
-        // `elements[0]` is topmost in smithay's render order, so we
-        // insert at position 0. The header is eligible only for
-        // SSD-mode windows (the compositor reserved SSD_HEIGHT px
-        // at the top of the geometry for us); `header_render_element`
-        // short-circuits to `None` otherwise.
-        if let Some(header_element) =
-            self.header_render_element::<R>(renderer, location, scale)
-        {
-            elements.insert(
-                0,
-                CosmicWindowRenderElement::from(
-                    header_element,
-                )
-                .into(),
-            );
-        }
+        // The window header is rendered by desktop-shell via the
+        // arlen-shell-overlay `window_header_*` protocol, positioned from the
+        // `window_header_show` payload. The compositor reserves the SSD_HEIGHT
+        // strip (see `has_ssd`) but does not paint the header itself.
 
         elements.into_iter().map(C::from).collect()
     }
@@ -842,110 +811,6 @@ impl CosmicWindow {
         // next motion event will re-arm Hover if appropriate.
         *guard = ButtonInteraction::Idle;
         fired
-    }
-
-    /// Produce a single `MemoryRenderBufferRenderElement` containing
-    /// the compositor-rasterised Arlen header (Feature 4-C) at
-    /// `physical_location`. Returns `None` when this window is not
-    /// eligible for a header (CSD / stacked / fullscreen — see
-    /// `crate::shell::should_render_window_header` for the full
-    /// policy, but the authoritative eligibility check lives there
-    /// to keep the policy in one place).
-    ///
-    /// The element is produced from a cached `MemoryRenderBuffer`
-    /// keyed by a `HeaderVisualState`. Mouse motion that doesn't
-    /// change the hovered button, focus toggles that don't change
-    /// activated state, and re-renders with identical theme all
-    /// hit the cache and skip tiny-skia completely.
-    ///
-    /// `physical_location` is the output-space top-left of the
-    /// window including the 36-px header strip (i.e. the location
-    /// the caller passes to `render_elements`).
-    pub fn header_render_element<R>(
-        &self,
-        _renderer: &mut R,
-        physical_location: Point<i32, Physical>,
-        output_scale: Scale<f64>,
-    ) -> Option<
-        smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement<R>,
-    >
-    where
-        R: AsGlowRenderer + smithay::backend::renderer::ImportMem,
-        R::TextureId: Send + Clone + 'static,
-    {
-        use crate::backend::render::window_header::{
-            self as wh, ButtonVisibility, HeaderVisualState, rasterize_header,
-        };
-
-        let (title, activated, width_logical, interaction, buttons) = {
-            let p = self.p();
-            // Only windows with SSD decorations get a Arlen header
-            // (the `Shell::should_render_window_header` policy is
-            // already applied by the caller for the WAYLAND path;
-            // for X11 callers will gate via the same helper).
-            // We additionally guard locally so a late-stage state
-            // flip doesn't produce a zero-width header.
-            if !p.has_ssd(false) {
-                return None;
-            }
-            let title = p.window.title();
-            let activated = p.window.is_activated(false);
-            let geometry = p.window.geometry();
-            let width = geometry.size.w;
-            let interaction = *p.header_button_interaction.lock().unwrap();
-            // Minimize / maximize are always offered today. A
-            // future refinement can gate these on
-            // xdg_toplevel.wm_capabilities but the shell already
-            // treats them as always-on so stay consistent.
-            let buttons = ButtonVisibility { has_minimize: true, has_maximize: true };
-            (title, activated, width, interaction, buttons)
-        };
-        if width_logical <= 0 {
-            return None;
-        }
-
-        let state = HeaderVisualState {
-            width: width_logical,
-            activated,
-            title,
-            buttons,
-            interaction,
-            scale: output_scale.x,
-            focused_button: None,
-            theme_generation: wh::theme_generation(),
-        };
-
-        let buffer = {
-            let p = self.p();
-            let mut cache = p.header_cache.lock().unwrap();
-            let needs_rerasterise = match cache.as_ref() {
-                None => true,
-                Some((cached_state, _)) => cached_state != &state,
-            };
-            if needs_rerasterise {
-                let theme = crate::theme::arlen_theme();
-                let new_buffer = rasterize_header(&state, &theme);
-                *cache = Some((state.clone(), new_buffer));
-            }
-            cache.as_ref().unwrap().1.clone()
-        };
-
-        // Convert physical location to logical coordinates
-        // expected by `MemoryRenderBufferRenderElement::from_buffer`.
-        // The header sits at the window's top-left corner.
-        let logical_loc = physical_location.to_f64().to_logical(output_scale);
-        let element =
-            smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement::from_buffer(
-                _renderer,
-                (logical_loc.x, logical_loc.y),
-                &buffer,
-                None,
-                None,
-                None,
-                smithay::backend::renderer::element::Kind::Unspecified,
-            )
-            .ok();
-        element
     }
 
     /// Returns the minimum size of the window including SSD header.
