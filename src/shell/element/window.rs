@@ -930,10 +930,16 @@ impl CosmicWindow {
             cache.as_ref().unwrap().1.clone()
         };
 
-        // Convert physical location to logical coordinates
-        // expected by `MemoryRenderBufferRenderElement::from_buffer`.
-        // The header sits at the window's top-left corner.
-        let logical_loc = physical_location.to_f64().to_logical(output_scale);
+        // `MemoryRenderBufferRenderElement::from_buffer` takes its location in
+        // PHYSICAL space — the same space the window content surfaces are
+        // placed in (see `backend/render/cursor.rs`, which passes
+        // `location.to_physical(scale)`). Passing logical coordinates here fed
+        // the logical numbers in as physical: on a fractional output scale of
+        // 1.5 that put the header at physical (241,186) instead of (362,279),
+        // detaching it ~120px up and ~120px left of the window and leaving its
+        // reserved strip empty. The header sits at the window's top-left
+        // corner in physical space.
+        let phys = physical_location.to_f64();
         // Pin the element's LOGICAL size explicitly to the reserved
         // strip (`width_logical` x `SSD_HEIGHT`). The buffer is
         // rasterised in physical pixels (`logical * scale`) but tagged
@@ -961,13 +967,11 @@ impl CosmicWindow {
             p.window.geometry()
         };
         tracing::info!(
-            "HEADER-POS-DEBUG output_scale={:.3} phys_loc=({},{}) logical_loc=({:.1},{:.1}) \
+            "HEADER-POS-DEBUG output_scale={:.3} phys_loc=({},{}) \
              width_logical={} ssd_h={} win_geo_loc=({},{}) win_geo_size=({},{})",
             output_scale.x,
             physical_location.x,
             physical_location.y,
-            logical_loc.x,
-            logical_loc.y,
             width_logical,
             SSD_HEIGHT,
             win_geo.loc.x,
@@ -978,7 +982,7 @@ impl CosmicWindow {
         let element =
             smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement::from_buffer(
                 _renderer,
-                (logical_loc.x, logical_loc.y),
+                (phys.x, phys.y),
                 &buffer,
                 None,
                 None,
