@@ -415,7 +415,17 @@ pub fn rasterize_header(
     state: &HeaderVisualState,
     theme: &ArlenTheme,
 ) -> MemoryRenderBuffer {
-    let scale = state.scale.max(0.1);
+    // Rasterise at an INTEGER scale that matches the buffer's integer scale
+    // tag (`MemoryRenderBuffer::from_slice` takes an `i32` scale). The output
+    // scale may be fractional (e.g. 1.5), but if the buffer were rasterised at
+    // 1.5 while tagged `round(1.5) = 2`, the buffer's logical extent would read
+    // as `physical / 2` = 0.75x the strip. `from_buffer`'s default `src` then
+    // samples only that 0.75x region, rendering the header (and its buttons) at
+    // 75% size, top-left aligned in the strip. Rasterising at the same integer
+    // the tag uses keeps the buffer's logical extent equal to the strip, so the
+    // whole buffer is sampled and the header fills it. A slightly oversampled
+    // buffer (2x on a 1.5x output) is downscaled at display, which stays crisp.
+    let scale = state.scale.max(0.1).round().max(1.0);
     let logical_w = state.width.max(60) as f32;
     let logical_h = HEADER_LOGICAL_HEIGHT as f32;
     let pixel_w = (logical_w as f64 * scale).ceil() as u32;
