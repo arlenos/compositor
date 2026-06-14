@@ -934,6 +934,18 @@ impl CosmicWindow {
         // expected by `MemoryRenderBufferRenderElement::from_buffer`.
         // The header sits at the window's top-left corner.
         let logical_loc = physical_location.to_f64().to_logical(output_scale);
+        // Pin the element's LOGICAL size explicitly to the reserved
+        // strip (`width_logical` x `SSD_HEIGHT`). The buffer is
+        // rasterised in physical pixels (`logical * scale`) but tagged
+        // with an integer buffer scale (`scale.round()`), so on a
+        // fractional output scale (e.g. 1.5 rounds to 2) a `None` size
+        // would let `from_buffer` derive the logical size as
+        // `physical / round(scale)` — 0.75x here — shrinking the header
+        // and leaving it short of the strip. An explicit logical size
+        // renders the buffer to exactly the strip, scale-correct at any
+        // fractional scale.
+        let logical_size =
+            Size::<i32, Logical>::from((width_logical, SSD_HEIGHT));
         let element =
             smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement::from_buffer(
                 _renderer,
@@ -941,7 +953,7 @@ impl CosmicWindow {
                 &buffer,
                 None,
                 None,
-                None,
+                Some(logical_size),
                 smithay::backend::renderer::element::Kind::Unspecified,
             )
             .ok();
