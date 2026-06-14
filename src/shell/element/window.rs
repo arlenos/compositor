@@ -952,33 +952,6 @@ impl CosmicWindow {
         // fractional scale.
         let logical_size =
             Size::<i32, Logical>::from((width_logical, SSD_HEIGHT));
-        // HEADER-POS-DEBUG: the actual geometry inputs the compositor
-        // header is placed with this frame. Pair with the RENDER-DEBUG
-        // line from `rasterize_header` (which logs the buffer pixel
-        // dims + scale) to see the full position/size picture under a
-        // fractional output scale and/or output transform.
-        //
-        // The window geometry is read ONCE into a local: `self.p()`
-        // returns a non-reentrant `std::sync::MutexGuard`, so calling it
-        // repeatedly inside one statement (whose temporaries all live to
-        // the statement end) self-deadlocks. Acquire, copy out, release.
-        let win_geo = {
-            let p = self.p();
-            p.window.geometry()
-        };
-        tracing::info!(
-            "HEADER-POS-DEBUG output_scale={:.3} phys_loc=({},{}) \
-             width_logical={} ssd_h={} win_geo_loc=({},{}) win_geo_size=({},{})",
-            output_scale.x,
-            physical_location.x,
-            physical_location.y,
-            width_logical,
-            SSD_HEIGHT,
-            win_geo.loc.x,
-            win_geo.loc.y,
-            win_geo.size.w,
-            win_geo.size.h,
-        );
         let element =
             smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement::from_buffer(
                 _renderer,
