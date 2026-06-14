@@ -21,6 +21,7 @@ use crate::{
             a11y::A11yState,
             corner_radius::CornerRadiusState,
             drm::WlDrmState,
+            grid::GridManagerState,
             image_capture_source::CosmicImageCaptureSourceState,
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
@@ -294,6 +295,8 @@ pub struct Common {
     pub overlap_notify_state: OverlapNotifyState,
     pub shell_overlay_state: ShellOverlayState,
     pub titlebar_manager_state: TitlebarManagerState,
+    /// State backing the `arlen-grid-v1` terminal grid back-pane protocol.
+    pub grid_manager_state: GridManagerState,
     /// State backing the `arlen-window-attach-v1` protocol. See
     /// Feature 4 (latency-sync) groundwork. v1 keeps the bindings
     /// index dormant until the phase-2 renderer consumes it.
@@ -702,6 +705,7 @@ impl State {
         let shell_overlay_state =
             ShellOverlayState::new::<Self, _>(dh, client_has_no_security_context);
         let titlebar_manager_state = TitlebarManagerState::new(dh);
+        let grid_manager_state = GridManagerState::new(dh);
         let window_attach_state =
             crate::wayland::protocols::window_attach::WindowAttachState::new::<Self, _>(
                 dh,
@@ -872,6 +876,7 @@ impl State {
                 overlap_notify_state,
                 shell_overlay_state,
                 titlebar_manager_state,
+                grid_manager_state,
                 window_attach_state,
                 fullscreen_reveal: Default::default(),
                 super_tap_pending: false,

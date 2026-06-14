@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="arlen_grid_v1">
+  <copyright>
+    Copyright (C) 2026 Arlen OS Contributors
+    SPDX-License-Identifier: GPL-3.0-only
+  </copyright>
+
+  <description summary="Arlen terminal grid back-pane subsurface protocol">
+    This protocol lets the Arlen terminal declare a text-grid back pane that
+    the compositor composites under the app window. The terminal renders its
+    cell grid (and Kitty images) into a native Wayland subsurface placed below
+    its main webview surface; the webview is transparent where the grid shows
+    through, and opaque where a GUI block (a "DOM hole") covers it.
+
+    The grid never travels through the webview or the app's IPC: it is a
+    first-class compositor citizen. The app declares WHERE the grid lives and
+    WHICH regions the DOM owns; the compositor composites and clips the back
+    pane to match, and drives a resize handshake so the grid stays
+    pixel-aligned through resize and reflow.
+
+    Sibling of arlen-titlebar-v1: app declares WHAT, compositor decides HOW.
+  </description>
+
+  <!-- ================================================================== -->
+  <!-- Manager global: binds to a surface to get a per-window grid        -->
+  <!-- ================================================================== -->
+
+  <interface name="arlen_grid_manager_v1" version="1">
+    <description summary="factory for per-window grid back-pane interfaces">
+      Global singleton. Clients call get_grid to obtain an arlen_grid_v1
+      object tied to a specific app toplevel wl_surface.
+    </description>
+
+    <request name="get_grid">
+      <description summary="create a grid interface for a toplevel surface">
+        Creates an arlen_grid_v1 object bound to the given toplevel surface
+        (the app window). Only one grid object per surface is allowed.
+      </description>
+      <arg name="id" type="new_id" interface="arlen_grid_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+
+    <request name="destroy" type="destructor"/>
+  </interface>
+
+  <!-- ================================================================== -->
+  <!-- Per-window grid back-pane interface                                 -->
+  <!-- ================================================================== -->
+
+  <interface name="arlen_grid_v1" version="1">
+    <description summary="per-window grid back-pane declaration">
+      Bound to a single app toplevel wl_surface. The client declares the grid
+      subsurface, the region it occupies, the cell metrics, and the DOM holes;
+      the compositor composites the grid under the window and drives resize.
+    </description>
+
+    <!-- ============================================================== -->
+    <!-- Requests (client -> compositor)                                 -->
+    <!-- ============================================================== -->
+
+    <request name="set_grid_surface">
+      <description summary="designate the subsurface that carries the text grid">
+        The given wl_surface is the back-pane grid surface (a subsurface of
+        the toplevel). The compositor composites it under the app window and
+        clips it to the declared region minus the DOM holes.
+      </description>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+
+    <request name="set_region">
+      <description summary="the toplevel-relative rectangle the grid occupies">
+        Logical-pixel rectangle, relative to the toplevel surface origin,
+        that the grid back pane fills. The webview is transparent over this
+        rectangle except where a DOM hole covers it.
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+
+    <request name="set_cell_size">
+      <description summary="logical-pixel metrics of one grid cell">
+        Used by the compositor to pixel-align the grid to whole cells, so the
+        back pane never smears across a sub-cell boundary on resize or scale.
+      </description>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+
+    <request name="set_dom_holes">
+      <description summary="opaque DOM-block regions the grid leaves to the front pane">
+        A JSON array of toplevel-relative logical-pixel rectangles, each an
+        object with integer fields x, y, width and height, that the front DOM
+        pane owns (tables, images, widgets). The compositor occludes the grid
+        under these rectangles so the GUI block shows through. An empty array
+        clears all holes.
+      </description>
+      <arg name="holes_json" type="string"/>
+    </request>
+
+    <request name="ack_configure">
+      <description summary="acknowledge a compositor configure">
+        The app acks the serial of a configure event once it has reflowed the
+        grid to the offered size. The compositor only composites the grid at a
+        size the app has acked, so resize stays glitch-free.
+      </description>
+      <arg name="serial" type="uint"/>
+    </request>
+
+    <request name="destroy" type="destructor"/>
+
+    <!-- ============================================================== -->
+    <!-- Events (compositor -> client)                                   -->
+    <!-- ============================================================== -->
+
+    <event name="configure">
+      <description summary="compositor offers the grid its available pixel size">
+        Sent when the window is resized. The app reflows the grid to fit
+        width x height (logical pixels), commits the grid surface, then calls
+        ack_configure with this serial.
+      </description>
+      <arg name="serial" type="uint"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </event>
+
+  </interface>
+</protocol>
