@@ -5473,6 +5473,7 @@ where
     let swap_tree = swap_tree.flatten().filter(|_| is_active_output);
     let lt = crate::theme::arlen_theme();
     let window_hint = crate::theme::arlen_hint_rgb(&lt);
+    let unfocused_hint = crate::theme::arlen_unfocused_hint_rgb(&lt);
     let group_color = GROUP_COLOR;
 
     // render placeholder, if we are swapping to an empty workspace
@@ -5643,7 +5644,18 @@ where
                                 radius,
                                 alpha,
                                 output_scale,
-                                window_hint,
+                                // BUG-1b: the focused node (and the group
+                                // indicators) wear the accent hint; an
+                                // unfocused tiled window wears the recessed
+                                // default border colour, so the
+                                // `[window.border]` focused/unfocused
+                                // distinction actually renders instead of every
+                                // node sharing the focused hint.
+                                if data.is_group() || focused.as_ref() == Some(&node_id) {
+                                    window_hint
+                                } else {
+                                    unfocused_hint
+                                },
                             ),
                         ));
                     }

@@ -71,6 +71,20 @@ pub(crate) fn arlen_hint_rgb(lt: &arlen_theme::ArlenTheme) -> [f32; 3] {
     }
 }
 
+/// Unfocused window border color from ArlenTheme as `[r, g, b]`.
+///
+/// The focused border uses [`arlen_hint_rgb`] (`[window.border].focused`,
+/// the accent); an unfocused tiled window uses the theme's default border
+/// color so it reads as present-but-recessed rather than wearing the same
+/// accent hint as the focused window. This is the `$border` sentinel that
+/// `[window.border].unfocused` resolves to; a user-set explicit unfocused
+/// hex would need to be carried on `wm` like `window_hint`, a follow-up that
+/// touches the shared theme crate.
+pub(crate) fn arlen_unfocused_hint_rgb(lt: &arlen_theme::ArlenTheme) -> [f32; 3] {
+    let b = lt.color.border_default;
+    [b[0], b[1], b[2]]
+}
+
 /// Compose the effective theme from bundled bytes + user
 /// `theme.toml` + `appearance.toml`. Falls back to bundled
 /// defaults when the user files fail to parse — used at
