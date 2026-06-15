@@ -1687,10 +1687,16 @@ impl Common {
         self.shell.write().scratchpad_remove_dead();
         self.toplevel_info_state.refresh(&self.workspace_state);
         self.refresh_idle_inhibit();
+<<<<<<< HEAD
         self.a11y_keyboard_monitor_state.refresh();
         self.refresh_titlebar_modes();
         self.refresh_window_headers();
         self.tick_fullscreen_reveal_timer();
+=======
+        if let Some(mut a11y_keyboard_monitor) = self.dbus_state.a11y_keyboard_monitor() {
+            a11y_keyboard_monitor.refresh();
+        }
+>>>>>>> upstream/master
         self.image_copy_capture_state.cleanup();
     }
 
