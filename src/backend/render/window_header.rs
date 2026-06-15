@@ -534,10 +534,13 @@ fn draw_background(
     let mut pb = PathBuilder::new();
     let w = state.width as f32;
     let h = HEADER_LOGICAL_HEIGHT as f32;
-    // Window-header outline uses the `card` semantic radius (12px
-    // default) — it's a container, not an interactive element,
-    // so MD3 size-proportional says container > children.
-    let r = theme.effective_card();
+    // The header's top corners use `window_corners` (the window frame
+    // radius), NOT the card radius, so the headerbar and the app body
+    // below it read as ONE concentric frame with a single radius source
+    // (rounding-fix.md PR-1). It is intensity-scaled; [0] is the top-left
+    // corner, and a window's corners are uniform so it also sets the
+    // top-right. The window body reads the same `window_corners`.
+    let r = theme.effective_window_corners()[0];
 
     // Rounded-top, square-bottom path. Walks clockwise from the
     // bottom-left. When effective_card == 0 (sharp-corner user
@@ -1206,14 +1209,14 @@ mod tests {
 
     #[test]
     fn rasterize_uses_theme_radius_not_hardcoded() {
-        // Changing the theme's radius_md must change the
-        // rasterised output bytes — proves the renderer honours
-        // the token instead of silently falling back to a literal.
+        // Changing the theme's window-corner radius must drive the
+        // rasterised output — proves the header honours the frame
+        // radius token (PR-1) instead of a literal or the card radius.
         let state = stub_state(600, true);
         let mut theme_a = test_theme_dark();
-        theme_a.radius.card = 0.0;
+        theme_a.radius.window_corners = [0.0; 4];
         let mut theme_b = test_theme_dark();
-        theme_b.radius.card = 16.0;
+        theme_b.radius.window_corners = [16.0; 4];
         // MemoryRenderBuffer doesn't expose data() directly, so we
         // can't diff bytes here, but running the rasteriser with
         // different radius values must not panic and must produce
