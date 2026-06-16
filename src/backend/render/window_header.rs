@@ -1367,4 +1367,140 @@ mod tests {
         assert_eq!(dark.color.bg_shell, [0x0a as f32 / 255.0, 0x0a as f32 / 255.0, 0x0a as f32 / 255.0, 1.0]);
         assert_eq!(dark.color.bg_app,   [0x0f as f32 / 255.0, 0x0f as f32 / 255.0, 0x0f as f32 / 255.0, 1.0]);
     }
+
+    /// Render the real header through the headless render-readback harness
+    /// (Test Layer 1a) and return the RGBA8 pixels (`R,G,B,A` byte order,
+    /// `width*height*4`, no padding), or `None` when no headless GL device is
+    /// available so the caller skips instead of failing. Width `w`, scale 1.0,
+    /// so the buffer and output are `w x HEADER_LOGICAL_HEIGHT` 1:1.
+    fn render_header_rgba(state: &HeaderVisualState, theme: &ArlenTheme) -> Option<(Vec<u8>, i32, i32)> {
+        use crate::utils::render_harness::{headless_gles_renderer, render_to_rgba};
+        use smithay::backend::renderer::element::{memory::MemoryRenderBufferRenderElement, Kind};
+        use smithay::utils::Size;
+
+        let mut renderer = match headless_gles_renderer() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("window_header golden: skipping, no headless GL device: {e:#}");
+                return None;
+            }
+        };
+        let w = state.width;
+        let h = HEADER_LOGICAL_HEIGHT;
+        let buffer = rasterize_header(state, theme);
+        // Mirror `CosmicWindow::header_render_element`: the element is placed at
+        // the window's top-left in PHYSICAL space with the logical strip size
+        // pinned, so the render path under test matches what the compositor runs.
+        let element: MemoryRenderBufferRenderElement<_> =
+            MemoryRenderBufferRenderElement::from_buffer(
+                &mut renderer,
+                (0.0, 0.0),
+                &buffer,
+                None,
+                None,
+                Some(Size::<i32, smithay::utils::Logical>::from((w, h))),
+                Kind::Unspecified,
+            )
+            .expect("build header render element");
+        // Transparent clear: the header has rounded top corners, so anything
+        // outside its path must stay clear (alpha 0).
+        let pixels = render_to_rgba(&mut renderer, w, h, [0.0, 0.0, 0.0, 0.0], &[element])
+            .expect("render the header element");
+        Some((pixels, w, h))
+    }
+
+    /// Golden render test (Test Layer 1a): the real `window_header` element,
+    /// rasterised and pushed through the headless GLES offscreen-render +
+    /// `ExportMem` readback, actually paints the chrome — a flat shell-surface
+    /// drag zone, a distinct bottom border, and the button strip — and the
+    /// painted output reflects the input state (hovering Close reddens its
+    /// region). This self-verifies the compositor's titlebar render path
+    /// without a screen or Tim's metal.
+    #[test]
+    fn window_header_paints_chrome_through_the_render_harness() {
+        let theme = test_theme_dark();
+        let state = stub_state(400, true);
+        let (pixels, w, h) = match render_header_rgba(&state, &theme) {
+            Some(out) => out,
+            None => return, // no headless GL device here; skipped, not failed
+        };
+        assert_eq!(pixels.len(), (w * h * 4) as usize, "RGBA8, no padding");
+
+        let px = |x: i32, y: i32| -> [u8; 4] {
+            let i = ((y * w + x) * 4) as usize;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+
+        // 1) The drag zone (left third, middle row, clear of corners / border /
+        //    buttons) is the opaque near-black shell background. `bg_shell` is
+        //    #0a0a0a; allow a small per-channel margin for the GLES blend.
+        let drag = px(w / 4, h / 2);
+        assert!(drag[3] >= 250, "drag zone must be opaque, got alpha {}", drag[3]);
+        assert!(
+            drag[0] < 40 && drag[1] < 40 && drag[2] < 40,
+            "drag zone must be the dark shell background, got {drag:?}"
+        );
+
+        // 2) The bottom-border row differs from the drag-zone background, so
+        //    `draw_bottom_border` actually painted `border_default`.
+        let border = px(w / 4, h - 1);
+        let channel_delta = |a: [u8; 4], b: [u8; 4]| {
+            (0..3).map(|c| a[c].abs_diff(b[c]) as u32).sum::<u32>()
+        };
+        assert!(
+            channel_delta(border, drag) > 8,
+            "bottom border ({border:?}) should differ from the bg ({drag:?})"
+        );
+
+        // 3) The right button strip carries pixels that differ from the bg, so
+        //    `draw_buttons` painted the controls. Count over the rightmost
+        //    strip across the middle rows.
+        let strip_start = (w - 120).max(0);
+        let strip_diffs = |rows: std::ops::Range<i32>, px: &dyn Fn(i32, i32) -> [u8; 4]| -> u32 {
+            let mut n = 0;
+            for y in rows {
+                for x in strip_start..w {
+                    if channel_delta(px(x, y), drag) > 24 {
+                        n += 1;
+                    }
+                }
+            }
+            n
+        };
+        let idle_strip = strip_diffs(8..(h - 1), &px);
+        assert!(
+            idle_strip > 50,
+            "button strip should paint controls (got {idle_strip} differing pixels)"
+        );
+
+        // 4) State drives the pixels: hovering Close reddens its background, so
+        //    the strip diverges from the idle render. Proves the harness sees
+        //    the input state, not a constant bitmap.
+        let hover_state = HeaderVisualState {
+            interaction: ButtonInteraction::Hover(HeaderButton::Close),
+            ..stub_state(400, true)
+        };
+        let (hover_pixels, hw, _) = match render_header_rgba(&hover_state, &theme) {
+            Some(out) => out,
+            None => return,
+        };
+        let hpx = |x: i32, y: i32| -> [u8; 4] {
+            let i = ((y * hw + x) * 4) as usize;
+            [hover_pixels[i], hover_pixels[i + 1], hover_pixels[i + 2], hover_pixels[i + 3]]
+        };
+        // The close button is rightmost; its hovered red bg makes far-right
+        // pixels diverge from the idle render in the same positions.
+        let mut hover_vs_idle = 0u32;
+        for y in 8..(h - 1) {
+            for x in strip_start..w {
+                if channel_delta(hpx(x, y), px(x, y)) > 24 {
+                    hover_vs_idle += 1;
+                }
+            }
+        }
+        assert!(
+            hover_vs_idle > 20,
+            "hovering Close should change the strip pixels (got {hover_vs_idle} changed)"
+        );
+    }
 }
