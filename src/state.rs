@@ -8,10 +8,14 @@ use crate::{
         x11::X11State,
     },
     config::{CompOutputConfig, Config, ScreenFilter},
+<<<<<<< HEAD
     dbus::a11y_keyboard_monitor::A11yKeyboardMonitorState,
     dbus::app_interface::AppRegistryState,
     dbus::input_manager::InputManagerState,
     input::binding_resolver::BindingResolver,
+=======
+    dbus::DBusState,
+>>>>>>> upstream/master
     input::{PointerFocusState, gestures::GestureState},
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
@@ -37,7 +41,6 @@ use crate::{
 use anyhow::Context;
 use calloop::RegistrationToken;
 use cosmic_comp_config::output::comp::{OutputConfig, OutputState};
-use futures_executor::ThreadPool;
 use i18n_embed::{
     DesktopLanguageRequester,
     fluent::{FluentLanguageLoader, fluent_language_loader},
@@ -92,6 +95,7 @@ use smithay::{
         output::OutputManagerState,
         pointer_constraints::PointerConstraintsState,
         pointer_gestures::PointerGesturesState,
+        pointer_warp::PointerWarpManager,
         presentation::PresentationState,
         seat::WaylandFocus,
         security_context::{SecurityContext, SecurityContextState},
@@ -122,7 +126,7 @@ use smithay::{
 };
 use tracing::warn;
 
-#[cfg(feature = "systemd")]
+#[cfg(feature = "logind")]
 use std::os::fd::OwnedFd;
 
 use std::{
@@ -239,7 +243,6 @@ pub struct Common {
     pub display_handle: DisplayHandle,
     pub event_loop_handle: LoopHandle<'static, State>,
     pub event_loop_signal: LoopSignal,
-    pub async_executor: ThreadPool,
 
     pub popups: PopupManager,
     pub shell: Arc<parking_lot::RwLock<Shell>>,
@@ -316,6 +319,7 @@ pub struct Common {
     /// Populated by MenuGrab when a menu is sent to the shell.
     pub pending_menu_callbacks: HashMap<u32, Vec<crate::shell::grabs::menu::Item>>,
     pub a11y_state: A11yState,
+<<<<<<< HEAD
     pub a11y_keyboard_monitor_state: A11yKeyboardMonitorState,
     /// Registration table backing the `org.arlen.App1` D-Bus
     /// service. Shared with `input_manager_state` so focused-scope
@@ -329,6 +333,9 @@ pub struct Common {
     /// Resolver merging static TOML bindings with dynamic D-Bus ones.
     /// Consulted by the input dispatcher on every keypress.
     pub binding_resolver: BindingResolver,
+=======
+    pub dbus_state: DBusState,
+>>>>>>> upstream/master
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -343,7 +350,7 @@ pub struct Common {
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
 
-    #[cfg(feature = "systemd")]
+    #[cfg(feature = "logind")]
     pub inhibit_lid_fd: Option<OwnedFd>,
 
     pub with_xwayland: bool,
@@ -730,6 +737,7 @@ impl State {
         XWaylandKeyboardGrabState::new::<Self>(dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
         PointerConstraintsState::new::<Self>(dh);
+        PointerWarpManager::new::<Self>(dh);
         PointerGesturesState::new::<Self>(dh);
         TabletManagerState::new::<Self>(dh);
         SecurityContextState::new::<Self, _>(dh, client_has_no_security_context);
@@ -784,15 +792,9 @@ impl State {
         );
         let workspace_state = WorkspaceState::new(dh, client_not_sandboxed);
 
-        let async_executor = ThreadPool::builder().pool_size(1).create().unwrap();
-
-        if let Err(err) = crate::dbus::init(&handle, &async_executor) {
-            tracing::warn!(?err, "Failed to initialize dbus handlers");
-        }
-
         let a11y_state = A11yState::new::<State, _>(dh, client_not_sandboxed);
 
-        let a11y_keyboard_monitor_state = A11yKeyboardMonitorState::new(&async_executor);
+        let dbus_state = DBusState::init(&handle);
 
         // Start the org.arlen.InputManager1 D-Bus service and seed the
         // resolver with the bindings currently declared in TOML. The
@@ -834,7 +836,6 @@ impl State {
                 display_handle: dh.clone(),
                 event_loop_handle: handle,
                 event_loop_signal: signal,
-                async_executor,
 
                 popups: PopupManager::default(),
                 shell,
@@ -893,16 +894,20 @@ impl State {
                 xdg_foreign_state,
                 workspace_state,
                 a11y_state,
+<<<<<<< HEAD
                 a11y_keyboard_monitor_state,
                 app_registry_state,
                 input_manager_state,
                 binding_resolver,
+=======
+>>>>>>> upstream/master
                 xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+                dbus_state,
 
-                #[cfg(feature = "systemd")]
+                #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
 
                 with_xwayland,
@@ -927,7 +932,7 @@ impl State {
     }
 
     fn update_inhibitor_locks(&mut self) {
-        #[cfg(feature = "systemd")]
+        #[cfg(feature = "logind")]
         {
             use smithay::backend::session::Session;
             use tracing::{debug, error, warn};
@@ -943,7 +948,7 @@ impl State {
 
             if should_handle_lid {
                 if self.common.inhibit_lid_fd.is_none() {
-                    match crate::dbus::logind::inhibit_lid() {
+                    match crate::dbus::logind::inhibit_lid(&self.common) {
                         Ok(fd) => {
                             debug!("Inhibiting lid switch");
                             self.common.inhibit_lid_fd = Some(fd);
@@ -954,7 +959,8 @@ impl State {
                                 .iter()
                                 .find(|o| o.is_internal())
                                 .cloned();
-                            let closed = crate::dbus::logind::lid_closed().unwrap_or(false);
+                            let closed =
+                                crate::dbus::logind::lid_closed(&self.common).unwrap_or(false);
 
                             if closed {
                                 backend.disable_internal_output(

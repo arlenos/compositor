@@ -293,12 +293,28 @@ impl CosmicStack {
                 p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
                 Some((p.stack_id, idx as u32))
             }
+<<<<<<< HEAD
         };
         if let Some((stack_id, index)) = tab_event {
             self.handle.insert_idle(move |state| {
                 state.common.shell_overlay_state.send_tab_removed(stack_id, index);
             });
         }
+=======
+            let window = windows.remove(idx);
+            window.try_force_undecorated(false);
+            window.set_tiled(false);
+
+            p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+            p.previous_index
+                .lock()
+                .unwrap()
+                .take_if(|(_, idx)| *idx >= windows.len());
+        });
+        self.0
+            .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
+        self.0.force_redraw()
+>>>>>>> upstream/master
     }
 
     pub fn remove_idx(&self, idx: usize) -> Option<CosmicSurface> {
@@ -321,7 +337,15 @@ impl CosmicStack {
                 window.try_force_undecorated(false);
                 window.set_tiled(false);
 
+<<<<<<< HEAD
                 p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+=======
+            p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+            p.previous_index
+                .lock()
+                .unwrap()
+                .take_if(|(_, idx)| *idx >= windows.len());
+>>>>>>> upstream/master
 
                 (Some(window), Some((p.stack_id, idx as u32)))
             }
