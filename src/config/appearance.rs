@@ -12,8 +12,10 @@
 //! * `[window].border_width`       -> `ArlenTheme::active_hint`
 //! * `[window.border].focused`    -> `ArlenTheme::window_hint`
 //!   (accepts hex `#rrggbb[aa]` or the sentinel `"$accent"`)
-//! * `[window.border].unfocused`  -> currently parsed but not rendered
-//!   (Phase 4 render-loop patch; see project plan)
+//! * `[window.border].unfocused`  -> the unfocused tiled border renders with
+//!   the theme's default border colour (the per-node tiling render loop
+//!   landed in BUG-1b); an explicit hex is parsed but falls back to that
+//!   default until it is carried on `wm` (see the sentinel below)
 //!
 //! Tiling gaps are NOT handled here. They live in `compositor.toml [layout]`
 //! as `inner_gap` / `outer_gap` / `smart_gaps` and are read and applied by
@@ -50,8 +52,10 @@ use crate::state::State;
 pub const BORDER_FOCUSED_SENTINEL: &str = "$accent";
 
 /// Sentinel for `[window.border].unfocused` that binds the unfocused
-/// border colour to `theme.colors.border.default`. Parsed today, not
-/// rendered until the tiling render loop gets per-node border support.
+/// border colour to `theme.colors.border.default`. The per-node tiling
+/// render loop draws this unfocused border (BUG-1b); an explicit user hex
+/// is parsed but falls back to this default until it is carried on `wm`
+/// like `window_hint` (see `theme::arlen_unfocused_hint_rgb`).
 pub const BORDER_UNFOCUSED_SENTINEL: &str = "$border";
 
 /// Sentinel value that can appear in `[overrides].accent` to request a
