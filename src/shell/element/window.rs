@@ -42,8 +42,8 @@ use smithay::{
             GestureSwipeUpdateEvent, MotionEvent, PointerTarget, RelativeMotionEvent,
         },
         touch::{
-            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
-            UpEvent,
+            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
+            TouchTarget, UpEvent,
         },
     },
     output::Output,
@@ -1589,6 +1589,7 @@ impl PointerTarget<State> for CosmicWindow {
 }
 
 impl TouchTarget<State> for CosmicWindow {
+<<<<<<< HEAD
     fn down(&self, _seat: &Seat<State>, _data: &mut State, event: &DownEvent, _seq: Serial) {
         let _adjusted_loc = {
             let p = self.p();
@@ -1613,15 +1614,44 @@ impl TouchTarget<State> for CosmicWindow {
     }
 
     fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent, _seq: Serial) {
+=======
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent) {
+        let mut event = event.clone();
+        self.0.with_program(|p| {
+            event.location -= p.window.geometry().loc.to_f64();
+        });
+        TouchTarget::down(&self.0, seat, data, &event)
     }
 
-    fn orientation(
-        &self,
-        _seat: &Seat<State>,
-        _data: &mut State,
-        _event: &OrientationEvent,
-        _seq: Serial,
-    ) {
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent) {
+        TouchTarget::up(&self.0, seat, data, event)
+    }
+
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent) {
+        let mut event = event.clone();
+        event.location -= self.0.with_program(|p| p.window.geometry().loc.to_f64());
+        TouchTarget::motion(&self.0, seat, data, &event)
+    }
+
+    fn frame(&self, seat: &Seat<State>, data: &mut State, frame: FrameMarker) {
+        TouchTarget::frame(&self.0, seat, data, frame)
+    }
+
+    fn cancel(&self, seat: &Seat<State>, data: &mut State, frame: FrameMarker) {
+        TouchTarget::cancel(&self.0, seat, data, frame)
+    }
+
+    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent) {
+        TouchTarget::shape(&self.0, seat, data, event)
+>>>>>>> upstream/master
+    }
+
+    fn orientation(&self, seat: &Seat<State>, data: &mut State, event: &OrientationEvent) {
+        TouchTarget::orientation(&self.0, seat, data, event)
+    }
+
+    fn last_frame(&self, seat: &Seat<State>, data: &mut State) -> Option<FrameMarker> {
+        TouchTarget::last_frame(&self.0, seat, data)
     }
 }
 

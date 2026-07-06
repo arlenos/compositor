@@ -64,7 +64,7 @@ use smithay::{
             protocol::{wl_shm::Format as ShmFormat, wl_surface::WlSurface},
         },
     },
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size},
     wayland::{
         compositor::CompositorHandler,
         image_copy_capture::{BufferConstraints, CursorSessionRef},
@@ -751,11 +751,13 @@ impl State {
 
                     for session in cursor_sessions_for_output(&shell, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
-                            position.as_logical().to_buffer(
-                                output.current_scale().fractional_scale(),
-                                output.current_transform(),
-                                &output_geometry.size.to_f64().as_logical(),
-                            ),
+                            (position - output_geometry.loc.to_f64())
+                                .as_logical()
+                                .to_buffer(
+                                    output.current_scale().fractional_scale(),
+                                    output.current_transform(),
+                                    &output_geometry.size.to_f64().as_logical(),
+                                ),
                             self.common.clock.now(),
                         ) {
                             if session
@@ -763,8 +765,13 @@ impl State {
                                 .map(|constraint| constraint.size != geometry.size)
                                 .unwrap_or(true)
                             {
+                                let mut cursor_size = geometry.size;
+                                // Client shouldn't try to allocate 0x0 buffer
+                                if cursor_size == Size::new(0, 0) {
+                                    cursor_size = Size::new(1, 1);
+                                }
                                 session.update_constraints(BufferConstraints {
-                                    size: geometry.size,
+                                    size: cursor_size,
                                     shm: vec![ShmFormat::Argb8888],
                                     dma: None,
                                 });
@@ -787,11 +794,11 @@ impl State {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let output = seat.active_output();
-                    let geometry = output.geometry();
-                    let position = geometry.loc.to_f64()
+                    let output_geometry = output.geometry();
+                    let position = output_geometry.loc.to_f64()
                         + smithay::backend::input::AbsolutePositionEvent::position_transformed(
                             &event,
-                            geometry.size.as_logical(),
+                            output_geometry.size.as_logical(),
                         )
                         .as_global();
                     let serial = SERIAL_COUNTER.next_serial();
@@ -844,11 +851,13 @@ impl State {
                     let shell = self.common.shell.read();
                     for session in cursor_sessions_for_output(&shell, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
-                            position.as_logical().to_buffer(
-                                output.current_scale().fractional_scale(),
-                                output.current_transform(),
-                                &geometry.size.to_f64().as_logical(),
-                            ),
+                            (position - output_geometry.loc.to_f64())
+                                .as_logical()
+                                .to_buffer(
+                                    output.current_scale().fractional_scale(),
+                                    output.current_transform(),
+                                    &output_geometry.size.to_f64().as_logical(),
+                                ),
                             self.common.clock.now(),
                         ) {
                             if session
@@ -856,8 +865,13 @@ impl State {
                                 .map(|constraint| constraint.size != geometry.size)
                                 .unwrap_or(true)
                             {
+                                let mut cursor_size = geometry.size;
+                                // Client shouldn't try to allocate 0x0 buffer
+                                if cursor_size == Size::new(0, 0) {
+                                    cursor_size = Size::new(1, 1);
+                                }
                                 session.update_constraints(BufferConstraints {
-                                    size: geometry.size,
+                                    size: cursor_size,
                                     shm: vec![ShmFormat::Argb8888],
                                     dma: None,
                                 });
@@ -1742,7 +1756,7 @@ impl State {
             }
             InputEvent::Special(_) => {}
             InputEvent::SwitchToggle { event } => {
-                #[cfg(feature = "systemd")]
+                #[cfg(feature = "logind")]
                 if event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
                     let backend = self.backend.lock();
                     let output = backend
@@ -1824,9 +1838,9 @@ impl State {
                 .unwrap_or(false)
         });
 
-        self.common
-            .a11y_keyboard_monitor_state
-            .key_event(modifiers, &handle, event.state());
+        if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
+            a11y_keyboard_monitor.key_event(modifiers, &handle, event.state());
+        }
 
         // Leave move overview mode, if any modifier was released
         if let Some(Trigger::KeyboardMove(action_modifiers)) =
@@ -1986,61 +2000,54 @@ impl State {
             )));
         }
 
-        if event.state() == KeyState::Released {
-            let removed = self
-                .common
-                .a11y_keyboard_monitor_state
-                .remove_active_virtual_mod(handle.modified_sym());
-            // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
-            if removed
-                && handle.modified_sym() == Keysym::Caps_Lock
-                && (modifiers.serialized.locked & 2) != 0
+        if let Some(mut a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
+            if event.state() == KeyState::Released {
+                let removed =
+                    a11y_keyboard_monitor.remove_active_virtual_mod(handle.modified_sym());
+                // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
+                if removed
+                    && handle.modified_sym() == Keysym::Caps_Lock
+                    && (modifiers.serialized.locked & 2) != 0
+                {
+                    let seat = seat.clone();
+                    let key_code = event.key_code();
+                    self.common.event_loop_handle.insert_idle(move |state| {
+                        if let Some(keyboard) = seat.get_keyboard() {
+                            let serial = SERIAL_COUNTER.next_serial();
+                            let time = state.common.clock.now().as_millis();
+                            keyboard.input(
+                                state,
+                                key_code,
+                                KeyState::Pressed,
+                                serial,
+                                time,
+                                |_, _, _| FilterResult::<()>::Forward,
+                            );
+                            let serial = SERIAL_COUNTER.next_serial();
+                            keyboard.input(
+                                state,
+                                key_code,
+                                KeyState::Released,
+                                serial,
+                                time,
+                                |_, _, _| FilterResult::<()>::Forward,
+                            );
+                        }
+                    });
+                }
+            } else if event.state() == KeyState::Pressed
+                && a11y_keyboard_monitor.has_virtual_mod(handle.modified_sym())
             {
-                let seat = seat.clone();
-                let key_code = event.key_code();
-                self.common.event_loop_handle.insert_idle(move |state| {
-                    if let Some(keyboard) = seat.get_keyboard() {
-                        let serial = SERIAL_COUNTER.next_serial();
-                        let time = state.common.clock.now().as_millis();
-                        keyboard.input(
-                            state,
-                            key_code,
-                            KeyState::Pressed,
-                            serial,
-                            time,
-                            |_, _, _| FilterResult::<()>::Forward,
-                        );
-                        let serial = SERIAL_COUNTER.next_serial();
-                        keyboard.input(
-                            state,
-                            key_code,
-                            KeyState::Released,
-                            serial,
-                            time,
-                            |_, _, _| FilterResult::<()>::Forward,
-                        );
-                    }
-                });
+                a11y_keyboard_monitor.add_active_virtual_mod(handle.modified_sym());
+
+                tracing::debug!(
+                    "active virtual mods: {:?}",
+                    a11y_keyboard_monitor.active_virtual_mods()
+                );
+                seat.supressed_keys().add(&handle, None);
+
+                return FilterResult::Intercept(None);
             }
-        } else if event.state() == KeyState::Pressed
-            && self
-                .common
-                .a11y_keyboard_monitor_state
-                .has_virtual_mod(handle.modified_sym())
-        {
-            self.common
-                .a11y_keyboard_monitor_state
-                .add_active_virtual_mod(handle.modified_sym());
-
-            tracing::debug!(
-                "active virtual mods: {:?}",
-                self.common
-                    .a11y_keyboard_monitor_state
-                    .active_virtual_mods()
-            );
-            seat.supressed_keys().add(&handle, None);
-
-            return FilterResult::Intercept(None);
         }
 
         // Skip released events for initially surpressed keys
@@ -2067,12 +2074,10 @@ impl State {
             return FilterResult::Intercept(None);
         }
 
-        if event.state() == KeyState::Pressed
-            && (self.common.a11y_keyboard_monitor_state.has_keyboard_grab()
-                || self
-                    .common
-                    .a11y_keyboard_monitor_state
-                    .has_key_grab(modifiers, handle.modified_sym()))
+        if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor()
+            && event.state() == KeyState::Pressed
+            && (a11y_keyboard_monitor.has_keyboard_grab()
+                || a11y_keyboard_monitor.has_key_grab(modifiers, handle.modified_sym()))
         {
             let modifiers_queue = seat.modifiers_shortcut_queue();
             modifiers_queue.clear();
@@ -2655,7 +2660,7 @@ impl State {
             });
 
             if let Some((output, geometry, surface_offset)) = found {
-                let mut pos_in_element = location + surface_offset.to_f64();
+                let pos_in_element = location + surface_offset.to_f64();
                 let window_size = geometry.size.to_f64();
 
                 let is_legal = |p: Point<f64, Logical>| {
@@ -2679,29 +2684,13 @@ impl State {
                 let workspace_origin = output.geometry().loc.to_f64();
                 let origin = geometry.loc.to_f64();
 
-                if !is_legal(pos_in_element) {
-                    let original_global = pointer.current_location();
-
-                    let original_pos_in_element = Point::new(
-                        original_global.x - workspace_origin.x - origin.x,
-                        original_global.y - workspace_origin.y - origin.y,
-                    );
-
-                    let y_only_pos = Point::new(original_pos_in_element.x, pos_in_element.y);
-                    let x_only_pos = Point::new(pos_in_element.x, original_pos_in_element.y);
-
-                    if is_legal(y_only_pos) {
-                        pos_in_element = y_only_pos;
-                    } else if is_legal(x_only_pos) {
-                        pos_in_element = x_only_pos;
-                    } else {
-                        pos_in_element = original_pos_in_element;
-                    }
+                if is_legal(pos_in_element) {
+                    let x = workspace_origin.x + origin.x + pos_in_element.x;
+                    let y = workspace_origin.y + origin.y + pos_in_element.y;
+                    Some((Point::new(x, y), output.clone()))
+                } else {
+                    None
                 }
-
-                let x = workspace_origin.x + origin.x + pos_in_element.x;
-                let y = workspace_origin.y + origin.y + pos_in_element.y;
-                Some((Point::new(x, y), output.clone()))
             } else {
                 None
             }
@@ -2757,6 +2746,7 @@ impl State {
     }
 }
 
+// Output and workspace sessions for the given output
 fn cursor_sessions_for_output<'a>(
     shell: &'a Shell,
     output: &'a Output,
@@ -2765,14 +2755,9 @@ fn cursor_sessions_for_output<'a>(
         .active_space(output)
         .into_iter()
         .flat_map(|workspace| {
-            let fullscreen_cursors: Vec<_> = workspace
-                .get_fullscreen_surfaces()
-                .flat_map(|f| f.surface.cursor_sessions())
-                .collect();
             workspace
                 .cursor_sessions()
                 .into_iter()
-                .chain(fullscreen_cursors)
                 .chain(output.cursor_sessions())
         })
 }

@@ -49,8 +49,8 @@ use smithay::{
             PointerTarget, RelativeMotionEvent,
         },
         touch::{
-            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
-            UpEvent,
+            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
+            TouchTarget, UpEvent,
         },
     },
     output::Output,
@@ -66,8 +66,13 @@ use std::{
     fmt,
     hash::Hash,
     sync::{
+<<<<<<< HEAD
         Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering},
+=======
+        Arc, LazyLock, Mutex,
+        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering},
+>>>>>>> upstream/master
     },
 };
 
@@ -121,6 +126,7 @@ pub struct CosmicStackInternal {
     scroll_to_focus: AtomicBool,
     previous_keyboard: AtomicUsize,
     pointer_entered: AtomicU8,
+    touch_serial: AtomicU32,
     reenter: AtomicBool,
     potential_drag: Mutex<Option<usize>>,
     override_alive: AtomicBool,
@@ -209,6 +215,7 @@ impl CosmicStack {
                 scroll_to_focus: AtomicBool::new(false),
                 previous_keyboard: AtomicUsize::new(0),
                 pointer_entered: AtomicU8::new(0),
+                touch_serial: AtomicU32::new(0),
                 reenter: AtomicBool::new(false),
                 potential_drag: Mutex::new(None),
                 override_alive: AtomicBool::new(true),
@@ -293,12 +300,28 @@ impl CosmicStack {
                 p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
                 Some((p.stack_id, idx as u32))
             }
+<<<<<<< HEAD
         };
         if let Some((stack_id, index)) = tab_event {
             self.handle.insert_idle(move |state| {
                 state.common.shell_overlay_state.send_tab_removed(stack_id, index);
             });
         }
+=======
+            let window = windows.remove(idx);
+            window.try_force_undecorated(false);
+            window.set_tiled(false);
+
+            p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+            p.previous_index
+                .lock()
+                .unwrap()
+                .take_if(|(_, idx)| *idx >= windows.len());
+        });
+        self.0
+            .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
+        self.0.force_redraw()
+>>>>>>> upstream/master
     }
 
     pub fn remove_idx(&self, idx: usize) -> Option<CosmicSurface> {
@@ -321,7 +344,15 @@ impl CosmicStack {
                 window.try_force_undecorated(false);
                 window.set_tiled(false);
 
+<<<<<<< HEAD
                 p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+=======
+            p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+            p.previous_index
+                .lock()
+                .unwrap()
+                .take_if(|(_, idx)| *idx >= windows.len());
+>>>>>>> upstream/master
 
                 (Some(window), Some((p.stack_id, idx as u32)))
             }
@@ -1593,6 +1624,7 @@ impl PointerTarget<State> for CosmicStack {
 }
 
 impl TouchTarget<State> for CosmicStack {
+<<<<<<< HEAD
     fn down(&self, _seat: &Seat<State>, _data: &mut State, event: &DownEvent, _seq: Serial) {
         let _event = event.clone();
         let _active_window_geo = {
@@ -1613,16 +1645,47 @@ impl TouchTarget<State> for CosmicStack {
             p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
         };
         let adjusted_location = event.location - active_window_geo.loc.to_f64();
+=======
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent) {
+        let mut event = event.clone();
+        let active_window_geo = self.0.with_program(|p| {
+            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
+        });
+        event.location -= active_window_geo.loc.to_f64();
+        self.0
+            .with_program(|p| p.touch_serial.store(event.serial.into(), Ordering::Release));
+        TouchTarget::down(&self.0, seat, data, &event)
+    }
+
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent) {
+        TouchTarget::up(&self.0, seat, data, event)
+    }
+
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent) {
+        let mut event = event.clone();
+        let active_window_geo = self.0.with_program(|p| {
+            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
+        });
+        event.location -= active_window_geo.loc.to_f64();
+        TouchTarget::motion(&self.0, seat, data, &event);
+>>>>>>> upstream/master
 
         if adjusted_location.y < 0.0
             || adjusted_location.y > TAB_HEIGHT as f64
             || adjusted_location.x < 64.0
             || adjusted_location.x > (active_window_geo.size.w as f64 - 64.0)
         {
-            self.start_drag(data, seat, seq);
+            self.start_drag(
+                data,
+                seat,
+                self.0
+                    .with_program(|p| p.touch_serial.load(Ordering::Acquire))
+                    .into(),
+            );
         }
     }
 
+<<<<<<< HEAD
     fn frame(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {
         // No-op.
     }
@@ -1633,15 +1696,26 @@ impl TouchTarget<State> for CosmicStack {
 
     fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent, _seq: Serial) {
         // No-op.
+=======
+    fn frame(&self, seat: &Seat<State>, data: &mut State, frame: FrameMarker) {
+        TouchTarget::frame(&self.0, seat, data, frame)
     }
 
-    fn orientation(
-        &self,
-        _seat: &Seat<State>,
-        _data: &mut State,
-        _event: &OrientationEvent,
-        _seq: Serial,
-    ) {
+    fn cancel(&self, seat: &Seat<State>, data: &mut State, frame: FrameMarker) {
+        TouchTarget::cancel(&self.0, seat, data, frame)
+    }
+
+    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent) {
+        TouchTarget::shape(&self.0, seat, data, event)
+>>>>>>> upstream/master
+    }
+
+    fn orientation(&self, seat: &Seat<State>, data: &mut State, event: &OrientationEvent) {
+        TouchTarget::orientation(&self.0, seat, data, event)
+    }
+
+    fn last_frame(&self, seat: &Seat<State>, data: &mut State) -> Option<FrameMarker> {
+        TouchTarget::last_frame(&self.0, seat, data)
     }
 }
 

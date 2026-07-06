@@ -366,6 +366,7 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+<<<<<<< HEAD
         event: &smithay::input::touch::DownEvent,
         seq: smithay::utils::Serial,
     ) {
@@ -379,6 +380,62 @@ impl TouchGrab<State> for MenuGrab {
         _event: &smithay::input::touch::UpEvent,
         _seq: smithay::utils::Serial,
     ) {
+=======
+        event: &DownEvent,
+    ) {
+        {
+            let mut guard = self.elements.lock().unwrap();
+            let elements = &mut *guard;
+            let event_location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if data.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
+            if let Some(i) = elements.iter().position(|elem| {
+                let mut bbox = elem.iced.bbox();
+                bbox.loc = elem.position.as_logical();
+
+                bbox.contains(event_location.to_i32_round())
+            }) {
+                let element = &mut elements[i];
+
+                let new_event = DownEvent {
+                    slot: event.slot,
+                    location: event_location - element.position.as_logical().to_f64(),
+                    serial: event.serial,
+                    time: event.time,
+                };
+                if element.touch_entered.is_none() {
+                    TouchTarget::down(&element.iced, &self.seat, data, &new_event);
+                    element.touch_entered = Some(event.slot);
+                }
+            }
+        }
+        handle.down(data, None, event);
+    }
+
+    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {
+        {
+            let elements = self.elements.lock().unwrap();
+            for element in elements.iter().filter(|elem| {
+                elem.touch_entered
+                    .as_ref()
+                    .is_some_and(|slot| *slot == event.slot)
+            }) {
+                TouchTarget::up(&element.iced, &self.seat, data, event);
+            }
+        }
+>>>>>>> upstream/master
         handle.unset_grab(self, data);
     }
 
@@ -387,6 +444,7 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+<<<<<<< HEAD
         event: &smithay::input::touch::MotionEvent,
         seq: smithay::utils::Serial,
     ) {
@@ -409,6 +467,35 @@ impl TouchGrab<State> for MenuGrab {
         seq: smithay::utils::Serial,
     ) {
         handle.cancel(data, seq);
+=======
+        event: &TouchMotionEvent,
+    ) {
+        {
+            let elements = self.elements.lock().unwrap();
+            for element in elements.iter().filter(|elem| {
+                elem.touch_entered
+                    .as_ref()
+                    .is_some_and(|slot| *slot == event.slot)
+            }) {
+                TouchTarget::motion(&element.iced, &self.seat, data, event);
+            }
+        }
+        handle.motion(data, None, event);
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        handle.frame(data);
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        {
+            let mut elements = self.elements.lock().unwrap();
+            for element in elements.iter_mut() {
+                let _ = element.touch_entered.take();
+            }
+        }
+        handle.cancel(data);
+>>>>>>> upstream/master
     }
 
     fn shape(
@@ -416,9 +503,12 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &smithay::input::touch::ShapeEvent,
+<<<<<<< HEAD
         seq: smithay::utils::Serial,
+=======
+>>>>>>> upstream/master
     ) {
-        handle.shape(data, event, seq);
+        handle.shape(data, event);
     }
 
     fn orientation(
@@ -426,9 +516,12 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &smithay::input::touch::OrientationEvent,
+<<<<<<< HEAD
         seq: smithay::utils::Serial,
+=======
+>>>>>>> upstream/master
     ) {
-        handle.orientation(data, event, seq);
+        handle.orientation(data, event);
     }
 
     fn start_data(&self) -> &TouchGrabStartData<State> {

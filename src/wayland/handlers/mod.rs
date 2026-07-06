@@ -28,6 +28,7 @@ pub mod shell_overlay;
 pub mod titlebar;
 pub mod window_attach;
 pub mod pointer_constraints;
+pub mod pointer_warp;
 pub mod primary_selection;
 pub mod seat;
 pub mod security_context;
