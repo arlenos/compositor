@@ -26,7 +26,9 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
-use wayland::protocols::overlap_notify::OverlapNotifyState;
+use wayland::protocols::{
+    keyboard_layout::KeyboardLayoutState, overlap_notify::OverlapNotifyState,
+};
 
 use crate::wayland::handlers::compositor::client_compositor_state;
 
@@ -357,6 +359,7 @@ fn refresh(state: &mut State) {
     state::Common::refresh_focus(state);
     OverlapNotifyState::refresh(state);
     state.common.update_x11_stacking_order();
+    KeyboardLayoutState::refresh(state);
     state.last_refresh = LastRefresh::At(Instant::now());
 }
 pub mod event_bus;

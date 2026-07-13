@@ -4,7 +4,7 @@ edition = "2024"
 license = "GPL-3.0-only"
 name = "cosmic-comp"
 version = "1.0.0"
-rust-version = "1.90"
+rust-version = "1.93"
 
 [workspace]
 members = ["cosmic-comp-config"]
@@ -18,9 +18,13 @@ uuid = { version = "1", features = ["v7"] }
 anyhow = { version = "1.0.102", features = ["backtrace"] }
 arlen-theme = { git = "https://github.com/arlenos/arlen" }
 bitflags = "2.11.0"
+<<<<<<< HEAD
 calloop = { version = "0.14.4", features = ["executor"] }
 toml = "0.8"
 notify = "7"
+=======
+calloop = { version = "0.14.4", features = ["executor", "stream"] }
+>>>>>>> upstream/master
 cosmic-comp-config = { path = "cosmic-comp-config", features = [
     "libdisplay-info",
     "output",
@@ -33,7 +37,14 @@ cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "
 # `shortcuts::action::*` types for cosmic-shape dispatch. The
 # runtime-config functions on this crate are no longer called.
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
+<<<<<<< HEAD
 cosmic-text = { git = "https://github.com/pop-os/cosmic-text.git", features = [
+=======
+cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
+    "greeter",
+] }
+cosmic-text = { version = "0.19", features = [
+>>>>>>> upstream/master
     "shape-run-cache",
 ] }
 libdisplay-info = "0.3.0"
@@ -44,6 +55,11 @@ i18n-embed = { version = "0.16", features = [
     "desktop-requester",
 ] }
 i18n-embed-fl = "0.10"
+<<<<<<< HEAD
+=======
+iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic" }
+iced_graphics = { git = "https://github.com/pop-os/libcosmic/", features = ["geometry"] }
+>>>>>>> upstream/master
 indexmap = "2.13"
 # Night-light schedule timer needs local-time-of-day checks and
 # sunrise/sunset computation. `chrono` is only enabled with `clock`
@@ -89,10 +105,10 @@ rand = "0.10"
 clap_lex = "1.0"
 parking_lot = "0.12.5"
 logind-zbus = { version = "5.3.2", optional = true }
-futures-executor = { version = "0.3.32", features = ["thread-pool"] }
+futures-executor = { version = "0.3.32" }
 futures-util = "0.3.32"
 cgmath = "0.18.0"
-smallvec = "1.15.1"
+smallvec = "1.15.2"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
@@ -127,8 +143,13 @@ optional = true
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
+<<<<<<< HEAD
 systemd = ["libsystemd", "logind-zbus"]
 test-client = ["dep:wayland-client", "dep:wayland-protocols", "dep:tempfile"]
+=======
+logind = ["logind-zbus"]
+systemd = ["libsystemd", "logind"]
+>>>>>>> upstream/master
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
 profile-with-tracy-gpu = ["profile-with-tracy", "smithay/tracy_gpu_profiling"]
 
@@ -150,9 +171,9 @@ lto = "fat"
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
 cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [patch.crates-io]
+<<<<<<< HEAD
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "85f83ab" }
 
 [build-dependencies]
@@ -160,3 +181,6 @@ prost-build = "0.13"
 
 [dev-dependencies]
 tempfile = "3"
+=======
+smithay = { git = "https://github.com/smithay/smithay.git", rev = "efeb597" }
+>>>>>>> upstream/master
