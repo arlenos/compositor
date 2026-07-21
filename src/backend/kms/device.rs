@@ -159,12 +159,21 @@ impl fmt::Debug for InnerDevice {
 pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
     let path = gbm.dev_path();
 
+    // Stage markers at info level so a boot that hangs somewhere inside
+    // EGL init (the intermittent software-GL / llvmpipe socket-publish
+    // race - the compositor comes up but never publishes its Wayland
+    // socket, so the session boots to a black screen) leaves the exact
+    // blocking stage in the serial log. Without these the trace goes
+    // silent mid-init with no marker, so the hang site is unknowable.
+    // One handful of lines per DRM device at startup, so not noisy.
+    tracing::info!(device = ?path.as_deref().map(Path::display), "init_egl: creating EGLDisplay");
     let display = unsafe { EGLDisplay::new(gbm.clone()) }.with_context(|| {
         format!(
             "Failed to create EGLDisplay for device: {:?}",
             path.as_deref().map(Path::display)
         )
     })?;
+    tracing::info!(device = ?path.as_deref().map(Path::display), "init_egl: EGLDisplay created, resolving EGLDevice");
     let device = EGLDevice::device_for_display(&display).with_context(|| {
         format!(
             "Unable to find matching egl device for {:?}",
@@ -172,6 +181,7 @@ pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
         )
     })?;
 
+    tracing::info!(device = ?path.as_deref().map(Path::display), "init_egl: EGLDevice resolved, creating EGLContext");
     let context =
         EGLContext::new_with_priority(&display, ContextPriority::High).with_context(|| {
             format!(
@@ -180,6 +190,7 @@ pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
                 path.as_deref().map(Path::display),
             )
         })?;
+    tracing::info!(device = ?path.as_deref().map(Path::display), "init_egl: EGLContext created");
 
     Ok(EGLInternals {
         display,
