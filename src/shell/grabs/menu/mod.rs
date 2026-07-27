@@ -4,10 +4,27 @@ use std::{
 };
 
 use calloop::LoopHandle;
+<<<<<<< HEAD
 use smithay::{
     backend::renderer::{
         ImportMem, Renderer,
         element::memory::MemoryRenderBufferRenderElement,
+=======
+use cosmic::{
+    Apply as _, Task,
+    iced::{
+        Alignment, Background,
+        core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
+        widget::{self as iced_widget, Row, text::Style as TextStyle},
+    },
+    theme,
+    widget::{button, divider, icon::from_name, menu::menu_column::MenuColumn, space, text},
+};
+use smithay::{
+    backend::{
+        input::{ButtonState, TouchSlot},
+        renderer::ImportMem,
+>>>>>>> upstream/master
     },
     input::{
         Seat,
@@ -28,10 +45,20 @@ use smithay::{
 };
 
 use crate::{
+<<<<<<< HEAD
     shell::focus::target::PointerFocusTarget,
     state::State,
     utils::prelude::*,
     wayland::protocols::shell_overlay::WindowAction,
+=======
+    backend::render::element::AsGlowRenderer,
+    shell::{SeatExt, focus::target::PointerFocusTarget},
+    state::State,
+    utils::{
+        iced::{IcedElement, IcedRenderElement, Program},
+        prelude::*,
+    },
+>>>>>>> upstream/master
 };
 
 use super::{GrabStartData, ResizeEdge};
@@ -49,6 +76,7 @@ pub struct MenuGrabState {
 pub type SeatMenuGrabState = Mutex<Option<MenuGrabState>>;
 
 impl MenuGrabState {
+<<<<<<< HEAD
     /// Render elements for the menu.
     ///
     /// With the overlay protocol active, rendering is handled entirely by
@@ -56,10 +84,38 @@ impl MenuGrabState {
     pub fn render<I, R>(&self, _renderer: &mut R, _output: &Output) -> Vec<I>
     where
         R: Renderer + ImportMem,
+=======
+    pub fn render<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        push: &mut dyn FnMut(IcedRenderElement<R>),
+    ) where
+        R: AsGlowRenderer + ImportMem,
+>>>>>>> upstream/master
         R::TextureId: Send + Clone + 'static,
-        I: From<MemoryRenderBufferRenderElement<R>>,
     {
+<<<<<<< HEAD
         Vec::new()
+=======
+        let scale = output.current_scale().fractional_scale();
+        for elem in self.elements.lock().unwrap().iter() {
+            elem.iced.push_render_elements(
+                renderer,
+                elem.position
+                    .to_local(output)
+                    .as_logical()
+                    .to_physical_precise_round(scale),
+                scale.into(),
+                1.0,
+                elem.iced
+                    .with_theme(|theme| theme.cosmic().radius_s())
+                    .map(|x| x.round() as u8),
+                push,
+                None,
+            )
+        }
+>>>>>>> upstream/master
     }
 
     /// Whether the menu is positioned in screen space.
@@ -212,11 +268,319 @@ impl Item {
     }
 }
 
+<<<<<<< HEAD
 /// Active menu grab.
 ///
 /// The menu is always rendered by desktop-shell via the `arlen-shell-overlay`
 /// protocol. Pointer events are forwarded to `shell_focus` so that the
 /// desktop-shell client can detect clicks on the rendered menu.
+=======
+/// Menu that comes up when right-clicking an application header bar
+#[derive(Debug)]
+pub struct ContextMenu {
+    items: Vec<Item>,
+    selected: AtomicBool,
+    row_width: Mutex<Option<f32>>,
+}
+
+impl ContextMenu {
+    pub fn new(items: Vec<Item>) -> ContextMenu {
+        ContextMenu {
+            items,
+            selected: AtomicBool::new(false),
+            row_width: Mutex::new(None),
+        }
+    }
+
+    pub fn set_row_width(&self, width: f32) {
+        *self.row_width.lock().unwrap() = Some(width);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    ItemEntered(usize, IcedRectangle<f32>),
+    ItemPressed(usize),
+    ItemLeft(usize, IcedRectangle<f32>),
+}
+
+impl item::CursorEvents for Message {
+    fn cursor_entered(idx: usize, bounds: IcedRectangle<f32>) -> Self {
+        Message::ItemEntered(idx, bounds)
+    }
+
+    fn cursor_left(idx: usize, bounds: IcedRectangle<f32>) -> Self {
+        Message::ItemLeft(idx, bounds)
+    }
+}
+
+impl Program for ContextMenu {
+    type Message = Message;
+
+    fn update(
+        &mut self,
+        message: Self::Message,
+        loop_handle: &LoopHandle<'static, crate::state::State>,
+        last_seat: Option<&(Seat<State>, Serial)>,
+    ) -> Task<Self::Message> {
+        match message {
+            Message::ItemPressed(idx) => {
+                if let Some(Item::Entry { on_press, .. }) = self.items.get_mut(idx) {
+                    (on_press)(loop_handle);
+                    self.selected.store(true, Ordering::SeqCst);
+                }
+                // TODO: If Submenu, then also expand on "Pressed" for touch events.
+                // But right now we don't have any touch responsive menus with submenus
+            }
+            Message::ItemEntered(idx, bounds) => {
+                if let Some(Item::Submenu { items, .. }) = self.items.get_mut(idx)
+                    && let Some((seat, _)) = last_seat.cloned()
+                {
+                    let items = items.clone();
+                    let _ = loop_handle.insert_idle(move |state| {
+                        let grab_state = seat
+                            .user_data()
+                            .get::<SeatMenuGrabState>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+
+                        if let Some(grab_state) = &*grab_state {
+                            let mut elements = grab_state.elements.lock().unwrap();
+
+                            let position = elements.last().unwrap().position;
+                            let mut theme = state.common.theme.clone();
+                            theme.transparent = theme.cosmic().frosted_system_interface;
+                            let element = IcedElement::new(
+                                ContextMenu::new(items),
+                                Size::default(),
+                                state.common.event_loop_handle.clone(),
+                                theme,
+                            );
+
+                            let min_size = element.minimum_size();
+                            element.with_program(|p| {
+                                *p.row_width.lock().unwrap() = Some(min_size.w as f32);
+                            });
+                            element.resize(min_size);
+
+                            let output = seat.active_output();
+                            let position = [
+                                // to the right -> down
+                                Rectangle::new(
+                                    position
+                                        + Point::from((
+                                            bounds.width.floor() as i32,
+                                            bounds.y.ceil() as i32,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                                // to the right -> up
+                                Rectangle::new(
+                                    position
+                                        + Point::from((
+                                            bounds.width.floor() as i32,
+                                            bounds.y.ceil() as i32 + bounds.height.ceil() as i32
+                                                - min_size.h,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                                // to the left -> down
+                                Rectangle::new(
+                                    position
+                                        + Point::from((-min_size.w + 1, bounds.y.ceil() as i32)),
+                                    min_size.as_global(),
+                                ),
+                                // to the left -> up
+                                Rectangle::new(
+                                    position
+                                        + Point::from((
+                                            -min_size.w + 1,
+                                            bounds.y.ceil() as i32 + bounds.height.ceil() as i32
+                                                - min_size.h,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                            ]
+                            .iter()
+                            .rev() // preference of max_by_key is backwards
+                            .max_by_key(|rect| {
+                                output
+                                    .geometry()
+                                    .intersection(**rect)
+                                    .map(|rect| rect.size.w * rect.size.h)
+                            })
+                            .unwrap()
+                            .loc;
+                            element.output_enter(&output, element.bbox());
+                            element.set_additional_scale(*grab_state.scale.lock().unwrap());
+
+                            elements.push(Element {
+                                iced: element,
+                                position,
+                                pointer_entered: false,
+                                touch_entered: None,
+                            })
+                        }
+                    });
+                }
+            }
+            Message::ItemLeft(idx, _) => {
+                if let Some(Item::Submenu { .. }) = self.items.get_mut(idx)
+                    && let Some((seat, _)) = last_seat.cloned()
+                {
+                    let _ = loop_handle.insert_idle(move |_| {
+                        let grab_state = seat
+                            .user_data()
+                            .get::<SeatMenuGrabState>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+
+                        if let Some(grab_state) = &*grab_state {
+                            let mut elements = grab_state.elements.lock().unwrap();
+                            elements.pop();
+                        }
+                    });
+                }
+            }
+        };
+
+        Task::none()
+    }
+
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
+        let width = self
+            .row_width
+            .lock()
+            .unwrap()
+            .map(Length::Fixed)
+            .unwrap_or(Length::Shrink);
+        let mode = match width {
+            Length::Shrink => Length::Shrink,
+            _ => Length::Fill,
+        };
+
+        MenuColumn::with_children(self.items.iter().enumerate().map(|(idx, item)| {
+            match item {
+                Item::Separator => divider::horizontal::light()
+                    .class(theme::Rule::Default)
+                    .into(),
+                Item::Submenu { title, .. } => Row::with_children(vec![
+                    space::horizontal().width(16).into(),
+                    text::body(title).width(mode).into(),
+                    from_name("go-next-symbolic")
+                        .size(16)
+                        .prefer_svg(true)
+                        .icon()
+                        .into(),
+                ])
+                .spacing(8)
+                .width(width)
+                .padding([8, 16])
+                .align_y(Alignment::Center)
+                .apply(|row| item::SubmenuItem::new(row, idx))
+                .style(theme::Button::MenuItem)
+                .into(),
+                Item::Entry {
+                    title,
+                    shortcut,
+                    toggled,
+                    disabled,
+                    ..
+                } => {
+                    let mut components = vec![
+                        if *toggled {
+                            from_name("object-select-symbolic")
+                                .size(16)
+                                .prefer_svg(true)
+                                .icon()
+                                .class(theme::Svg::custom(|theme| iced_widget::svg::Style {
+                                    color: Some(theme.cosmic().accent.base.into()),
+                                }))
+                                .into()
+                        } else {
+                            space::horizontal().width(16).into()
+                        },
+                        text::body(title)
+                            .width(mode)
+                            .class(if *disabled {
+                                theme::Text::Custom(|theme| {
+                                    let mut color = theme.cosmic().background(false).component.on;
+                                    color.alpha *= 0.5;
+                                    TextStyle {
+                                        color: Some(color.into()),
+                                        ..Default::default()
+                                    }
+                                })
+                            } else {
+                                theme::Text::Default
+                            })
+                            .into(),
+                        space::horizontal().width(16).into(),
+                    ];
+                    if let Some(shortcut) = shortcut.as_ref() {
+                        components.push(
+                            text::body(shortcut)
+                                .align_x(Horizontal::Right)
+                                .width(Length::Shrink)
+                                .class(theme::Text::Custom(|theme| {
+                                    let mut color = theme.cosmic().background(false).component.on;
+                                    color.alpha *= 0.75;
+                                    TextStyle {
+                                        color: Some(color.into()),
+                                        ..Default::default()
+                                    }
+                                }))
+                                .into(),
+                        );
+                    }
+
+                    Row::with_children(components)
+                        .spacing(8)
+                        .width(mode)
+                        .align_y(Alignment::Center)
+                        .apply(button::custom)
+                        .width(width)
+                        .padding([8, 16])
+                        .on_press_maybe((!disabled).then_some(Message::ItemPressed(idx)))
+                        .class(theme::Button::MenuItem)
+                        .into()
+                }
+            }
+        }))
+        .width(Length::Shrink)
+        .apply(iced_widget::container)
+        .padding(1)
+        .class(theme::Container::custom(|theme| {
+            let cosmic = theme.cosmic();
+            let component = &cosmic.background(theme.cosmic().frosted_windows).component;
+            iced_widget::container::Style {
+                snap: true,
+                icon_color: Some(cosmic.accent.base.into()),
+                text_color: Some(component.on.into()),
+                background: Some(Background::Color(component.base.into())),
+                border: Border {
+                    radius: cosmic.radius_s().into(),
+                    width: 1.0,
+                    color: component.divider.into(),
+                },
+                shadow: Default::default(),
+            }
+        }))
+        .width(Length::Shrink)
+        .into()
+    }
+}
+
+pub struct Element {
+    iced: IcedElement<ContextMenu>,
+    position: Point<i32, Global>,
+    pointer_entered: bool,
+    touch_entered: Option<TouchSlot>,
+}
+
+>>>>>>> upstream/master
 pub struct MenuGrab {
     start_data: GrabStartData,
     seat: Seat<State>,
@@ -232,8 +596,66 @@ impl PointerGrab<State> for MenuGrab {
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &PointerMotionEvent,
     ) {
+<<<<<<< HEAD
         // Forward pointer events to desktop-shell so it can handle menu interaction.
         handle.motion(state, self.shell_focus.clone(), event);
+=======
+        {
+            let mut guard = self.elements.lock().unwrap();
+            let elements = &mut *guard;
+            let event_location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if state.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
+            if let Some(i) = elements.iter().position(|elem| {
+                let mut bbox = elem.iced.bbox();
+                bbox.loc = elem.position.as_logical();
+
+                bbox.contains(event_location.to_i32_floor())
+            }) {
+                let element = &mut elements[i];
+
+                let new_event = PointerMotionEvent {
+                    location: event_location - element.position.as_logical().to_f64(),
+                    serial: event.serial,
+                    time: event.time,
+                };
+                if !element.pointer_entered {
+                    PointerTarget::enter(&element.iced, &self.seat, state, &new_event);
+                    element.pointer_entered = true;
+                } else {
+                    PointerTarget::motion(&element.iced, &self.seat, state, &new_event);
+                }
+            } else {
+                elements
+                    .iter_mut()
+                    .filter(|element| element.pointer_entered)
+                    .skip(1)
+                    .for_each(|element| {
+                        PointerTarget::leave(
+                            &element.iced,
+                            &self.seat,
+                            state,
+                            event.serial,
+                            event.time,
+                        );
+                        element.pointer_entered = false;
+                    })
+            }
+        }
+        handle.motion(state, None, event);
+>>>>>>> upstream/master
     }
 
     fn relative_motion(
@@ -366,6 +788,7 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+<<<<<<< HEAD
         event: &smithay::input::touch::DownEvent,
         seq: smithay::utils::Serial,
     ) {
@@ -379,6 +802,62 @@ impl TouchGrab<State> for MenuGrab {
         _event: &smithay::input::touch::UpEvent,
         _seq: smithay::utils::Serial,
     ) {
+=======
+        event: &DownEvent,
+    ) {
+        {
+            let mut guard = self.elements.lock().unwrap();
+            let elements = &mut *guard;
+            let event_location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if data.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
+            if let Some(i) = elements.iter().position(|elem| {
+                let mut bbox = elem.iced.bbox();
+                bbox.loc = elem.position.as_logical();
+
+                bbox.contains(event_location.to_i32_floor())
+            }) {
+                let element = &mut elements[i];
+
+                let new_event = DownEvent {
+                    slot: event.slot,
+                    location: event_location - element.position.as_logical().to_f64(),
+                    serial: event.serial,
+                    time: event.time,
+                };
+                if element.touch_entered.is_none() {
+                    TouchTarget::down(&element.iced, &self.seat, data, &new_event);
+                    element.touch_entered = Some(event.slot);
+                }
+            }
+        }
+        handle.down(data, None, event);
+    }
+
+    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {
+        {
+            let elements = self.elements.lock().unwrap();
+            for element in elements.iter().filter(|elem| {
+                elem.touch_entered
+                    .as_ref()
+                    .is_some_and(|slot| *slot == event.slot)
+            }) {
+                TouchTarget::up(&element.iced, &self.seat, data, event);
+            }
+        }
+>>>>>>> upstream/master
         handle.unset_grab(self, data);
     }
 
@@ -387,6 +866,7 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+<<<<<<< HEAD
         event: &smithay::input::touch::MotionEvent,
         seq: smithay::utils::Serial,
     ) {
@@ -409,6 +889,35 @@ impl TouchGrab<State> for MenuGrab {
         seq: smithay::utils::Serial,
     ) {
         handle.cancel(data, seq);
+=======
+        event: &TouchMotionEvent,
+    ) {
+        {
+            let elements = self.elements.lock().unwrap();
+            for element in elements.iter().filter(|elem| {
+                elem.touch_entered
+                    .as_ref()
+                    .is_some_and(|slot| *slot == event.slot)
+            }) {
+                TouchTarget::motion(&element.iced, &self.seat, data, event);
+            }
+        }
+        handle.motion(data, None, event);
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        handle.frame(data);
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        {
+            let mut elements = self.elements.lock().unwrap();
+            for element in elements.iter_mut() {
+                let _ = element.touch_entered.take();
+            }
+        }
+        handle.cancel(data);
+>>>>>>> upstream/master
     }
 
     fn shape(
@@ -416,9 +925,12 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &smithay::input::touch::ShapeEvent,
+<<<<<<< HEAD
         seq: smithay::utils::Serial,
+=======
+>>>>>>> upstream/master
     ) {
-        handle.shape(data, event, seq);
+        handle.shape(data, event);
     }
 
     fn orientation(
@@ -426,9 +938,12 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &smithay::input::touch::OrientationEvent,
+<<<<<<< HEAD
         seq: smithay::utils::Serial,
+=======
+>>>>>>> upstream/master
     ) {
-        handle.orientation(data, event, seq);
+        handle.orientation(data, event);
     }
 
     fn start_data(&self) -> &TouchGrabStartData<State> {
