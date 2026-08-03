@@ -16,7 +16,7 @@ use smithay::{
 };
 
 use anyhow::{Context, Result};
-use state::{LastRefresh, State};
+use state::{BackendData, LastRefresh, State};
 use std::{
     env,
     ffi::OsString,
@@ -26,7 +26,9 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
-use wayland::protocols::overlap_notify::OverlapNotifyState;
+use wayland::protocols::{
+    keyboard_layout::KeyboardLayoutState, overlap_notify::OverlapNotifyState,
+};
 
 use crate::wayland::handlers::compositor::client_compositor_state;
 
@@ -79,11 +81,8 @@ impl State {
                 warn!(?err, "Failed to setup cosmic-session communication");
             }
 
-            let mut args = env::args().skip(1);
-            self.common.kiosk_child = if let Some(exec) = args.next() {
+            self.common.kiosk_child = if let Some(mut command) = self.kiosk_command.take() {
                 // Run command in kiosk mode
-                let mut command = process::Command::new(&exec);
-                command.args(args);
                 command.envs(
                     session::get_env(&self.common).expect("WAYLAND_DISPLAY should be valid UTF-8"),
                 );
@@ -94,7 +93,7 @@ impl State {
                     })
                 };
 
-                info!("Running {:?}", exec);
+                info!("Running {:?}", command.get_program());
                 command
                     .spawn()
                     .map_err(|err| {
@@ -113,8 +112,10 @@ impl State {
 pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     let raw_args = RawArgs::from_args();
     let mut cursor = raw_args.cursor();
+    raw_args.next_os(&mut cursor);
     let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
 
+    let mut kiosk_command = None;
     let mut with_xwayland = true;
     // Parse the arguments
     while let Some(arg) = raw_args.next_os(&mut cursor) {
@@ -135,7 +136,11 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
                 );
                 return Ok(());
             }
-            _ => {}
+            _ => {
+                let mut cmd = process::Command::new(arg);
+                cmd.args(raw_args.remaining(&mut cursor));
+                kiosk_command = Some(cmd);
+            }
         }
     }
 
@@ -189,6 +194,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         event_loop.handle(),
         event_loop.get_signal(),
         with_xwayland,
+        kiosk_command,
     );
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;
@@ -242,19 +248,17 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
                 // Kiosk child exited with status
                 Ok(Some(exit_status)) => {
                     info!("Command exited with status {:?}", exit_status);
-                    match exit_status.code() {
-                        // Exiting with the same status as the kiosk child
-                        Some(code) => process::exit(code),
-                        // The kiosk child exited with signal, exiting with error
-                        None => process::exit(1),
-                    }
+                    // Stop cleanly so surface threads are joined before exit() (signal -> 1).
+                    state.common.kiosk_exit_code = Some(exit_status.code().unwrap_or(1));
+                    state.common.should_stop = true;
                 }
                 // Command still running
                 Ok(None) => {}
                 // Kiosk child disappeared, exiting with error
                 Err(err) => {
                     warn!(?err, "Failed to wait for command");
-                    process::exit(1);
+                    state.common.kiosk_exit_code = Some(1);
+                    state.common.should_stop = true;
                 }
             }
         }
@@ -265,9 +269,31 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         let _ = child.kill();
     }
 
+    let kiosk_exit_code = state.common.kiosk_exit_code;
+
+    // Join surface threads before exit() so no thread is mid-eglCreateSync when
+    // Mesa's atexit handlers run and corrupt the heap (issue #2375). Safe here
+    // because the event loop has stopped; an unconditional join in Surface::Drop
+    // would instead deadlock against apply_config_for_outputs.
+    if let BackendData::Kms(kms) = &mut state.backend {
+        // Release master first so the surface drop path skips its blocking commit.
+        for device in kms.drm_devices.values_mut() {
+            device.drm.pause();
+        }
+        for device in kms.drm_devices.values_mut() {
+            for (_, surface) in device.inner.surfaces.drain() {
+                surface.drop_and_join();
+            }
+        }
+    }
+
     // drop eventloop & state before logger
     std::mem::drop(event_loop);
     std::mem::drop(state);
+
+    if let Some(code) = kiosk_exit_code {
+        process::exit(code);
+    }
 
     Ok(())
 }
@@ -357,6 +383,7 @@ fn refresh(state: &mut State) {
     state::Common::refresh_focus(state);
     OverlapNotifyState::refresh(state);
     state.common.update_x11_stacking_order();
+    KeyboardLayoutState::refresh(state);
     state.last_refresh = LastRefresh::At(Instant::now());
 }
 pub mod event_bus;
