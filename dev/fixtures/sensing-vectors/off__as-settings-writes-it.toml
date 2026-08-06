@@ -1,0 +1,3 @@
+# Sensing master switches. Off subtracts from every app at once and is
+# enforced where the capability is exercised, not in the settings UI.
+screen_capture = false

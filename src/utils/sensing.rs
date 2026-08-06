@@ -158,3 +158,46 @@ screen_capture = false
         );
     }
 }
+
+/// Where the shared vector table lives, relative to this crate.
+const VECTOR_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/dev/fixtures/sensing-vectors");
+
+#[cfg(test)]
+mod vector_tests {
+    use super::*;
+
+    /// The same table Settings and the xdg portal answer, copied into this
+    /// repository because a separate repo cannot read theirs. Copying the
+    /// predicate was the right call over a cross-repo release dependency for four
+    /// lines; what stops the copies diverging is that all three answer this table,
+    /// and `dev/scripts/check-sensing-vectors.sh` in the Arlen tree compares the
+    /// two directories wherever both are checked out.
+    #[test]
+    fn every_reader_agrees_with_the_shared_vector_table() {
+        let dir = std::path::Path::new(VECTOR_DIR);
+        let entries: Vec<_> = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("vector table missing at {}: {e}", dir.display()))
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
+            .collect();
+        assert!(entries.len() >= 12, "the table lost cases: {} left", entries.len());
+
+        for entry in entries {
+            let path = entry.path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let (want, _) = name
+                .split_once("__")
+                .unwrap_or_else(|| panic!("vector {name} is not named <expected>__<case>.toml"));
+            let text = std::fs::read_to_string(&path).unwrap();
+            let got = read_key(&text, "screen_capture");
+            let expected = match want {
+                "off" => Reading::Off,
+                "on" => Reading::On,
+                "not-stated" => Reading::NotStated,
+                "unreadable" => Reading::Unreadable,
+                other => panic!("vector {name} claims an answer nobody defines: {other}"),
+            };
+            assert_eq!(got, expected, "{name}");
+        }
+    }
+}
