@@ -12,6 +12,14 @@
 //! + `ExportMem`; this module wraps the same calls behind a renderer that is
 //! constructed headlessly (no DRM master, no winit window) so a test can drive
 //! it directly.
+//!
+//! **Not bound by the sensing master switch, and this is the carve-out rather
+//! than an exemption.** The switch binds a client asking for pixels; this builds
+//! its own renderer against an EGL device with no display server, no session and
+//! no client, so there is no screen for a capture to be of. Binding it would stop
+//! CI from rendering a titlebar into a buffer, which protects nobody. The paths
+//! that ARE bound, from the same search: the `ext-image-copy-capture-v1` handler
+//! (`wayland::handlers::image_copy_capture`) and `utils::screenshot`.
 
 use std::path::Path;
 

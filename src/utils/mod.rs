@@ -9,4 +9,5 @@ pub mod quirks;
 pub mod render_harness;
 pub mod rlimit;
 pub mod screenshot;
+pub mod sensing;
 pub mod tween;

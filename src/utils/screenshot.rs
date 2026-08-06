@@ -22,6 +22,18 @@ use crate::{
 };
 
 pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
+    // The second path to the compositor's pixels, and the one the enumeration was
+    // written to catch: reached from the window context menu, which a client
+    // drives over `arlen-shell-overlay`. A master switch that stopped the capture
+    // protocols but left a menu entry that writes a PNG would be a switch in name.
+    //
+    // Bound at the entry rather than around the readback so nothing is rendered
+    // offscreen either. The carve-out is the compositor drawing frames to a
+    // screen, which is not capture; this is a client asking for pixels.
+    if crate::utils::sensing::screen_capture_is_off() {
+        return;
+    }
+
     fn render_window<R>(renderer: &mut R, window: &CosmicSurface) -> anyhow::Result<()>
     where
         R: Renderer + ImportAll + Offscreen<GlesRenderbuffer> + ExportMem,

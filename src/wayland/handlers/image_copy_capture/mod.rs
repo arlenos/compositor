@@ -268,6 +268,25 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn frame(&mut self, session: &SessionRef, frame: Frame) {
+        // The sensing master switch, checked here rather than at `new_session`
+        // for the same reason the portal checks at Start rather than
+        // CreateSession: the intent is "off, right now", so a session opened
+        // while capture was allowed must stop delivering the moment it is not.
+        //
+        // The capture globals already sit behind `client_not_sandboxed`, which is
+        // a different question and no substitute - that filter asks who may speak
+        // the protocol, this asks whether the capability is live at all, and the
+        // switch exists to bind principals that are trusted.
+        //
+        // The other paths yielding these pixels, found by searching this tree for
+        // capture globals, screencopy and offscreen readback rather than by
+        // recalling which the feature was written against:
+        // `utils::screenshot::screenshot_window` (the window context menu) and
+        // `utils::render_harness` (tests, which set the switch on explicitly).
+        if crate::utils::sensing::screen_capture_is_off() {
+            frame.fail(CaptureFailureReason::Stopped);
+            return;
+        }
         match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
@@ -294,6 +313,13 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn cursor_frame(&mut self, session: &CursorSessionRef, frame: Frame) {
+        // Bound with the frames it accompanies. A cursor shape alone leaks little,
+        // but a switch with an exception is a switch someone routes around, and a
+        // cursor session without frames is useless anyway.
+        if crate::utils::sensing::screen_capture_is_off() {
+            frame.fail(CaptureFailureReason::Stopped);
+            return;
+        }
         if !session.has_cursor() {
             frame.success(Transform::Normal, Vec::new(), self.common.clock.now());
             return;
