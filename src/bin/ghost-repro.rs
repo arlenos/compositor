@@ -12,10 +12,10 @@
 //! the desktop background if compositing is correct, the block's own colour if the
 //! ghost is real.
 //!
-//!     WAYLAND_DISPLAY=wayland-1 ghost-repro          # toplevel, shrink 600x600 -> 200x200
-//!     WAYLAND_DISPLAY=wayland-1 ghost-repro unmap    # toplevel, then a null buffer
-//!     WAYLAND_DISPLAY=wayland-1 ghost-repro layer    # layer surface, then a null buffer
-//!     WAYLAND_DISPLAY=wayland-1 ghost-repro layer 60000   # positive control: hold it up
+//!     ghost-repro                 # layer surface, then a null buffer (the default)
+//!     ghost-repro layer 60000     # the same, held up: the positive control
+//!     ghost-repro toplevel        # xdg toplevel, then a null buffer
+//!     ghost-repro shrink          # xdg toplevel, 600x600 -> 200x200
 //!
 //! The `layer` mode is the one that matches the report, which says "every shell
 //! **overlay**" - overlays are layer surfaces. The toplevel modes came first and
@@ -200,10 +200,15 @@ enum Mode {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Layer is the default because of how this reaches the VM: the boot harness
+    // launches a verify app through the SMBIOS SKU, which is sanitised to a bare
+    // binary name and deliberately carries no arguments, so whatever runs with no
+    // arguments is what gets tested against KMS. That should be the case under
+    // suspicion, not the one documented above as testing nothing.
     let mode = match std::env::args().nth(1).as_deref() {
-        Some("unmap") => Mode::Unmap,
-        Some("layer") => Mode::Layer,
-        _ => Mode::Shrink,
+        Some("shrink") => Mode::Shrink,
+        Some("toplevel") | Some("unmap") => Mode::Unmap,
+        _ => Mode::Layer,
     };
 
     let conn = Connection::connect_to_env()?;
@@ -268,10 +273,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // clean shot after the change proves nothing unless the same harness has been
     // shown to photograph the block when it IS there, and this test is otherwise
     // one that cannot fail.
+    // The no-argument default is long on purpose, for the same reason: in the VM the
+    // only control the harness has is WHEN it screenshots. A 25s paint followed by an
+    // unmap means one boot at --wait 20 photographs the block (the control) and one at
+    // --wait 40 photographs what is left (the test), from the same binary, without ever
+    // passing it an argument. On the host, where arguments work, pass one.
     let hold_ms: u64 = std::env::args()
         .nth(2)
         .and_then(|a| a.parse().ok())
-        .unwrap_or(1500);
+        .unwrap_or(25_000);
     std::thread::sleep(Duration::from_millis(hold_ms));
     eprintln!("ghost-repro: {BIG}x{BIG} painted, held {hold_ms}ms");
 
