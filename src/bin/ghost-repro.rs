@@ -12,6 +12,21 @@
 //! the desktop background if compositing is correct, the block's own colour if the
 //! ghost is real.
 //!
+//! # Building and running it
+//!
+//! The Wayland client crates are optional, so a plain `cargo build --bin
+//! ghost-repro` fails with a page of unresolved imports that reads like a
+//! regression and is not one:
+//!
+//! ```text
+//! cargo build --bin ghost-repro --features test-client
+//! just screenshot-nested /tmp/ghost.png target/debug/ghost-repro partial 1200
+//! ```
+//!
+//! Pass the hold on the host. Without it the default below is 25 seconds and the
+//! capture lands on the block rather than on what replaced it, which looks like
+//! the ghost failing to reproduce.
+//!
 //!     ghost-repro                 # layer surface, then a null buffer (the default)
 //!     ghost-repro layer 60000     # the same, held up: the positive control
 //!     ghost-repro toplevel        # xdg toplevel, then a null buffer
