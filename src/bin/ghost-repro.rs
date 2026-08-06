@@ -16,6 +16,7 @@
 //!     ghost-repro layer 60000     # the same, held up: the positive control
 //!     ghost-repro toplevel        # xdg toplevel, then a null buffer
 //!     ghost-repro shrink          # xdg toplevel, 600x600 -> 200x200
+//!     ghost-repro partial         # layer surface, repaint half, damage half
 //!
 //! The `layer` mode is the one that matches the report, which says "every shell
 //! **overlay**" - overlays are layer surfaces. The toplevel modes came first and
@@ -56,6 +57,15 @@ const BIG: i32 = 600;
 const SMALL: i32 = 200;
 /// Opaque magenta in ARGB8888, a colour the theme never produces.
 const FILL: u32 = 0xFFFF00FF;
+/// The colour the second frame puts where the first had magenta. Distinct from both
+/// the fill and the desktop, so the readback says which frame the pixels came from
+/// rather than merely that they changed.
+/// Pure green: it has to be far from the desktop grey as well as from the fill,
+/// because a readback that tolerates a few levels will otherwise classify the
+/// background as the new content and report a pass. That happened once already.
+const DARK: u32 = 0xFF00FF00;
+/// What the second frame paints in the half it DOES damage.
+const LIVE: u32 = 0xFF0080FF;
 
 struct App {
     compositor: Option<WlCompositor>,
@@ -197,6 +207,45 @@ enum Mode {
     Unmap,
     /// Layer surface, then a null buffer. The overlay case.
     Layer,
+    /// Layer surface of a fixed size that repaints only part of itself and reports
+    /// damage for only that part. This is the shape the waypointer ghost actually
+    /// has: a panel whose content shrank between two frames, leaving the strip it
+    /// vacated showing the earlier frame.
+    ///
+    /// Read the result carefully, because the obvious reading is backwards. A
+    /// compositor is entitled to re-upload only the damaged region; the protocol
+    /// puts the duty to report damage on the client. So a stale strip here means the
+    /// compositor is behaving correctly and an under-reporting client is the fault,
+    /// while a cleared strip means damage is not what governs the region and the
+    /// ghost has some other cause.
+    Partial,
+}
+
+/// A buffer whose top `split` rows are `top` and whose remainder is `bottom`. This
+/// models a panel that shrank: the same surface, the same size, new content in part
+/// of it.
+fn split_buffer(
+    shm: &WlShm,
+    qh: &QueueHandle<App>,
+    width: i32,
+    height: i32,
+    split: i32,
+    top: u32,
+    bottom: u32,
+) -> Result<WlBuffer, Box<dyn std::error::Error>> {
+    let stride = width * 4;
+    let size = (stride * height) as usize;
+
+    let mut file = tempfile::tempfile()?;
+    let top_row = top.to_ne_bytes().repeat(width as usize);
+    let bottom_row = bottom.to_ne_bytes().repeat(width as usize);
+    for y in 0..height {
+        file.write_all(if y < split { &top_row } else { &bottom_row })?;
+    }
+    file.flush()?;
+
+    let pool = shm.create_pool(file.as_fd(), size as i32, qh, ());
+    Ok(pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ()))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -207,6 +256,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // suspicion, not the one documented above as testing nothing.
     let mode = match std::env::args().nth(1).as_deref() {
         Some("shrink") => Mode::Shrink,
+        Some("partial") => Mode::Partial,
         Some("toplevel") | Some("unmap") => Mode::Unmap,
         _ => Mode::Layer,
     };
@@ -230,7 +280,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // roles have no common trait worth inventing, so each arm keeps its own binding.
     let mut _layer_role = None;
     let mut _xdg_role = None;
-    if mode == Mode::Layer {
+    if mode == Mode::Layer || mode == Mode::Partial {
         let layer_shell = state.layer_shell.clone().ok_or("no zwlr_layer_shell_v1")?;
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
@@ -285,7 +335,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::sleep(Duration::from_millis(hold_ms));
     eprintln!("ghost-repro: {BIG}x{BIG} painted, held {hold_ms}ms");
 
-    if mode != Mode::Shrink {
+    if mode == Mode::Partial {
+        // Same surface, same size, new buffer: magenta on top, dark below. Damage
+        // covers only the top half, which is the under-report being modelled.
+        let split = BIG / 2;
+        // Three colours, not two. If the damaged half also came up magenta there
+        // would be no way to tell "the compositor kept the old pixels below" from
+        // "the compositor ignored the commit entirely", and those have different
+        // culprits. Blue on top proves the new buffer was taken.
+        let next = split_buffer(&shm, &qh, BIG, BIG, split, LIVE, DARK)?;
+        surface.attach(Some(&next), 0, 0);
+        surface.damage_buffer(0, 0, BIG, split);
+        surface.commit();
+        eprintln!(
+            "ghost-repro: frame 2 is blue above {split} and green below, damage covers \
+             only the top; blue on screen means the buffer was taken, and magenta \
+             below means the undamaged half kept frame 1"
+        );
+    } else if mode != Mode::Shrink {
         // The overlay case: the surface stays alive and keeps its role, it just
         // stops presenting. This is what a hidden shell window does.
         surface.attach(None, 0, 0);
