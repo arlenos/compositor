@@ -12,8 +12,17 @@
 //! the desktop background if compositing is correct, the block's own colour if the
 //! ghost is real.
 //!
-//!     WAYLAND_DISPLAY=wayland-1 ghost-repro          # shrink: 600x600 -> 200x200
-//!     WAYLAND_DISPLAY=wayland-1 ghost-repro unmap    # map, then attach a null buffer
+//!     WAYLAND_DISPLAY=wayland-1 ghost-repro          # toplevel, shrink 600x600 -> 200x200
+//!     WAYLAND_DISPLAY=wayland-1 ghost-repro unmap    # toplevel, then a null buffer
+//!     WAYLAND_DISPLAY=wayland-1 ghost-repro layer    # layer surface, then a null buffer
+//!     WAYLAND_DISPLAY=wayland-1 ghost-repro layer 60000   # positive control: hold it up
+//!
+//! The `layer` mode is the one that matches the report, which says "every shell
+//! **overlay**" - overlays are layer surfaces. The toplevel modes came first and
+//! answered a narrower question: `unmap` comes back clean, so the generic "a
+//! surface stops presenting and the compositor repaints" path is not at fault, and
+//! `shrink` turns out to test nothing here because this is a tiling compositor and
+//! the layout owns toplevel geometry, so a smaller buffer vacates no region.
 //!
 //! The colour is deliberately saturated magenta, which appears nowhere in the
 //! theme, so a pixel readback can attribute it without ambiguity.
@@ -38,6 +47,10 @@ use wayland_protocols::xdg::shell::client::{
     xdg_toplevel::{self, XdgToplevel},
     xdg_wm_base::{self, XdgWmBase},
 };
+use wayland_protocols_wlr::layer_shell::v1::client::{
+    zwlr_layer_shell_v1::{Layer, ZwlrLayerShellV1},
+    zwlr_layer_surface_v1::{self, ZwlrLayerSurfaceV1},
+};
 
 const BIG: i32 = 600;
 const SMALL: i32 = 200;
@@ -48,6 +61,7 @@ struct App {
     compositor: Option<WlCompositor>,
     shm: Option<WlShm>,
     wm_base: Option<XdgWmBase>,
+    layer_shell: Option<ZwlrLayerShellV1>,
     configured: bool,
 }
 
@@ -65,6 +79,9 @@ impl Dispatch<WlRegistry, ()> for App {
                 "wl_compositor" => state.compositor = Some(registry.bind(name, version.min(4), qh, ())),
                 "wl_shm" => state.shm = Some(registry.bind(name, version.min(1), qh, ())),
                 "xdg_wm_base" => state.wm_base = Some(registry.bind(name, version.min(2), qh, ())),
+                "zwlr_layer_shell_v1" => {
+                    state.layer_shell = Some(registry.bind(name, version.min(4), qh, ()))
+                }
                 _ => {}
             }
         }
@@ -85,6 +102,23 @@ ignore_events! {
     WlShmPool => wayland_client::protocol::wl_shm_pool::Event,
     WlBuffer => wayland_client::protocol::wl_buffer::Event,
     WlSurface => wayland_client::protocol::wl_surface::Event,
+    ZwlrLayerShellV1 => wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Event,
+}
+
+impl Dispatch<ZwlrLayerSurfaceV1, ()> for App {
+    fn event(
+        state: &mut Self,
+        layer_surface: &ZwlrLayerSurfaceV1,
+        event: zwlr_layer_surface_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zwlr_layer_surface_v1::Event::Configure { serial, .. } = event {
+            layer_surface.ack_configure(serial);
+            state.configured = true;
+        }
+    }
 }
 
 impl Dispatch<XdgWmBase, ()> for App {
@@ -153,26 +187,66 @@ fn solid_buffer(
     Ok(pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ()))
 }
 
+/// What the client does after its first frame is on screen.
+#[derive(PartialEq)]
+enum Mode {
+    /// Toplevel, then a smaller buffer. Tests nothing here; kept because someone
+    /// will otherwise rebuild it to find that out again.
+    Shrink,
+    /// Toplevel, then a null buffer.
+    Unmap,
+    /// Layer surface, then a null buffer. The overlay case.
+    Layer,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let unmap = std::env::args().nth(1).as_deref() == Some("unmap");
+    let mode = match std::env::args().nth(1).as_deref() {
+        Some("unmap") => Mode::Unmap,
+        Some("layer") => Mode::Layer,
+        _ => Mode::Shrink,
+    };
 
     let conn = Connection::connect_to_env()?;
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
 
-    let mut state = App { compositor: None, shm: None, wm_base: None, configured: false };
+    let mut state =
+        App { compositor: None, shm: None, wm_base: None, layer_shell: None, configured: false };
     let _registry = conn.display().get_registry(&qh, ());
     queue.roundtrip(&mut state)?;
 
     let compositor = state.compositor.clone().ok_or("no wl_compositor")?;
     let shm = state.shm.clone().ok_or("no wl_shm")?;
-    let wm_base = state.wm_base.clone().ok_or("no xdg_wm_base")?;
 
     let surface = compositor.create_surface(&qh, ());
-    let xdg_surface = wm_base.get_xdg_surface(&surface, &qh, ());
-    let toplevel = xdg_surface.get_toplevel(&qh, ());
-    toplevel.set_title("ghost-repro".to_owned());
-    toplevel.set_app_id("arlen.ghost-repro".to_owned());
+
+    // The role object has to outlive the run: dropping it destroys the role, which
+    // tears the surface down and takes the very thing under test with it. The two
+    // roles have no common trait worth inventing, so each arm keeps its own binding.
+    let mut _layer_role = None;
+    let mut _xdg_role = None;
+    if mode == Mode::Layer {
+        let layer_shell = state.layer_shell.clone().ok_or("no zwlr_layer_shell_v1")?;
+        let layer_surface = layer_shell.get_layer_surface(
+            &surface,
+            None,
+            Layer::Overlay,
+            "ghost-repro".to_owned(),
+            &qh,
+            (),
+        );
+        // Sized rather than anchored to all four edges, so the region it vacates is
+        // a definite rectangle instead of the whole output.
+        layer_surface.set_size(BIG as u32, BIG as u32);
+        _layer_role = Some(layer_surface);
+    } else {
+        let wm_base = state.wm_base.clone().ok_or("no xdg_wm_base")?;
+        let xdg_surface = wm_base.get_xdg_surface(&surface, &qh, ());
+        let toplevel = xdg_surface.get_toplevel(&qh, ());
+        toplevel.set_title("ghost-repro".to_owned());
+        toplevel.set_app_id("arlen.ghost-repro".to_owned());
+        _xdg_role = Some((xdg_surface, toplevel));
+    }
     surface.commit();
 
     while !state.configured {
@@ -188,10 +262,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Long enough that the big frame is unambiguously on screen before anything
     // changes: a capture racing the first paint would show an empty region and
     // read as a pass.
-    std::thread::sleep(Duration::from_millis(1500));
-    eprintln!("ghost-repro: {BIG}x{BIG} painted");
+    //
+    // The second argument overrides the wait, which is how the positive control is
+    // run: hold long enough that the capture lands while the block is still up. A
+    // clean shot after the change proves nothing unless the same harness has been
+    // shown to photograph the block when it IS there, and this test is otherwise
+    // one that cannot fail.
+    let hold_ms: u64 = std::env::args()
+        .nth(2)
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(1500);
+    std::thread::sleep(Duration::from_millis(hold_ms));
+    eprintln!("ghost-repro: {BIG}x{BIG} painted, held {hold_ms}ms");
 
-    if unmap {
+    if mode != Mode::Shrink {
         // The overlay case: the surface stays alive and keeps its role, it just
         // stops presenting. This is what a hidden shell window does.
         surface.attach(None, 0, 0);
