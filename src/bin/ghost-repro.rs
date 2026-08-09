@@ -222,6 +222,18 @@ enum Mode {
     Unmap,
     /// Layer surface, then a null buffer. The overlay case.
     Layer,
+    /// Layer surface that SHRINKS: `set_size` and a smaller buffer, both committed.
+    ///
+    /// The combination none of the others covers, and the one the waypointer
+    /// actually performs as its list filters. `Shrink` is a toplevel, where the
+    /// tiling layout owns the geometry and a smaller buffer vacates nothing;
+    /// `Layer` unmaps rather than resizes and comes back clean. A layer surface
+    /// sizes itself, so shrinking one really does vacate a strip - and the client
+    /// cannot damage that strip, because it lies outside the surface. If anything
+    /// must repair it, it is the compositor. Added 9 August after measuring the
+    /// other four and finding that the only one which ghosts is the one where the
+    /// client breaks the damage contract on purpose.
+    LayerShrink,
     /// Layer surface of a fixed size that repaints only part of itself and reports
     /// damage for only that part. This is the shape the waypointer ghost actually
     /// has: a panel whose content shrank between two frames, leaving the strip it
@@ -272,6 +284,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mode = match std::env::args().nth(1).as_deref() {
         Some("shrink") => Mode::Shrink,
         Some("partial") => Mode::Partial,
+        Some("layer-shrink") => Mode::LayerShrink,
         Some("toplevel") | Some("unmap") => Mode::Unmap,
         _ => Mode::Layer,
     };
@@ -295,7 +308,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // roles have no common trait worth inventing, so each arm keeps its own binding.
     let mut _layer_role = None;
     let mut _xdg_role = None;
-    if mode == Mode::Layer || mode == Mode::Partial {
+    if mode == Mode::Layer || mode == Mode::Partial || mode == Mode::LayerShrink {
         let layer_shell = state.layer_shell.clone().ok_or("no zwlr_layer_shell_v1")?;
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
@@ -367,13 +380,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
              only the top; blue on screen means the buffer was taken, and magenta \
              below means the undamaged half kept frame 1"
         );
-    } else if mode != Mode::Shrink {
+    } else if mode != Mode::Shrink && mode != Mode::LayerShrink {
         // The overlay case: the surface stays alive and keeps its role, it just
         // stops presenting. This is what a hidden shell window does.
         surface.attach(None, 0, 0);
         surface.commit();
         eprintln!("ghost-repro: unmapped, region {BIG}x{BIG} should be background");
     } else {
+        // A layer surface has to be told its new size as well as given a smaller
+        // buffer: the buffer alone leaves the role's configured extent unchanged,
+        // and then nothing has been vacated to look at.
+        if let Some(layer) = _layer_role.as_ref() {
+            layer.set_size(SMALL as u32, SMALL as u32);
+        }
         let small = solid_buffer(&shm, &qh, SMALL, SMALL, FILL)?;
         surface.attach(Some(&small), 0, 0);
         surface.damage_buffer(0, 0, SMALL, SMALL);
