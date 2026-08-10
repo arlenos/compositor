@@ -313,8 +313,26 @@ impl EventBusHandle {
 pub fn spawn() -> EventBusHandle {
     let socket_path = std::env::var("ARLEN_PRODUCER_SOCKET")
         .unwrap_or_else(|_| DEFAULT_PRODUCER_SOCKET.to_string());
-    let session_id = std::env::var("ARLEN_SESSION_ID")
-        .unwrap_or_else(|_| uuid::Uuid::now_v7().to_string());
+    // Read, never mint. One login is one session and `arlen-session` is the one
+    // thing positioned to say which - a compositor inventing a uuid asserts a fact
+    // it cannot know, and the proof is that the kernel-layer used to invent a
+    // different one for the same login. Two ids, neither locally wrong, and a file
+    // the user opened could not be joined to the window they had focused.
+    //
+    // Absent is a DEPLOYMENT DEFECT, said loudly rather than papered over: a
+    // substituted id would make the graph look joined while joining nothing, and
+    // relabelling the compositor as a system source would attribute the user's own
+    // window focus to the machine. The empty string is refused by the bus
+    // validator, so the events stop and the log says why - which is the failure
+    // being visible instead of silent.
+    let session_id = std::env::var("ARLEN_SESSION_ID").unwrap_or_default();
+    if session_id.is_empty() {
+        tracing::error!(
+            "ARLEN_SESSION_ID is unset: the session startup did not export it, so \
+             window events cannot be attributed to a session and the bus will \
+             refuse them"
+        );
+    }
     let (tx, rx) = mpsc::sync_channel::<EventBusMessage>(CHANNEL_CAPACITY);
     thread::Builder::new()
         .name("event-bus-sender".to_string())
