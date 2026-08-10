@@ -40,17 +40,34 @@ impl EventBusHandle {
         }
     }
 
-    /// Emit a `window.focused` event with the given app ID.
+    /// Emit a `window.focused` event with the given app ID and window title.
     ///
     /// Deduplicated: only emits if the app_id changed since the last call.
-    pub fn emit_window_focused(&self, app_id: &str) {
-        {
+    ///
+    /// This carried `payload: vec![]` until 10 August, which is not a missing
+    /// nicety - it is the whole content of the event. The Knowledge Graph
+    /// deserializes the payload to build the `App` node and the `Event` title, so
+    /// every focus it recorded had an empty app and an empty title, and the
+    /// timeline rendered a row reading "focused" with nothing after it. Seen on a
+    /// booted image, beside a file row that named its file.
+    ///
+    /// All three fields are here already: the app id is the argument, the title
+    /// comes from the focused surface, and `prev_app_id` is the dedup state this
+    /// method was keeping anyway - so the previous value is taken out rather than
+    /// overwritten, and the event says what the focus moved AWAY from too.
+    pub fn emit_window_focused(&self, app_id: &str, window_title: &str) {
+        let prev_app_id = {
             let mut last = self.last_focused_app_id.lock().unwrap();
             if *last == app_id {
                 return;
             }
-            *last = app_id.to_string();
-        }
+            std::mem::replace(&mut *last, app_id.to_string())
+        };
+        let payload = proto::WindowFocusedPayload {
+            app_id: app_id.to_string(),
+            window_title: window_title.to_string(),
+            prev_app_id,
+        };
         let event = Event {
             id: uuid::Uuid::now_v7().to_string(),
             r#type: "window.focused".to_string(),
@@ -58,13 +75,13 @@ impl EventBusHandle {
             source: "wayland".to_string(),
             pid: std::process::id(),
             session_id: self.session_id.clone(),
-            payload: vec![],
+            payload: payload.encode_to_vec(),
             uid: 0,
             project_id: String::new(),
         };
         if let Some(msg) = encode(event) {
             self.try_send(msg);
-            debug!(app_id, "emitted window.focused event");
+            debug!(app_id, window_title, "emitted window.focused event");
         }
     }
 

@@ -226,7 +226,18 @@ impl Shell {
             "set_focus: {} -> {} update_cursor={}",
             old_app_id, app_id, update_cursor,
         );
-        state.common.event_bus.emit_window_focused(&app_id);
+        // The title comes from the same surface the app id does. Only a real
+        // window has one: the sentinel targets below ("group", "popup", "lock",
+        // and so on) are not windows, and inventing a title for them would put a
+        // string in the graph that names nothing.
+        let window_title = match target {
+            Some(KeyboardFocusTarget::Element(mapped)) => mapped.active_window().title(),
+            _ => String::new(),
+        };
+        state
+            .common
+            .event_bus
+            .emit_window_focused(&app_id, &window_title);
         // Keep the dynamic keybinding resolver in sync so
         // `app_focused` D-Bus bindings fire for the newly focused app.
         // Sentinel values produced by non-Element targets (`"none"`,
