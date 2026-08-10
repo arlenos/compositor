@@ -11,7 +11,12 @@ message Event {
   int64  timestamp  = 3;  // microseconds since Unix epoch
   string source     = 4;  // "ebpf", "wayland", "app:<app-id>", "journald"
   uint32 pid        = 5;  // originating process ID
-  string session_id = 6;  // user session reference
+  string origin     = 6;  // session reference, or `system:<producer>` for
+                          // an event no session originated. Renamed from
+                          // `session_id` on 10 Aug: nine of the ten proto
+                          // copies in the tree already called it `origin`,
+                          // this was the last one out of step. Same field
+                          // number, so the wire is unchanged.
   bytes  payload    = 7;  // type-specific protobuf message, encoded
   uint32 uid        = 8;  // originating user ID (0 = system event, delivered to all)
   string project_id = 9;  // optional: project UUID for audit-log scoping
