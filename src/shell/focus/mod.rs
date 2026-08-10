@@ -207,44 +207,69 @@ impl Shell {
             state.common.shell.write().append_focus_stack(target, seat);
         }
 
-        // Emit window.focused event to the Arlen Event Bus.
-        let app_id = match target {
-            Some(KeyboardFocusTarget::Element(mapped)) => mapped.active_window().app_id(),
-            Some(KeyboardFocusTarget::Fullscreen(s)) => format!("fullscreen:{:?}", s),
-            Some(KeyboardFocusTarget::Group(_)) => "group".to_string(),
-            Some(KeyboardFocusTarget::Popup(_)) => "popup".to_string(),
-            Some(KeyboardFocusTarget::LockSurface(_)) => "lock".to_string(),
-            Some(KeyboardFocusTarget::LayerSurface(_)) => "layer".to_string(),
-            None => "none".to_string(),
+        // Two different facts, so two different events.
+        //
+        // `Element` and `Fullscreen` both wrap a real application surface, and
+        // both answer `app_id()` and `title()` - a fullscreen window is a window.
+        // Everything else is shell furniture or nothing at all, and it used to be
+        // reported as a `window.focused` whose `app_id` read "layer", "lock",
+        // "popup", "group" or a DEBUG FORMAT of the surface struct. A field
+        // meaning "which application" then held values naming no application, and
+        // every consumer needed the private list to tell them apart.
+        //
+        // The window kinds keep `window.focused`. The rest get
+        // `window.focus_left`, where the kind is a field with a domain of its own
+        // rather than a stand-in smuggled through someone else's.
+        let window = match target {
+            Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.active_window()),
+            Some(KeyboardFocusTarget::Fullscreen(s)) => Some(s.clone()),
+            _ => None,
         };
         let old_focus = seat.get_keyboard().unwrap().current_focus();
         let old_app_id = match old_focus.as_ref() {
             Some(KeyboardFocusTarget::Element(mapped)) => mapped.active_window().app_id(),
             _ => "none".to_string(),
         };
-        tracing::info!(
-            "set_focus: {} -> {} update_cursor={}",
-            old_app_id, app_id, update_cursor,
-        );
-        // The title comes from the same surface the app id does. Only a real
-        // window has one: the sentinel targets below ("group", "popup", "lock",
-        // and so on) are not windows, and inventing a title for them would put a
-        // string in the graph that names nothing.
-        let window_title = match target {
-            Some(KeyboardFocusTarget::Element(mapped)) => mapped.active_window().title(),
-            _ => String::new(),
-        };
-        state
-            .common
-            .event_bus
-            .emit_window_focused(&app_id, &window_title);
-        // Keep the dynamic keybinding resolver in sync so
-        // `app_focused` D-Bus bindings fire for the newly focused app.
-        // Sentinel values produced by non-Element targets (`"none"`,
-        // `"fullscreen:..."`, `"group"`, `"popup"`, `"lock"`, `"layer"`)
-        // are not real app ids and must not be fed to the resolver.
+        match &window {
+            Some(surface) => {
+                let app_id = surface.app_id();
+                tracing::info!(
+                    "set_focus: {} -> {} update_cursor={}",
+                    old_app_id, app_id, update_cursor,
+                );
+                state
+                    .common
+                    .event_bus
+                    .emit_window_focused(&app_id, &surface.title());
+            }
+            None => {
+                let kind = match target {
+                    Some(KeyboardFocusTarget::Group(_)) => "window-group",
+                    Some(KeyboardFocusTarget::Popup(_)) => "popup",
+                    Some(KeyboardFocusTarget::LockSurface(_)) => "lock-screen",
+                    Some(KeyboardFocusTarget::LayerSurface(_)) => "shell-surface",
+                    None => "no-window",
+                    // Unreachable: the window kinds took the branch above.
+                    Some(KeyboardFocusTarget::Element(_))
+                    | Some(KeyboardFocusTarget::Fullscreen(_)) => "no-window",
+                };
+                tracing::info!(
+                    "set_focus: {} -> [{}] update_cursor={}",
+                    old_app_id, kind, update_cursor,
+                );
+                state.common.event_bus.emit_window_focus_left(kind);
+            }
+        }
+        // Keep the dynamic keybinding resolver in sync so `app_focused` D-Bus
+        // bindings fire for the newly focused app.
+        //
+        // Element only, deliberately unchanged. The event split above now treats a
+        // fullscreen surface as a window too, and it is arguably one here as well -
+        // but whether a fullscreen app should fire `app_focused` bindings is a
+        // keybinding question, not a reporting one, and it is not this change's to
+        // answer quietly.
         let resolver_app_id = match target {
-            Some(KeyboardFocusTarget::Element(_)) => Some(app_id.clone()),
+            Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.active_window().app_id()),
             _ => None,
         };
         state

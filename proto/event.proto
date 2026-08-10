@@ -35,6 +35,24 @@ message WindowFocusedPayload {
   string prev_app_id  = 3;  // previously focused app, empty if none
 }
 
+// Emitted when keyboard focus goes somewhere that is not an application
+// window: the lock screen, a shell layer surface, a popup, a stack header,
+// or nothing at all.
+// Event type: "window.focus_left"
+//
+// Its own type rather than a `window.focused` carrying a stand-in app id.
+// The compositor used to send "layer", "lock", "none" and the like in
+// `app_id`, so a field meaning "which application" held values that named
+// no application, and every consumer had to know the private list to tell
+// them apart. A special value inside a field is a type trying to be born.
+//
+// `kind` is the fact, with a domain of its own: "no-window" | "shell-surface"
+// | "lock-screen" | "popup" | "window-group".
+message WindowFocusLeftPayload {
+  string kind        = 1;
+  string prev_app_id = 2;  // the application that had focus, empty if none
+}
+
 // Emitted when a window transitions to minimized state. The shell
 // derives its own minimized-windows UI from cosmic-toplevel-info
 // state (the authoritative source for live UI); this event exists so

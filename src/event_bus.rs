@@ -85,6 +85,43 @@ impl EventBusHandle {
         }
     }
 
+    /// Emit a `window.focus_left` event: focus went somewhere that is not an
+    /// application window.
+    ///
+    /// Deduplicated against the same state as `emit_window_focused`, so a run of
+    /// focus changes within the shell's own chrome produces one event rather than
+    /// a stream. `kind` is stored as the dedup key, which is why two different
+    /// non-window kinds in a row are both reported: moving from the top bar to the
+    /// lock screen is a real transition.
+    pub fn emit_window_focus_left(&self, kind: &str) {
+        let prev_app_id = {
+            let mut last = self.last_focused_app_id.lock().unwrap();
+            if *last == kind {
+                return;
+            }
+            std::mem::replace(&mut *last, kind.to_string())
+        };
+        let payload = proto::WindowFocusLeftPayload {
+            kind: kind.to_string(),
+            prev_app_id,
+        };
+        let event = Event {
+            id: uuid::Uuid::now_v7().to_string(),
+            r#type: "window.focus_left".to_string(),
+            timestamp: timestamp_micros(),
+            source: "wayland".to_string(),
+            pid: std::process::id(),
+            session_id: self.session_id.clone(),
+            payload: payload.encode_to_vec(),
+            uid: 0,
+            project_id: String::new(),
+        };
+        if let Some(msg) = encode(event) {
+            self.try_send(msg);
+            debug!(kind, "emitted window.focus_left event");
+        }
+    }
+
     /// Emit a `window.opened` event with the given app ID.
     pub fn emit_window_opened(&self, app_id: &str) {
         let event = Event {
