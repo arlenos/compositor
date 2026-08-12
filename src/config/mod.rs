@@ -1897,6 +1897,28 @@ struct SystemXkb {
     options: String,
 }
 
+/// One `localectl status` value, with systemd's not-set placeholder read as not
+/// set.
+///
+/// `localectl` prints `X11 Layout: (unset)` when nothing is configured, and the
+/// literal was being taken as a layout NAME. Two things followed, and the second
+/// is the worse one: xkbcommon was handed `pc+(unset)+inet(evdev)`, refused the
+/// whole keymap ("Illegal include statement"), and fell back to `us`; and because
+/// `"(unset)"` is not empty, the caller's chain stopped there and never reached
+/// its own last resort, `/etc/vconsole.conf`. So a machine whose only keyboard
+/// configuration was the console keymap got a US layout and one error line.
+///
+/// Seen on a real boot of the shipped image on 12 Aug, in the serial log.
+fn systemd_value(raw: &str) -> String {
+    let v = raw.trim();
+    // `(unset)` is systemd's own spelling for absent, printed by `localectl` and
+    // `hostnamectl` alike. `n/a` is its sibling in a few versions.
+    if v == "(unset)" || v == "n/a" {
+        return String::new();
+    }
+    v.to_string()
+}
+
 fn read_system_xkb_layout() -> SystemXkb {
     let mut result = SystemXkb {
         layout: String::new(),
@@ -1917,13 +1939,13 @@ fn read_system_xkb_layout() -> SystemXkb {
     for line in stdout.lines() {
         let line = line.trim();
         if let Some(v) = line.strip_prefix("X11 Layout:") {
-            result.layout = v.trim().to_string();
+            result.layout = systemd_value(v);
         } else if let Some(v) = line.strip_prefix("X11 Variant:") {
-            result.variant = v.trim().to_string();
+            result.variant = systemd_value(v);
         } else if let Some(v) = line.strip_prefix("X11 Model:") {
-            result.model = v.trim().to_string();
+            result.model = systemd_value(v);
         } else if let Some(v) = line.strip_prefix("X11 Options:") {
-            result.options = v.trim().to_string();
+            result.options = systemd_value(v);
         }
     }
 
@@ -2231,6 +2253,27 @@ impl From<Output> for CompOutputInfo {
 
 #[cfg(test)]
 mod tests {
+    /// systemd's placeholder is not a layout name.
+    ///
+    /// The failure it caused was two-sided: xkbcommon refused the whole keymap
+    /// (`pc+(unset)+inet(evdev)` is not an include it can resolve, so the user
+    /// got `us` plus one error line), and the non-empty string convinced the
+    /// resolution chain it had an answer, so `/etc/vconsole.conf` - the one place
+    /// a console-only machine records its keyboard - was never read.
+    #[test]
+    fn the_unset_placeholder_reads_as_no_value() {
+        assert_eq!(super::systemd_value("(unset)"), "");
+        assert_eq!(super::systemd_value("  (unset)  "), "");
+        assert_eq!(super::systemd_value("n/a"), "");
+        assert_eq!(super::systemd_value(""), "");
+
+        // And a real value still survives, including one that merely contains
+        // the word.
+        assert_eq!(super::systemd_value(" de "), "de");
+        assert_eq!(super::systemd_value("nodeadkeys"), "nodeadkeys");
+        assert_eq!(super::systemd_value("unset-layout"), "unset-layout");
+    }
+
     use super::*;
 
     #[test]
