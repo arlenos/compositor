@@ -1261,26 +1261,78 @@ mod tests {
     }
 
     #[test]
-    fn rasterize_uses_theme_bg_app_not_hardcoded() {
-        // A `bg_app` swap should change the rasterised pixels.
+    fn the_header_paints_bg_shell_and_ignores_bg_app() {
+        // This was `rasterize_uses_theme_bg_app_not_hardcoded`, whose comment
+        // said "a `bg_app` swap should change the rasterised pixels" - the
+        // opposite of the rule its sibling above states, that the header paints
+        // `bg_shell` and NOT `bg_app`. It asserted only that two fixtures
+        // differed and then dropped both renders, so the contradiction cost
+        // nothing and neither half was checked. Both halves are checked here.
         let state = stub_state(600, true);
-        let mut dark = test_theme_dark();
-        let mut light = test_theme_light();
-        // Sanity: the two presets don't have the same bg_app.
-        assert_ne!(dark.color.bg_app, light.color.bg_app);
-        dark.color.bg_app = [1.0, 0.0, 0.0, 1.0]; // pure red
-        light.color.bg_app = [0.0, 1.0, 0.0, 1.0]; // pure green
-        let _ = rasterize_header(&state, &dark);
-        let _ = rasterize_header(&state, &light);
+
+        let mut red_app = test_theme_dark();
+        red_app.color.bg_app = [1.0, 0.0, 0.0, 1.0];
+        let mut green_app = test_theme_dark();
+        green_app.color.bg_app = [0.0, 1.0, 0.0, 1.0];
+        let (a, _, _) = match render_header_rgba(&state, &red_app) {
+            Some(out) => out,
+            None => return, // no headless GL device here; skipped, not failed
+        };
+        let (b, _, _) = match render_header_rgba(&state, &green_app) {
+            Some(out) => out,
+            None => return,
+        };
+        assert_eq!(a, b, "bg_app is the app-content colour and must not reach the header");
+
+        let mut red_shell = test_theme_dark();
+        red_shell.color.bg_shell = [1.0, 0.0, 0.0, 1.0];
+        let (c, _, _) = match render_header_rgba(&state, &red_shell) {
+            Some(out) => out,
+            None => return,
+        };
+        assert_ne!(a, c, "bg_shell is the header's own colour and must reach it");
     }
 
+    /// The focus ring is painted in the theme's accent.
+    ///
+    /// Was a call to the rasteriser whose buffer was dropped, so it held for a
+    /// header that ignored the accent entirely. Measured through the readback
+    /// harness now: change only the accent and the focused header must change.
     #[test]
-    fn rasterize_picks_theme_accent_for_focus_ring() {
-        // Focused-button rendering uses theme.color.accent for the ring.
+    fn the_focus_ring_is_painted_in_the_theme_accent() {
         let mut state = stub_state(600, true);
         state.focused_button = Some(HeaderButton::Close);
-        let theme = test_theme_dark();
-        let _ = rasterize_header(&state, &theme);
+        let mut blue = test_theme_dark();
+        blue.color.accent = [0.0, 0.0, 1.0, 1.0];
+        let mut orange = test_theme_dark();
+        orange.color.accent = [1.0, 0.5, 0.0, 1.0];
+
+        let (blue_px, _, _) = match render_header_rgba(&state, &blue) {
+            Some(out) => out,
+            None => return, // no headless GL device here; skipped, not failed
+        };
+        let (orange_px, _, _) = match render_header_rgba(&state, &orange) {
+            Some(out) => out,
+            None => return,
+        };
+        assert_ne!(
+            blue_px, orange_px,
+            "changing the accent must change the focused header"
+        );
+
+        // With nothing focused there is no ring, so the accent must reach no
+        // pixel at all. This is what makes the assertion above about the ring
+        // rather than about the accent leaking into other chrome.
+        let unfocused = stub_state(600, true);
+        let (a, _, _) = match render_header_rgba(&unfocused, &blue) {
+            Some(out) => out,
+            None => return,
+        };
+        let (b, _, _) = match render_header_rgba(&unfocused, &orange) {
+            Some(out) => out,
+            None => return,
+        };
+        assert_eq!(a, b, "the accent must not paint anything when nothing is focused");
     }
 
     // ── Lucide icon geometry ──────────────────────────────────
