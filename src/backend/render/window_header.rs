@@ -1207,24 +1207,57 @@ mod tests {
 
     // primary_family_* tests removed along with the title renderer.
 
+    /// The theme's window-corner radius must reach the painted pixels.
+    ///
+    /// This asserted nothing until 17 Aug: it called the rasteriser twice with
+    /// different radii and dropped both buffers, on the reasoning that
+    /// `MemoryRenderBuffer` exposes no bytes and "the byte-diff test lives in
+    /// the integration suite under tests/". There is no `tests/` directory in
+    /// this repository and there never was, so the radius had no check that
+    /// could fail while carrying a name that said it did. The readback harness
+    /// the golden test uses answers the question the old comment could not.
     #[test]
-    fn rasterize_uses_theme_radius_not_hardcoded() {
-        // Changing the theme's window-corner radius must drive the
-        // rasterised output — proves the header honours the frame
-        // radius token (PR-1) instead of a literal or the card radius.
+    fn the_header_corner_is_cut_to_the_theme_radius() {
         let state = stub_state(600, true);
-        let mut theme_a = test_theme_dark();
-        theme_a.radius.window_corners = [0.0; 4];
-        let mut theme_b = test_theme_dark();
-        theme_b.radius.window_corners = [16.0; 4];
-        // MemoryRenderBuffer doesn't expose data() directly, so we
-        // can't diff bytes here, but running the rasteriser with
-        // different radius values must not panic and must produce
-        // DIFFERENT buffers. Presence of a buffer at all is a
-        // sanity test; the byte-diff test lives in the integration
-        // suite under tests/.
-        let _ = rasterize_header(&state, &theme_a);
-        let _ = rasterize_header(&state, &theme_b);
+        let mut sharp = test_theme_dark();
+        sharp.radius.window_corners = [0.0; 4];
+        let mut round = test_theme_dark();
+        round.radius.window_corners = [16.0; 4];
+
+        let (sharp_px, w, _) = match render_header_rgba(&state, &sharp) {
+            Some(out) => out,
+            None => return, // no headless GL device here; skipped, not failed
+        };
+        let (round_px, _, _) = match render_header_rgba(&state, &round) {
+            Some(out) => out,
+            None => return,
+        };
+
+        let at = |pixels: &[u8], x: i32, y: i32| -> [u8; 4] {
+            let i = ((y * w + x) * 4) as usize;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+
+        // One pixel in from the top-left, which a 16px radius cuts away and a
+        // zero radius leaves as ordinary chrome.
+        let corner_sharp = at(&sharp_px, 1, 1);
+        let corner_round = at(&round_px, 1, 1);
+        assert!(
+            corner_sharp[3] >= 250,
+            "a zero radius must leave the corner painted, got {corner_sharp:?}"
+        );
+        assert!(
+            corner_round[3] < 128,
+            "a 16px radius must cut the corner away, got {corner_round:?}"
+        );
+
+        // Away from the corners the two must agree, so the assertion above is
+        // about the radius and not about the whole header changing.
+        assert_eq!(
+            at(&sharp_px, w / 2, 20)[3],
+            at(&round_px, w / 2, 20)[3],
+            "the radius must not change the header away from its corners"
+        );
     }
 
     #[test]
