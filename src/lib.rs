@@ -42,6 +42,7 @@ pub mod debug;
 pub mod hooks;
 pub mod input;
 mod logger;
+pub mod presented;
 pub mod session;
 pub mod shell;
 pub mod state;

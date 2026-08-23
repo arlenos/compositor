@@ -2634,6 +2634,11 @@ impl State {
         )
         .ok()
         .flatten()
+        // A surface that has never been on screen receives no input. One filter
+        // over every stage above rather than a check inside each: the rule is a
+        // property of the answer, not of the path that produced it, and a stage
+        // added later inherits it. See `crate::presented`.
+        .filter(|(target, _)| target_may_receive_input(target))
     }
 
     pub fn apply_cursor_hint(
@@ -2816,3 +2821,30 @@ fn mapped_output_for_device<'a, D: Device + 'static>(
     };
     map_to_output.or_else(|| shell.builtin_output())
 }
+
+/// May this pointer target be given the click?
+///
+/// The rule is `crate::presented`'s: a surface that has never reached the screen
+/// receives no input, so the moment between a window being mapped and its first
+/// paint cannot be clicked into.
+///
+/// The compositor's own decorations - a stack's tab bar, a window's header, a
+/// resize edge - are drawn by us in the same frame that draws the window, so
+/// there is no gap to close and they always answer yes.
+///
+/// XWAYLAND IS DELIBERATELY NOT COVERED. An X11 surface reaches the screen the
+/// same way and the same check would apply, but a wrong answer here makes every
+/// X11 window unclickable, and I have no way to drive an X11 client through the
+/// VM to prove otherwise. Extending it wants that proof first.
+fn target_may_receive_input(target: &PointerFocusTarget) -> bool {
+    match target {
+        PointerFocusTarget::WlSurface { surface, .. } => {
+            crate::presented::has_been_presented(surface)
+        }
+        PointerFocusTarget::X11Surface { .. }
+        | PointerFocusTarget::StackUI(_)
+        | PointerFocusTarget::WindowUI(_)
+        | PointerFocusTarget::ResizeFork(_) => true,
+    }
+}
+

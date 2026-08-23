@@ -1368,6 +1368,7 @@ impl Common {
             }
 
             let Some(sequence) = sequence else {
+                crate::presented::mark_presented(states);
                 return Some(output.clone());
             };
 
@@ -1390,8 +1391,13 @@ impl Common {
 
             if send {
                 *last_sent_at = Some((output.downgrade(), sequence));
+                // The frame that carried this surface has been submitted, so from
+                // here on it may be clicked. See `crate::presented`.
+                crate::presented::mark_presented(states);
                 Some(output.clone())
             } else {
+                // Throttled, not unseen: a surface that has been presented once
+                // stays presented, and one that has not is still waiting.
                 None
             }
         };
