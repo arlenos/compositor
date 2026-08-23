@@ -2839,7 +2839,14 @@ fn mapped_output_for_device<'a, D: Device + 'static>(
 fn target_may_receive_input(target: &PointerFocusTarget) -> bool {
     match target {
         PointerFocusTarget::WlSurface { surface, .. } => {
-            crate::presented::has_been_presented(surface)
+            let ok = crate::presented::has_been_presented(surface);
+            if !ok {
+                // Rate-limited by the pointer: this fires on motion as well as
+                // on clicks, so it is `debug` rather than `info`. A refusal that
+                // never appears in a journal is a rule nobody can check.
+                tracing::debug!("presented: refusing input to a surface that has never been on screen");
+            }
+            ok
         }
         PointerFocusTarget::X11Surface { .. }
         | PointerFocusTarget::StackUI(_)

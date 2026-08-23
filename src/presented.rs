@@ -28,7 +28,10 @@ use std::cell::Cell;
 
 use smithay::{
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
-    wayland::compositor::{with_states, SurfaceData},
+    wayland::{
+        compositor::{with_states, SurfaceData},
+        shell::xdg::XdgToplevelSurfaceData,
+    },
 };
 
 /// Set once the surface's first frame callback goes out, and never cleared.
@@ -40,8 +43,26 @@ struct EverPresented(Cell<bool>);
 /// Called from the frame-callback path, which is per-surface and already walks
 /// the whole tree, so subsurfaces and popups are marked in their own right
 /// rather than inheriting their parent's answer.
+///
+/// The first presentation is logged, once per surface. Without it the rule is
+/// invisible from outside: a boot where it never fires and a boot where it
+/// silently passes everything look identical, and the question this exists to
+/// answer - how long is the gap between a window being raised and being on the
+/// screen - can only be answered by something that sits where the frames are.
 pub fn mark_presented(states: &SurfaceData) {
-    states.data_map.get_or_insert(EverPresented::default).0.set(true);
+    let flag = states.data_map.get_or_insert(EverPresented::default);
+    if flag.0.replace(true) {
+        return;
+    }
+    // Only toplevels are named, which keeps this to one line per window instead
+    // of one per surface in the tree - a window's subsurfaces and popups are
+    // marked in the same pass and would say nothing a reader could use.
+    if let Some(data) = states.data_map.get::<XdgToplevelSurfaceData>() {
+        let app_id = data.lock().unwrap().app_id.clone();
+        if let Some(app_id) = app_id {
+            tracing::info!("presented: {app_id} reached the screen for the first time");
+        }
+    }
 }
 
 /// Has this surface ever been on screen?
