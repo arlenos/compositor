@@ -786,6 +786,29 @@ fn update_focus_target(
                             .map(|fs| KeyboardFocusTarget::Fullscreen(fs.surface))
                     })
             })
+            // The keyboard half of `crate::presented`: a window that has never
+            // been on the screen takes no keys either, so an Escape typed in the
+            // moment before a dialog paints cannot answer a question nobody has
+            // read. Focus stays where it was and moves on by itself - this runs
+            // every refresh, so the frame that puts the window on screen is
+            // followed by the refresh that gives it focus.
+            //
+            // ONLY THIS BRANCH. The session lock and an exclusive layer surface
+            // above return their own target, and there "nobody has focus" is a
+            // worse answer than "focus something unpainted" - a lock screen that
+            // cannot take keys is a machine that cannot be unlocked.
+            .filter(keyboard_target_may_receive_input)
+    }
+}
+
+/// May this keyboard target be given the keys? See [`update_focus_target`].
+///
+/// A target with no surface of its own - a window group in the overview - is the
+/// compositor's own furniture and always answers yes.
+fn keyboard_target_may_receive_input(target: &KeyboardFocusTarget) -> bool {
+    match WaylandFocus::wl_surface(target) {
+        Some(surface) => crate::presented::has_been_presented(&surface),
+        None => true,
     }
 }
 
