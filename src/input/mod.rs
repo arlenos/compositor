@@ -2844,7 +2844,11 @@ fn target_may_receive_input(target: &PointerFocusTarget) -> bool {
                 // Rate-limited by the pointer: this fires on motion as well as
                 // on clicks, so it is `debug` rather than `info`. A refusal that
                 // never appears in a journal is a rule nobody can check.
-                tracing::debug!("presented: refusing input to a surface that has never been on screen");
+                // `info`, not `debug`: this is the rule doing its job, it is rare
+                // by construction (a surface is unpresented for one frame at
+                // most), and at `debug` it sat under the release filter where
+                // nothing could confirm the refusal had ever happened.
+                tracing::info!("presented: refusing input to a surface that has never been on screen");
             }
             ok
         }

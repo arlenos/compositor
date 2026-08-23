@@ -54,15 +54,23 @@ pub fn mark_presented(states: &SurfaceData) {
     if flag.0.replace(true) {
         return;
     }
-    // Only toplevels are named, which keeps this to one line per window instead
-    // of one per surface in the tree - a window's subsurfaces and popups are
-    // marked in the same pass and would say nothing a reader could use.
-    if let Some(data) = states.data_map.get::<XdgToplevelSurfaceData>() {
-        let app_id = data.lock().unwrap().app_id.clone();
-        if let Some(app_id) = app_id {
-            tracing::info!("presented: {app_id} reached the screen for the first time");
-        }
-    }
+    // Named where the surface can name itself. The first cut logged ONLY
+    // toplevels carrying an app_id and printed nothing at all on a real boot,
+    // which read as "the rule never runs" when the rule was running fine - the
+    // surfaces going through here are mostly not toplevels, and a toplevel's
+    // app_id can still be unset the first time it is drawn. A log that is silent
+    // in the interesting case is worse than none: it invents a second question.
+    let what = states
+        .data_map
+        .get::<XdgToplevelSurfaceData>()
+        .and_then(|d| d.lock().unwrap().app_id.clone())
+        .unwrap_or_else(|| {
+            states
+                .role
+                .map(|r| format!("<{r}>"))
+                .unwrap_or_else(|| "<no role>".into())
+        });
+    tracing::info!("presented: {what} reached the screen for the first time");
 }
 
 /// Has this surface ever been on screen?
