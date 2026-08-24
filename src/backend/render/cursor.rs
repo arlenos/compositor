@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{utils::prelude::*, wayland::handlers::compositor::FRAME_TIME_FILTER};
+use crate::{
+    backend::render::{
+        element::AsGlowRenderer,
+        wayland::{SurfaceRenderElement, push_render_elements_from_surface_tree},
+    },
+    utils::prelude::*,
+    wayland::handlers::compositor::FRAME_TIME_FILTER,
+};
+use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -9,10 +17,10 @@ use smithay::{
             element::{
                 Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             },
         },
     },
+    desktop::utils::bbox_from_surface_tree,
     input::{
         Seat,
         pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
@@ -31,7 +39,7 @@ use smithay::{
     wayland::compositor::{get_role, with_states},
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     io::Read,
     sync::Mutex,
     time::{Duration, Instant},
@@ -114,24 +122,63 @@ enum Error {
     NoDefaultCursor,
     #[error("Error opening xcursor file: {0}")]
     File(#[from] std::io::Error),
-    #[error("Failed to parse XCursor file")]
-    Parse,
+}
+
+fn cursor_aliases(name: &str) -> &[&str] {
+    match name {
+        "default" => &["default", "left_ptr", "arrow"],
+        "pointer" => &["pointer", "hand2", "hand"],
+        "text" => &["text", "xterm"],
+        "wait" => &["wait", "watch"],
+        "progress" => &["progress", "left_ptr_watch"],
+
+        "ew-resize" => &["ew-resize", "h_double_arrow", "sb_h_double_arrow"],
+        "ns-resize" => &["ns-resize", "v_double_arrow", "sb_v_double_arrow"],
+        "nw-resize" => &["nw-resize", "top_left_corner"],
+        "ne-resize" => &["ne-resize", "top_right_corner"],
+        "sw-resize" => &["sw-resize", "bottom_left_corner"],
+        "se-resize" => &["se-resize", "bottom_right_corner"],
+
+        "w-resize" => &["w-resize", "left_side"],
+        "e-resize" => &["e-resize", "right_side"],
+        "n-resize" => &["n-resize", "top_side"],
+        "s-resize" => &["s-resize", "bottom_side"],
+
+        "move" => &["move", "fleur"],
+        "not-allowed" => &["not-allowed", "crossed_circle"],
+        "crosshair" => &["crosshair", "cross"],
+        "help" => &["help", "question_arrow", "left_ptr_help"],
+
+        _ => &[],
+    }
 }
 
 fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error> {
-    let icon_path = theme
-        .load_icon(&shape.to_string())
-        .ok_or(Error::NoDefaultCursor)?;
-    let mut cursor_file = std::fs::File::open(&icon_path)?;
-    let mut cursor_data = Vec::new();
-    cursor_file.read_to_end(&mut cursor_data)?;
-    parse_xcursor(&cursor_data).ok_or(Error::Parse)
+    let shape_name = shape.to_string();
+
+    for name in cursor_aliases(&shape_name)
+        .iter()
+        .copied()
+        .chain(std::iter::once(shape_name.as_str()))
+    {
+        if let Some(icon_path) = theme.load_icon(name) {
+            let mut cursor_file = std::fs::File::open(&icon_path)?;
+            let mut cursor_data = Vec::new();
+            cursor_file.read_to_end(&mut cursor_data)?;
+
+            if let Some(images) = parse_xcursor(&cursor_data) {
+                return Ok(images);
+            }
+        }
+    }
+
+    Err(Error::NoDefaultCursor)
 }
 
 render_elements! {
-    pub CursorRenderElement<R> where R: ImportAll + ImportMem;
+    pub CursorRenderElement<R> where R: ImportAll + ImportMem + AsGlowRenderer, R::TextureId: Send;
     Static=MemoryRenderBufferRenderElement<R>,
-    Surface=WaylandSurfaceRenderElement<R>,
+    Surface=SurfaceRenderElement<R>,
 }
 
 pub fn draw_surface_cursor<R>(
@@ -139,9 +186,10 @@ pub fn draw_surface_cursor<R>(
     surface: &wl_surface::WlSurface,
     location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
-where
-    R: Renderer + ImportAll,
+    blur_strength: usize,
+    push: &mut dyn FnMut(CursorRenderElement<R>, Point<i32, Physical>),
+) where
+    R: Renderer + ImportAll + AsGlowRenderer,
     R::TextureId: Clone + 'static,
 {
     let scale = scale.into();
@@ -156,17 +204,21 @@ where
             .to_physical_precise_round(scale)
     });
 
-    render_elements_from_surface_tree(
+    push_render_elements_from_surface_tree(
         renderer,
         surface,
         location.to_physical(scale).to_i32_round(),
+        bbox_from_surface_tree(surface, location.to_i32_round()).to_f64(),
         scale,
         1.0,
+        false,
+        [0; 4],
+        None,
+        blur_strength,
         Kind::Cursor,
-    )
-    .into_iter()
-    .map(|elem| (elem, h))
-    .collect()
+        &mut |elem| push(elem.into(), h),
+        None,
+    );
 }
 
 #[profiling::function]
@@ -175,9 +227,10 @@ pub fn draw_dnd_icon<R>(
     surface: &wl_surface::WlSurface,
     location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<WaylandSurfaceRenderElement<R>>
-where
-    R: Renderer + ImportAll,
+    blur_strength: usize,
+    push: &mut dyn FnMut(SurfaceRenderElement<R>),
+) where
+    R: Renderer + ImportAll + AsGlowRenderer,
     R::TextureId: Clone + 'static,
 {
     if get_role(surface) != Some("dnd_icon") {
@@ -187,14 +240,21 @@ where
         );
     }
     let scale = scale.into();
-    render_elements_from_surface_tree(
+    push_render_elements_from_surface_tree(
         renderer,
         surface,
         location.to_physical(scale).to_i32_round(),
+        bbox_from_surface_tree(surface, location.to_i32_round()).to_f64(),
         scale,
         1.0,
+        false,
+        [0; 4],
+        None,
+        blur_strength,
         FRAME_TIME_FILTER,
-    )
+        push,
+        None,
+    );
 }
 
 pub type CursorState = Mutex<CursorStateInner>;
@@ -211,6 +271,43 @@ pub struct CursorStateInner {
     hidden: bool,
     idle_timer: Option<RegistrationToken>,
     last_armed: Option<Instant>,
+
+    // shake-to-find
+    shake_path: VecDeque<PathSample>,
+    shake_path_position: Point<f64, Logical>,
+    magnify_until: Option<Instant>,
+    magnify_target: f32,
+    magnification: f32,
+    anim_from: f32,
+    anim_start: Option<Instant>,
+}
+
+/// One sampled pointer position on the recent motion path.
+#[derive(Clone, Copy)]
+struct PathSample {
+    position: Point<f64, Logical>,
+    time: Instant,
+}
+
+/// How far back the motion path is considered when looking for a shake.
+const SHAKE_INTERVAL: Duration = Duration::from_millis(1000);
+/// Path-length / bounding-box-diagonal ratio required to count as a shake.
+const SHAKE_SENSITIVITY: f64 = 4.0;
+/// Minimum bounding-box diagonal (logical px) before a shake is considered.
+const SHAKE_DIAGONAL_MIN: f64 = 100.0;
+/// Two deltas count as "the same direction" if both lie within this tolerance.
+const SHAKE_SAME_SIGN_TOLERANCE: f64 = 1.0;
+/// Keep the cursor enlarged for this long after the last detected shake.
+const SHAKE_HOLD: Duration = Duration::from_millis(2000);
+/// Extra magnification added by each shake, growing from the normal cursor size.
+const OVER_MAGNIFICATION: f32 = 1.0;
+/// Duration of the grow/shrink animation.
+const MAGNIFICATION_ANIM: Duration = Duration::from_millis(200);
+
+/// small movement is ignored and direction stays the same
+fn same_direction(a: f64, b: f64) -> bool {
+    (a >= -SHAKE_SAME_SIGN_TOLERANCE && b >= -SHAKE_SAME_SIGN_TOLERANCE)
+        || (a <= SHAKE_SAME_SIGN_TOLERANCE && b <= SHAKE_SAME_SIGN_TOLERANCE)
 }
 
 impl CursorStateInner {
@@ -230,6 +327,116 @@ impl CursorStateInner {
 
     pub fn size(&self) -> u32 {
         self.cursor_size
+    }
+
+    /// Feed one relative-motion event into the shake detector.
+    pub fn detect_shake(&mut self, delta: Point<f64, Logical>, now: Instant) {
+        // Drop samples that have aged out of the time window.
+        while let Some(oldest) = self.shake_path.front() {
+            if now.duration_since(oldest.time) >= SHAKE_INTERVAL {
+                self.shake_path.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if delta.x != 0.0 || delta.y != 0.0 {
+            self.shake_path_position += delta;
+            let sample = PathSample {
+                position: self.shake_path_position,
+                time: now,
+            };
+
+            if self.shake_path.len() >= 2 {
+                let last = self.shake_path[self.shake_path.len() - 1].position;
+                let prev = self.shake_path[self.shake_path.len() - 2].position;
+                let last_delta = last - prev;
+                if same_direction(last_delta.x, delta.x) && same_direction(last_delta.y, delta.y) {
+                    *self.shake_path.back_mut().unwrap() = sample;
+                } else {
+                    self.shake_path.push_back(sample);
+                }
+            } else {
+                self.shake_path.push_back(sample);
+            }
+        }
+
+        if self.shake_path.len() < 2 {
+            return;
+        }
+
+        let first = self.shake_path[0].position;
+        let (mut left, mut top, mut right, mut bottom) = (first.x, first.y, first.x, first.y);
+        let mut path_length = 0.0;
+        for i in 1..self.shake_path.len() {
+            let p = self.shake_path[i].position;
+            left = left.min(p.x);
+            top = top.min(p.y);
+            right = right.max(p.x);
+            bottom = bottom.max(p.y);
+
+            let step = p - self.shake_path[i - 1].position;
+            path_length += step.x.hypot(step.y);
+        }
+
+        let diagonal = (right - left).hypot(bottom - top);
+        if diagonal < SHAKE_DIAGONAL_MIN {
+            return;
+        }
+
+        // Path noticeably longer than the diagonal => a shake gesture.
+        if path_length / diagonal > SHAKE_SENSITIVITY {
+            self.grow(now);
+            self.shake_path.clear();
+        }
+    }
+
+    /// grow the cursor by one more increment (unbounded)
+    fn grow(&mut self, now: Instant) {
+        self.animate_to(self.magnify_target + OVER_MAGNIFICATION, now);
+        self.magnify_until = Some(now + SHAKE_HOLD);
+    }
+
+    /// Start a 200ms `InOutCubic` tween from the current size to `target`.
+    fn animate_to(&mut self, target: f32, now: Instant) {
+        if (target - self.magnify_target).abs() < f32::EPSILON {
+            return;
+        }
+        self.anim_from = self.magnification;
+        self.anim_start = Some(now);
+        self.magnify_target = target;
+    }
+
+    /// Advance the magnification animation and return the current factor.
+    pub fn animated_magnification(&mut self, now: Instant) -> f32 {
+        // Begin shrinking back once the hold window elapses.
+        if let Some(until) = self.magnify_until
+            && now >= until
+        {
+            self.magnify_until = None;
+            self.animate_to(1.0, now);
+        }
+
+        self.magnification = match self.anim_start {
+            Some(start) => {
+                // `ease` clamps the time to `0.0..=1.0` for us.
+                let t = now.duration_since(start).as_secs_f32() / MAGNIFICATION_ANIM.as_secs_f32();
+                if t >= 1.0 {
+                    self.anim_start = None;
+                }
+                ease(EaseInOutCubic, self.anim_from, self.magnify_target, t)
+            }
+            None => self.magnify_target,
+        };
+        self.magnification
+    }
+
+    /// Whether the cursor is currently magnified or pending; drives continued redraws.
+    pub fn is_magnifying(&self) -> bool {
+        self.magnify_until.is_some()
+            || self.anim_start.is_some()
+            || self.magnification > 1.001
+            || self.magnify_target > 1.001
     }
 }
 
@@ -265,6 +472,14 @@ impl Default for CursorStateInner {
             hidden: false,
             idle_timer: None,
             last_armed: None,
+
+            shake_path: VecDeque::new(),
+            shake_path_position: Point::from((0.0, 0.0)),
+            magnify_until: None,
+            magnify_target: 1.0,
+            magnification: 1.0,
+            anim_from: 1.0,
+            anim_start: None,
         }
     }
 }
@@ -277,10 +492,11 @@ pub fn draw_cursor<R>(
     scale: Scale<f64>,
     buffer_scale: f64,
     time: Time<Monotonic>,
+    blur_strength: usize,
     draw_default: bool,
-) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
-where
-    R: Renderer + ImportMem + ImportAll,
+    push: &mut dyn FnMut(CursorRenderElement<R>, Point<i32, Physical>),
+) where
+    R: Renderer + ImportMem + ImportAll + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
 {
     // draw the cursor as relevant
@@ -291,7 +507,7 @@ where
     let state = &mut *state_ref;
 
     if state.hidden {
-        return Vec::new();
+        return;
     }
 
     let named_cursor = state.current_cursor.or(match cursor_status {
@@ -300,7 +516,7 @@ where
     });
     if let Some(current_cursor) = named_cursor {
         if !draw_default && current_cursor == CursorIcon::Default {
-            return Vec::new();
+            return;
         }
 
         let integer_scale = (scale.x.max(scale.y) * buffer_scale).ceil() as u32;
@@ -337,7 +553,7 @@ where
             );
         state.current_image = Some(frame);
 
-        return vec![(
+        push(
             CursorRenderElement::Static(
                 MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
@@ -351,11 +567,9 @@ where
                 .expect("Failed to import cursor bitmap"),
             ),
             hotspot.to_physical_precise_round(scale),
-        )];
+        );
     } else if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
-        return draw_surface_cursor(renderer, wl_surface, location, scale);
-    } else {
-        Vec::new()
+        draw_surface_cursor(renderer, wl_surface, location, scale, blur_strength, push);
     }
 }
 

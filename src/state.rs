@@ -8,10 +8,14 @@ use crate::{
         x11::X11State,
     },
     config::{CompOutputConfig, Config, ScreenFilter},
+<<<<<<< HEAD
     dbus::a11y_keyboard_monitor::A11yKeyboardMonitorState,
     dbus::app_interface::AppRegistryState,
     dbus::input_manager::InputManagerState,
     input::binding_resolver::BindingResolver,
+=======
+    dbus::DBusState,
+>>>>>>> upstream/master
     input::{PointerFocusState, gestures::GestureState},
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
@@ -23,6 +27,7 @@ use crate::{
             drm::WlDrmState,
             grid::GridManagerState,
             image_capture_source::CosmicImageCaptureSourceState,
+            keyboard_layout::KeyboardLayoutState,
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
@@ -38,7 +43,6 @@ use crate::{
 use anyhow::Context;
 use calloop::RegistrationToken;
 use cosmic_comp_config::output::comp::{OutputConfig, OutputState};
-use futures_executor::ThreadPool;
 use i18n_embed::{
     DesktopLanguageRequester,
     fluent::{FluentLanguageLoader, fluent_language_loader},
@@ -79,6 +83,7 @@ use smithay::{
     utils::{Clock, Monotonic, Point},
     wayland::{
         alpha_modifier::AlphaModifierState,
+        background_effect::BackgroundEffectState,
         compositor::{CompositorClientState, CompositorState, SurfaceData},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
@@ -93,6 +98,7 @@ use smithay::{
         output::OutputManagerState,
         pointer_constraints::PointerConstraintsState,
         pointer_gestures::PointerGesturesState,
+        pointer_warp::PointerWarpManager,
         presentation::PresentationState,
         seat::WaylandFocus,
         security_context::{SecurityContext, SecurityContextState},
@@ -123,7 +129,7 @@ use smithay::{
 };
 use tracing::warn;
 
-#[cfg(feature = "systemd")]
+#[cfg(feature = "logind")]
 use std::os::fd::OwnedFd;
 
 use std::{
@@ -131,7 +137,7 @@ use std::{
     cmp::min,
     collections::{HashMap, HashSet},
     ffi::OsString,
-    process::Child,
+    process::{Child, Command},
     sync::{Arc, LazyLock, Once, atomic::AtomicBool},
     time::{Duration, Instant},
 };
@@ -229,6 +235,7 @@ pub struct State {
     pub common: Common,
     pub ready: Once,
     pub last_refresh: LastRefresh,
+    pub kiosk_command: Option<Command>,
 }
 smithay::delegate_dispatch2!(State);
 
@@ -240,7 +247,6 @@ pub struct Common {
     pub display_handle: DisplayHandle,
     pub event_loop_handle: LoopHandle<'static, State>,
     pub event_loop_signal: LoopSignal,
-    pub async_executor: ThreadPool,
 
     pub popups: PopupManager,
     pub shell: Arc<parking_lot::RwLock<Shell>>,
@@ -248,9 +254,35 @@ pub struct Common {
     pub clock: Clock<Monotonic>,
     pub startup_done: Arc<AtomicBool>,
     pub should_stop: bool,
+<<<<<<< HEAD
     pub event_bus: crate::event_bus::EventBusHandle,
+=======
+    pub kiosk_exit_code: Option<i32>,
+>>>>>>> upstream/master
 
     pub gesture_state: Option<GestureState>,
+
+    /// Active libei sender seats, keyed by their `eis` connection. Tracked so their virtual
+    /// keyboards can be re-created when the keyboard configuration changes at runtime.
+    pub ei_seats: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        smithay::backend::libei::EiInputSeat,
+    >,
+
+    /// The shared-seat [`KeyboardSource`] assigned to each libei connection, so its
+    /// `ei_keyboard` key events feed the seat keyboard with independent per-source hold
+    /// tracking (and can be released together on disconnect). Keyed by connection.
+    pub ei_keyboard_source: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        smithay::input::keyboard::KeyboardSource,
+    >,
+
+    /// Pointer buttons currently held by each libei connection, so they can be released when the
+    /// connection drops
+    pub ei_pointer_buttons: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        std::collections::HashSet<u32>,
+    >,
 
     pub kiosk_child: Option<Child>,
     pub arlen_theme: arlen_theme::ArlenTheme,
@@ -288,7 +320,7 @@ pub struct Common {
     pub idle_inhibiting_surfaces: HashSet<WlSurface>,
     pub shm_state: ShmState,
     pub cursor_shape_manager_state: CursorShapeManagerState,
-    pub wl_drm_state: WlDrmState<Option<DrmNode>>,
+    pub wl_drm_state: Option<WlDrmState<Option<DrmNode>>>,
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
@@ -319,6 +351,7 @@ pub struct Common {
     /// Populated by MenuGrab when a menu is sent to the shell.
     pub pending_menu_callbacks: HashMap<u32, Vec<crate::shell::grabs::menu::Item>>,
     pub a11y_state: A11yState,
+<<<<<<< HEAD
     pub a11y_keyboard_monitor_state: A11yKeyboardMonitorState,
     /// Registration table backing the `org.arlen.App1` D-Bus
     /// service. Shared with `input_manager_state` so focused-scope
@@ -332,6 +365,11 @@ pub struct Common {
     /// Resolver merging static TOML bindings with dynamic D-Bus ones.
     /// Consulted by the input dispatcher on every keypress.
     pub binding_resolver: BindingResolver,
+=======
+    pub dbus_state: DBusState,
+    pub keyboard_layout_state: KeyboardLayoutState,
+    pub background_effect_state: BackgroundEffectState,
+>>>>>>> upstream/master
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -346,7 +384,7 @@ pub struct Common {
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
 
-    #[cfg(feature = "systemd")]
+    #[cfg(feature = "logind")]
     pub inhibit_lid_fd: Option<OwnedFd>,
 
     pub with_xwayland: bool,
@@ -373,7 +411,7 @@ pub enum LockedBackend<'a> {
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
     pub overlay_scanout_feedback: Option<DmabufFeedback>,
-    pub primary_scanout_feedback: Option<DmabufFeedback>,
+    pub primary_scanout_feedback: DmabufFeedback,
 }
 
 #[derive(Debug)]
@@ -682,6 +720,7 @@ impl State {
         handle: LoopHandle<'static, State>,
         signal: LoopSignal,
         with_xwayland: bool,
+        kiosk_command: Option<Command>,
     ) -> State {
         let requested_languages = DesktopLanguageRequester::requested_languages();
         i18n_embed::select(&*LANG_LOADER, &Localizations, &requested_languages)
@@ -726,7 +765,7 @@ impl State {
         let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self>(dh);
-        let wl_drm_state = WlDrmState::<Option<DrmNode>>::default();
+        let wl_drm_state = None;
         let kde_decoration_state = KdeDecorationState::new::<Self>(dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(dh);
         let session_lock_manager_state =
@@ -734,6 +773,7 @@ impl State {
         XWaylandKeyboardGrabState::new::<Self>(dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
         PointerConstraintsState::new::<Self>(dh);
+        PointerWarpManager::new::<Self>(dh);
         PointerGesturesState::new::<Self>(dh);
         TabletManagerState::new::<Self>(dh);
         SecurityContextState::new::<Self, _>(dh, client_has_no_security_context);
@@ -743,6 +783,9 @@ impl State {
         AlphaModifierState::new::<Self>(dh);
         SinglePixelBufferState::new::<Self>(dh);
         FixesState::new::<Self>(dh);
+        let keyboard_layout_state = KeyboardLayoutState::new::<State, _>(dh, client_not_sandboxed);
+
+        let background_effect_state = BackgroundEffectState::new::<Self>(dh);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
@@ -788,15 +831,9 @@ impl State {
         );
         let workspace_state = WorkspaceState::new(dh, client_not_sandboxed);
 
-        let async_executor = ThreadPool::builder().pool_size(1).create().unwrap();
-
-        if let Err(err) = crate::dbus::init(&handle, &async_executor) {
-            tracing::warn!(?err, "Failed to initialize dbus handlers");
-        }
-
         let a11y_state = A11yState::new::<State, _>(dh, client_not_sandboxed);
 
-        let a11y_keyboard_monitor_state = A11yKeyboardMonitorState::new(&async_executor);
+        let dbus_state = DBusState::init(&handle);
 
         // Start the org.arlen.InputManager1 D-Bus service and seed the
         // resolver with the bindings currently declared in TOML. The
@@ -838,7 +875,6 @@ impl State {
                 display_handle: dh.clone(),
                 event_loop_handle: handle,
                 event_loop_signal: signal,
-                async_executor,
 
                 popups: PopupManager::default(),
                 shell,
@@ -846,8 +882,15 @@ impl State {
                 clock,
                 startup_done: Arc::new(AtomicBool::new(false)),
                 should_stop: false,
+<<<<<<< HEAD
                 event_bus: crate::event_bus::spawn(),
+=======
+                kiosk_exit_code: None,
+>>>>>>> upstream/master
                 gesture_state: None,
+                ei_seats: std::collections::HashMap::new(),
+                ei_keyboard_source: std::collections::HashMap::new(),
+                ei_pointer_buttons: std::collections::HashMap::new(),
 
                 kiosk_child: None,
                 arlen_theme: crate::theme::arlen_theme(),
@@ -897,17 +940,23 @@ impl State {
                 xdg_activation_state,
                 xdg_foreign_state,
                 workspace_state,
+                background_effect_state,
                 a11y_state,
+<<<<<<< HEAD
                 a11y_keyboard_monitor_state,
                 app_registry_state,
                 input_manager_state,
                 binding_resolver,
+=======
+>>>>>>> upstream/master
                 xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+                dbus_state,
+                keyboard_layout_state,
 
-                #[cfg(feature = "systemd")]
+                #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
 
                 with_xwayland,
@@ -915,6 +964,7 @@ impl State {
             backend: BackendData::Unset,
             ready: Once::new(),
             last_refresh: LastRefresh::None,
+            kiosk_command,
         }
     }
 
@@ -932,7 +982,7 @@ impl State {
     }
 
     fn update_inhibitor_locks(&mut self) {
-        #[cfg(feature = "systemd")]
+        #[cfg(feature = "logind")]
         {
             use smithay::backend::session::Session;
             use tracing::{debug, error, warn};
@@ -948,7 +998,7 @@ impl State {
 
             if should_handle_lid {
                 if self.common.inhibit_lid_fd.is_none() {
-                    match crate::dbus::logind::inhibit_lid() {
+                    match crate::dbus::logind::inhibit_lid(&self.common) {
                         Ok(fd) => {
                             debug!("Inhibiting lid switch");
                             self.common.inhibit_lid_fd = Some(fd);
@@ -959,7 +1009,8 @@ impl State {
                                 .iter()
                                 .find(|o| o.is_internal())
                                 .cloned();
-                            let closed = crate::dbus::logind::lid_closed().unwrap_or(false);
+                            let closed =
+                                crate::dbus::logind::lid_closed(&self.common).unwrap_or(false);
 
                             if closed {
                                 backend.disable_internal_output(
@@ -1043,19 +1094,25 @@ impl Common {
         render_element_states: &RenderElementStates,
     ) {
         let shell = self.shell.read();
-        let processor = |surface: &WlSurface, states: &SurfaceData| {
-            let primary_scanout_output = update_surface_primary_scanout_output(
-                surface,
-                output,
-                states,
-                None,
-                render_element_states,
-                primary_scanout_output_compare,
-            );
-            if let Some(output) = primary_scanout_output {
-                with_fractional_scale(states, |fraction_scale| {
-                    fraction_scale.set_preferred_scale(output.current_scale().fractional_scale());
-                });
+        let processor = |namespace: Option<usize>| {
+            move |surface: &WlSurface, states: &SurfaceData| {
+                let primary_scanout_output = update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    states,
+                    namespace,
+                    render_element_states,
+                    primary_scanout_output_compare,
+                );
+                if let Some(output) = primary_scanout_output {
+                    with_fractional_scale(states, |fraction_scale| {
+                        // The 1.0 clamp is a workaround for Chromium
+                        // TODO: remove if Chromium ever gets fixed
+                        fraction_scale.set_preferred_scale(
+                            output.current_scale().fractional_scale().max(1.0),
+                        );
+                    });
+                }
             }
         };
 
@@ -1063,7 +1120,7 @@ impl Common {
         if let Some(session_lock) = shell.session_lock.as_ref()
             && let Some(lock_surface) = session_lock.surfaces.get(output)
         {
-            with_surfaces_surface_tree(lock_surface.wl_surface(), processor)
+            with_surfaces_surface_tree(lock_surface.wl_surface(), processor(None))
         }
 
         for seat in shell
@@ -1075,7 +1132,7 @@ impl Common {
 
             // cursor ...
             if let CursorImageStatus::Surface(wl_surface) = cursor_status {
-                with_surfaces_surface_tree(&wl_surface, processor);
+                with_surfaces_surface_tree(&wl_surface, processor(None));
             }
 
             // grabs
@@ -1083,12 +1140,12 @@ impl Common {
                 && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
             {
                 for (window, _) in grab_state.element().windows() {
-                    window.with_surfaces(processor);
+                    window.with_surfaces(processor(None));
                 }
             }
 
             if let Some(icon) = get_dnd_icon(seat) {
-                with_surfaces_surface_tree(&icon.surface, processor);
+                with_surfaces_surface_tree(&icon.surface, processor(None));
             }
         }
 
@@ -1096,7 +1153,7 @@ impl Common {
         for set in shell.workspaces.sets.values() {
             set.sticky_layer.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.with_surfaces(processor);
+                    window.with_surfaces(processor(None));
                 }
             });
         }
@@ -1104,16 +1161,16 @@ impl Common {
         // normal windows
         for space in shell.workspaces.spaces() {
             if let Some(fs) = space.get_fullscreen(shell.seats.last_active()) {
-                fs.surface.with_surfaces(processor);
+                fs.surface.with_surfaces(processor(None));
             }
             space.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.with_surfaces(processor);
+                    window.with_surfaces(processor(None));
                 }
             });
             space.minimized_windows.iter().for_each(|m| {
                 for window in m.windows() {
-                    window.with_surfaces(processor);
+                    window.with_surfaces(processor(None));
                 }
             })
         }
@@ -1121,15 +1178,16 @@ impl Common {
         // OR windows
         shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
-                with_surfaces_surface_tree(&wl_surface, processor);
+                with_surfaces_surface_tree(&wl_surface, processor(None));
             }
         });
 
         // layer surfaces
         for o in shell.outputs() {
+            let namespace = shell.workspaces.active_num(o).1;
             let map = smithay::desktop::layer_map_for_output(o);
             for layer_surface in map.layers() {
-                layer_surface.with_surfaces(processor);
+                layer_surface.with_surfaces(processor(Some(namespace)));
             }
         }
     }
@@ -1158,10 +1216,7 @@ impl Common {
                         surface,
                         render_element_states,
                         &feedback.render_feedback,
-                        feedback
-                            .primary_scanout_feedback
-                            .as_ref()
-                            .unwrap_or(&feedback.render_feedback),
+                        &feedback.primary_scanout_feedback,
                     )
                 },
             )
