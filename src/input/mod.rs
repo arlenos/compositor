@@ -2841,13 +2841,17 @@ fn target_may_receive_input(target: &PointerFocusTarget) -> bool {
         PointerFocusTarget::WlSurface { surface, .. } => {
             let ok = crate::presented::has_been_presented(surface);
             if !ok {
-                // Rate-limited by the pointer: this fires on motion as well as
-                // on clicks, so it is `debug` rather than `info`. A refusal that
-                // never appears in a journal is a rule nobody can check.
-                // `info`, not `debug`: this is the rule doing its job, it is rare
-                // by construction (a surface is unpresented for one frame at
-                // most), and at `debug` it sat under the release filter where
-                // nothing could confirm the refusal had ever happened.
+                // `info`, not `debug`: this is the rule doing its job, it is
+                // rare by construction (a surface is unpresented for one frame
+                // at most), and at `debug` it sat under the release filter where
+                // nothing could confirm the refusal had ever happened. A refusal
+                // that never appears in a journal is a rule nobody can check.
+                //
+                // The first cut argued the other way - it fires on motion and
+                // not only on clicks, so `debug` looked like the rate-limited
+                // choice - and that reasoning was left standing above the line
+                // that overruled it, so the comment told a reader the opposite
+                // of what the code does.
                 tracing::info!("presented: refusing input to a surface that has never been on screen");
             }
             ok
