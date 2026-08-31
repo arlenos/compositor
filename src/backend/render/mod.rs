@@ -15,14 +15,19 @@ use crate::{
     backend::{
         kms::render::gles::GbmGlowBackend,
         render::{
-            clipped_surface::{CLIPPING_SHADER, ClippingShader},
             element::DamageElement,
             shadow::{SHADOW_SHADER, ShadowShader},
+            wayland::{
+                SurfaceRenderElement,
+                blur_effect::BlurShaders,
+                clipped_surface::{CLIPPING_SHADER, ClippingShader},
+                push_render_elements_from_surface_tree,
+            },
         },
     },
     config::ScreenFilter,
     shell::{
-        CosmicMappedRenderElement, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
+        CosmicMappedRenderElement, OutputId, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
         WorkspaceRenderElement,
         element::CosmicMappedKey,
         focus::{FocusTarget, Stage, render_input_order, target::WindowGroup},
@@ -34,24 +39,30 @@ use crate::{
     wayland::{
         handlers::{
             compositor::FRAME_TIME_FILTER,
+            corner_radius::{pad_rect, surface_corners, surface_padding},
             data_device::get_dnd_icon,
-            image_copy_capture::{FrameHolder, SessionData, render_session},
+            image_copy_capture::{
+                FrameHolder, SessionData, render_element_buffers, render_session,
+            },
         },
         protocols::workspace::WorkspaceHandle,
     },
 };
 
+<<<<<<< HEAD
 use element::FromGlesError;
+=======
+use cosmic::Theme;
+>>>>>>> upstream/master
 use smithay::{
     backend::{
         allocator::Fourcc,
         drm::{DrmDeviceFd, DrmNode},
         renderer::{
-            Color32F, ImportAll, Offscreen, Renderer, Texture, TextureFilter,
+            Color32F, Offscreen, Texture, TextureFilter,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
-                Element, Id, Kind, RenderElement, WeakId,
-                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+                Element, Id, Kind, NamespacedElement, RenderElement, WeakId,
                 texture::{TextureRenderBuffer, TextureRenderElement},
                 utils::{
                     ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, Relocate,
@@ -68,23 +79,27 @@ use smithay::{
             sync::SyncPoint,
         },
     },
+    desktop::utils::bbox_from_surface_tree,
     input::Seat,
     output::{Output, OutputModeSource, OutputNoMode},
     utils::{
         IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
     },
-    wayland::{dmabuf::get_dmabuf, session_lock::LockSurface},
+    wayland::{compositor::with_states, dmabuf::get_dmabuf, session_lock::LockSurface},
 };
 
 #[cfg(feature = "debug")]
 use smithay_egui::EguiState;
 
 pub mod animations;
-pub mod clipped_surface;
 pub mod cursor;
 pub mod element;
 pub mod shadow;
+<<<<<<< HEAD
 pub mod window_header;
+=======
+pub mod wayland;
+>>>>>>> upstream/master
 use self::element::{AsGlowRenderer, CosmicElement};
 
 use super::kms::Timings;
@@ -270,7 +285,7 @@ impl IndicatorShader {
             .filter(|(old_settings, _)| &settings == old_settings)
             .is_none()
         {
-            let thickness: f32 = ((thickness as f64 * scale).ceil() / scale) as f32;
+            let thickness: f32 = ((thickness as f64 * scale) / scale) as f32;
             let shader = Self::get(renderer);
 
             let elem = PixelShaderElement::new(
@@ -431,6 +446,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("geo_size", UniformType::_2f),
             UniformName::new("corner_radius", UniformType::_4f),
             UniformName::new("input_to_geo", UniformType::Matrix3x3),
+            UniformName::new("noise", UniformType::_1f),
         ],
     )?;
     let shadow_shader = renderer.compile_custom_pixel_shader(
@@ -446,6 +462,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("window_corner_radius", UniformType::_4f),
         ],
     )?;
+    let blur_shaders = BlurShaders::compile(renderer)?;
 
     let egl_context = renderer.egl_context();
     egl_context
@@ -463,6 +480,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     egl_context
         .user_data()
         .insert_if_missing(|| ShadowShader(shadow_shader));
+    egl_context.user_data().insert_if_missing(|| blur_shaders);
 
     Ok(())
 }
@@ -479,13 +497,19 @@ pub fn cursor_elements<'a, 'frame, R>(
     renderer: &mut R,
     seats: impl Iterator<Item = &'a Seat<State>>,
     zoom_state: Option<&ZoomState>,
+<<<<<<< HEAD
     lt: &arlen_theme::ArlenTheme,
+=======
+    theme: &Theme,
+    blur_strength: usize,
+>>>>>>> upstream/master
     now: Time<Monotonic>,
     output: &Output,
     mode: CursorMode,
     exclude_dnd_icon: bool,
-) -> Vec<CosmicElement<R>>
-where
+    scanout_node: Option<DrmNode>,
+    push: &mut dyn FnMut(CosmicElement<R>),
+) where
     R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -499,7 +523,6 @@ where
             )
         })
         .unwrap_or_else(|| ((0., 0.).into(), 1.));
-    let mut elements = Vec::new();
 
     for seat in seats {
         let pointer = match seat.get_pointer() {
@@ -508,86 +531,98 @@ where
         };
         let location = pointer.current_location() - output.current_location().to_f64();
 
+        // Shake-to-find magnification, applied around the pointer tip.
+        let cursor_magnification = seat
+            .user_data()
+            .get::<cursor::CursorState>()
+            .map_or(1.0, |s| {
+                s.lock().unwrap().animated_magnification(Instant::now())
+            });
+        let cursor_center = location.to_physical(scale).to_i32_round();
+
         if mode != CursorMode::None {
-            elements.extend(
-                cursor::draw_cursor(
-                    renderer,
-                    seat,
-                    location,
-                    scale.into(),
-                    zoom_scale,
-                    now,
-                    mode != CursorMode::NotDefault,
-                )
-                .into_iter()
-                .map(|(elem, hotspot)| {
-                    CosmicElement::Cursor(RescaleRenderElement::from_element(
-                        RelocateRenderElement::from_element(
-                            elem,
-                            Point::from((-hotspot.x, -hotspot.y)),
-                            Relocate::Relative,
+            cursor::draw_cursor(
+                renderer,
+                seat,
+                location,
+                scale.into(),
+                zoom_scale * cursor_magnification as f64,
+                now,
+                blur_strength,
+                mode != CursorMode::NotDefault,
+                &mut |elem, hotspot| {
+                    push(CosmicElement::Cursor(RescaleRenderElement::from_element(
+                        RescaleRenderElement::from_element(
+                            RelocateRenderElement::from_element(
+                                elem,
+                                Point::from((-hotspot.x, -hotspot.y)),
+                                Relocate::Relative,
+                            ),
+                            cursor_center,
+                            cursor_magnification as f64,
                         ),
                         focal_point
                             .as_logical()
                             .to_physical(output.current_scale().fractional_scale())
                             .to_i32_round(),
                         zoom_scale,
-                    ))
-                }),
+                    )))
+                },
             );
         }
 
         if !exclude_dnd_icon && let Some(dnd_icon) = get_dnd_icon(seat) {
-            elements.extend(
-                cursor::draw_dnd_icon(
-                    renderer,
-                    &dnd_icon.surface,
-                    (location + dnd_icon.offset.to_f64()).to_i32_round(),
-                    scale,
-                )
-                .into_iter()
-                .map(CosmicElement::Dnd),
+            cursor::draw_dnd_icon(
+                renderer,
+                &dnd_icon.surface,
+                (location + dnd_icon.offset.to_f64()).to_i32_round(),
+                scale,
+                blur_strength,
+                &mut |elem| push(CosmicElement::Dnd(elem)),
             );
         }
 
+<<<<<<< HEAD
         if let Some(grab_elements) = seat
+=======
+        let theme = theme.cosmic();
+        if let Some(grab_state) = seat
+>>>>>>> upstream/master
             .user_data()
             .get::<SeatMoveGrabState>()
             .unwrap()
             .lock()
             .unwrap()
             .as_ref()
+<<<<<<< HEAD
             .map(|state| state.render::<CosmicMappedRenderElement<R>, R>(renderer, output, lt))
+=======
+>>>>>>> upstream/master
         {
-            elements.extend(grab_elements.into_iter().map(|elem| {
-                CosmicElement::MoveGrab(RescaleRenderElement::from_element(
+            grab_state.render(renderer, output, theme, scanout_node, &mut |elem| {
+                push(CosmicElement::MoveGrab(RescaleRenderElement::from_element(
                     elem,
                     focal_point
                         .as_logical()
                         .to_physical(output.current_scale().fractional_scale())
                         .to_i32_round(),
                     zoom_scale,
-                ))
-            }));
+                )));
+            })
         }
 
-        if let Some((grab_elements, should_scale)) = seat
+        if let Some(grab_state) = seat
             .user_data()
             .get::<SeatMenuGrabState>()
             .unwrap()
             .lock()
             .unwrap()
             .as_ref()
-            .map(|state| {
-                (
-                    state.render::<CosmicMappedRenderElement<R>, R>(renderer, output),
-                    !state.is_in_screen_space(),
-                )
-            })
         {
-            elements.extend(grab_elements.into_iter().map(|elem| {
-                CosmicElement::MoveGrab(RescaleRenderElement::from_element(
-                    elem,
+            let should_scale = !grab_state.is_in_screen_space();
+            grab_state.render(renderer, output, &mut |elem| {
+                push(CosmicElement::MoveGrab(RescaleRenderElement::from_element(
+                    elem.into(),
                     if should_scale {
                         focal_point
                             .as_logical()
@@ -597,12 +632,10 @@ where
                         Point::from((0, 0))
                     },
                     if should_scale { zoom_scale } else { 1.0 },
-                ))
-            }));
+                )));
+            })
         }
     }
-
-    elements
 }
 
 #[cfg(not(feature = "debug"))]
@@ -623,11 +656,11 @@ pub fn output_elements<R>(
     output: &Output,
     cursor_mode: CursorMode,
     _fps: Option<(&EguiState, &Timings)>,
+    scanout_node: Option<DrmNode>,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
     R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
-    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
@@ -654,7 +687,7 @@ where
                     ),
                     scale,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
                 .map_err(RenderError::Rendering)?
                 .into(),
             ]
@@ -698,6 +731,7 @@ where
         workspace,
         cursor_mode,
         element_filter,
+        scanout_node,
     )?;
 
     #[cfg(feature = "debug")]
@@ -721,26 +755,32 @@ pub fn workspace_elements<R>(
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
+    scanout_node: Option<DrmNode>,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
     R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
-    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let mut elements = Vec::new();
+    let mut elements = Vec::<CosmicElement<R>>::new();
 
     let shell_ref = shell.read();
     let seats = shell_ref.seats.iter().cloned().collect::<Vec<_>>();
     if seats.is_empty() {
         return Ok(Vec::new());
     }
+<<<<<<< HEAD
+=======
+    let theme = shell_ref.theme().clone();
+    let blur_strength = (theme.cosmic().frosted as u8 + 1) as usize;
+>>>>>>> upstream/master
     let scale = output.current_scale().fractional_scale();
     // we don't want to hold a shell lock across `cursor_elements`,
     // that is prone to deadlock with the main-thread on some grabs.
     std::mem::drop(shell_ref);
 
+<<<<<<< HEAD
     {
         let lt = &shell.read().arlen_theme.clone();
         elements.extend(cursor_elements(
@@ -754,6 +794,21 @@ where
             element_filter == ElementFilter::ExcludeWorkspaceOverview,
         ));
     }
+=======
+    cursor_elements(
+        renderer,
+        seats.iter(),
+        zoom_level,
+        &theme,
+        blur_strength,
+        now,
+        output,
+        cursor_mode,
+        element_filter == ElementFilter::ExcludeWorkspaceOverview,
+        scanout_node,
+        &mut |elem| elements.push(elem),
+    );
+>>>>>>> upstream/master
 
     let shell = shell.read();
     let overview = shell.overview_mode();
@@ -832,73 +887,137 @@ where
     render_input_order::<()>(&shell, output, previous, current, element_filter, |stage| {
         match stage {
             Stage::ZoomUI => {
+<<<<<<< HEAD
                 // Zoom toolbar rendering is now handled by desktop-shell
                 // via the shell overlay protocol.
+=======
+                ZoomState::render(renderer, output, &mut |elem| {
+                    elements.push(CosmicElement::Zoom(elem))
+                });
+>>>>>>> upstream/master
             }
             Stage::SessionLock(lock_surface) => {
-                elements.extend(
-                    session_lock_elements(renderer, output, lock_surface)
-                        .into_iter()
-                        .map(Into::into)
-                        .flat_map(crop_to_output)
-                        .map(Into::into),
-                );
+                session_lock_elements(renderer, output, lock_surface, blur_strength, &mut |elem| {
+                    elements.extend(crop_to_output(elem.into()).map(Into::into))
+                })
             }
             Stage::LayerPopup {
-                popup, location, ..
+                popup,
+                location,
+                workspace_idx,
+                ..
             } => {
-                elements.extend(
-                    render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
-                        renderer,
-                        popup.wl_surface(),
-                        location
-                            .to_local(output)
-                            .as_logical()
-                            .to_physical_precise_round(scale),
-                        Scale::from(scale),
-                        1.0,
-                        FRAME_TIME_FILTER,
-                    )
-                    .into_iter()
-                    .flat_map(crop_to_output)
-                    .map(Into::into),
-                );
+                let mut geometry = popup.geometry().as_global();
+                geometry.loc += location;
+
+                let radii = with_states(popup.wl_surface(), |states| {
+                    surface_corners(states, geometry.size.as_logical())
+                })
+                .unwrap_or([0; 4]);
+
+                let namespace = output
+                    .user_data()
+                    .get::<OutputId>()
+                    .map(|id| id.namespace_for_workspace(workspace_idx))
+                    .unwrap_or(workspace_idx);
+
+                push_render_elements_from_surface_tree(
+                    renderer,
+                    popup.wl_surface(),
+                    location
+                        .to_local(output)
+                        .as_logical()
+                        .to_physical_precise_round(scale),
+                    geometry.to_local(output).as_logical().to_f64(),
+                    Scale::from(scale),
+                    1.0,
+                    false,
+                    radii,
+                    None,
+                    blur_strength,
+                    FRAME_TIME_FILTER,
+                    &mut |elem| {
+                        elements.extend(
+                            crop_to_output(NamespacedElement::new(elem, namespace).into())
+                                .map(Into::into),
+                        )
+                    },
+                    None,
+                )
             }
-            Stage::LayerSurface { layer, location } => {
-                elements.extend(
-                    render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
-                        renderer,
-                        layer.wl_surface(),
-                        location
-                            .to_local(output)
-                            .as_logical()
-                            .to_physical_precise_round(scale),
-                        Scale::from(scale),
-                        1.0,
-                        FRAME_TIME_FILTER,
-                    )
-                    .into_iter()
-                    .flat_map(crop_to_output)
-                    .map(Into::into),
+            Stage::LayerSurface {
+                layer,
+                location,
+                workspace_idx,
+            } => {
+                let mut geometry = layer.geometry().as_global();
+                geometry.loc += location;
+                let geometry = geometry.to_local(output).as_logical();
+
+                let padded = with_states(layer.wl_surface(), |states| {
+                    surface_padding(states, geometry.size)
+                        .and_then(|padding| pad_rect(geometry, &padding))
+                })
+                .unwrap_or(geometry);
+                let radii = with_states(layer.wl_surface(), |states| {
+                    surface_corners(states, padded.size)
+                })
+                .unwrap_or([0; 4]);
+
+                let namespace = output
+                    .user_data()
+                    .get::<OutputId>()
+                    .map(|id| id.namespace_for_workspace(workspace_idx))
+                    .unwrap_or(workspace_idx);
+
+                push_render_elements_from_surface_tree(
+                    renderer,
+                    layer.wl_surface(),
+                    location
+                        .to_local(output)
+                        .as_logical()
+                        .to_physical_precise_round(scale),
+                    geometry.to_f64(),
+                    Scale::from(scale),
+                    1.0,
+                    false,
+                    radii,
+                    padded.to_f64(),
+                    blur_strength,
+                    FRAME_TIME_FILTER,
+                    &mut |elem| {
+                        elements.extend(
+                            crop_to_output(NamespacedElement::new(elem, namespace).into())
+                                .map(Into::into),
+                        )
+                    },
+                    None,
                 );
             }
             Stage::OverrideRedirect { surface, location } => {
-                elements.extend(surface.wl_surface().into_iter().flat_map(|surface| {
-                    render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
+                if let Some(wl_surface) = surface.wl_surface() {
+                    let mut geometry = surface.geometry().as_global();
+                    geometry.loc += location;
+
+                    push_render_elements_from_surface_tree(
                         renderer,
-                        &surface,
+                        &wl_surface,
                         location
                             .to_local(output)
                             .as_logical()
                             .to_physical_precise_round(scale),
+                        geometry.to_local(output).as_logical().to_f64(),
                         Scale::from(scale),
                         1.0,
+                        false,
+                        [0; 4],
+                        None,
+                        blur_strength,
                         FRAME_TIME_FILTER,
-                    )
-                    .into_iter()
-                    .flat_map(crop_to_output)
-                    .map(Into::into)
-                }));
+                        &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
+                        None,
+                    );
+                }
             }
             Stage::StickyPopups(layout) => {
                 let alpha = match &overview.0 {
@@ -919,14 +1038,11 @@ where
                     OverviewMode::None => 1.0,
                 };
 
-                elements.extend(
-                    layout
-                        .render_popups(renderer, alpha)
-                        .into_iter()
-                        .map(Into::into)
-                        .flat_map(crop_to_output)
-                        .map(Into::into),
-                );
+                layout.render_popups(renderer, alpha, scanout_node, &mut |elem| {
+                    if let Some(elem) = crop_to_output(elem.into()) {
+                        elements.push(elem.into())
+                    }
+                });
             }
             Stage::Sticky(layout) => {
                 let alpha = match &overview.0 {
@@ -951,6 +1067,7 @@ where
                     .then_some(last_active_seat)
                     .map(|seat| workspace.focus_stack.get(seat));
 
+<<<<<<< HEAD
                 elements.extend(
                     layout
                         .render(
@@ -993,11 +1110,51 @@ where
                         }
                         Err(_) => {
                             return ControlFlow::Break(Err(OutputNoMode));
+=======
+                layout.render(
+                    renderer,
+                    current_focus.as_ref().and_then(|stack| {
+                        stack.last().and_then(|t| match t {
+                            FocusTarget::Window(w) => Some(w),
+                            _ => None,
+                        })
+                    }),
+                    resize_indicator.clone(),
+                    active_hint,
+                    alpha,
+                    theme.cosmic(),
+                    scanout_node,
+                    &mut |elem| {
+                        if let Some(elem) = crop_to_output(elem.into()) {
+                            elements.push(elem.into())
+                        }
+                    },
+                );
+            }
+            Stage::WorkspacePopups { workspace, offset } => {
+                workspace.render_popups(
+                    renderer,
+                    last_active_seat,
+                    !move_active && is_active_space,
+                    overview.clone(),
+                    theme.cosmic(),
+                    scanout_node,
+                    &mut |elem| {
+                        if let Some(elem) = crop_to_output(elem) {
+                            elements.push(CosmicElement::Workspace(
+                                RelocateRenderElement::from_element(
+                                    elem,
+                                    offset.to_physical_precise_round(scale),
+                                    Relocate::Relative,
+                                ),
+                            ));
+>>>>>>> upstream/master
                         }
                     },
                 );
             }
             Stage::Workspace { workspace, offset } => {
+<<<<<<< HEAD
                 elements.extend(
                     match workspace.render(
                         renderer,
@@ -1021,6 +1178,26 @@ where
                         }
                         Err(_) => {
                             return ControlFlow::Break(Err(OutputNoMode));
+=======
+                workspace.render(
+                    renderer,
+                    last_active_seat,
+                    !move_active && is_active_space,
+                    overview.clone(),
+                    resize_indicator.clone(),
+                    active_hint,
+                    theme.cosmic(),
+                    scanout_node,
+                    &mut |elem| {
+                        if let Some(elem) = crop_to_output(elem) {
+                            elements.push(CosmicElement::Workspace(
+                                RelocateRenderElement::from_element(
+                                    elem,
+                                    offset.to_physical_precise_round(scale),
+                                    Relocate::Relative,
+                                ),
+                            ));
+>>>>>>> upstream/master
                         }
                     },
                 );
@@ -1037,23 +1214,29 @@ fn session_lock_elements<R>(
     renderer: &mut R,
     output: &Output,
     lock_surface: Option<&LockSurface>,
-) -> Vec<WaylandSurfaceRenderElement<R>>
-where
-    R: Renderer + ImportAll,
+    blur_strength: usize,
+    push: &mut dyn FnMut(SurfaceRenderElement<R>),
+) where
+    R: AsGlowRenderer,
     R::TextureId: Clone + 'static,
 {
     if let Some(surface) = lock_surface {
         let scale = Scale::from(output.current_scale().fractional_scale());
-        render_elements_from_surface_tree(
+        push_render_elements_from_surface_tree(
             renderer,
             surface.wl_surface(),
             (0, 0),
+            bbox_from_surface_tree(surface.wl_surface(), (0, 0)).to_f64(),
             scale,
             1.0,
+            false,
+            [0; 4],
+            None,
+            blur_strength,
             FRAME_TIME_FILTER,
+            push,
+            None,
         )
-    } else {
-        Vec::new()
     }
 }
 
@@ -1201,7 +1384,6 @@ pub fn render_output<'d, R>(
 where
     R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
-    R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
@@ -1472,11 +1654,16 @@ where
                             }
                         }
 
-                        Ok(RenderOutputResult {
-                            damage: res.0,
-                            sync,
-                            states: res.1,
-                        })
+                        let buffers = render_element_buffers(renderer, &elements);
+
+                        Ok((
+                            RenderOutputResult {
+                                damage: res.0,
+                                sync,
+                                states: res.1,
+                            },
+                            buffers,
+                        ))
                     },
                 )? {
                     pending_image_copy_data.send_success_when_ready(
@@ -1513,12 +1700,23 @@ pub fn render_workspace<'d, R>(
 where
     R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
-    R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let elements: Vec<CosmicElement<R>> = workspace_elements(
+    let mut elements: Vec<CosmicElement<R>> = if let Some(additional_damage) = additional_damage {
+        let output_geo = output.geometry().to_local(output).as_logical();
+        additional_damage
+            .into_iter()
+            .filter_map(|rect| rect.intersection(output_geo))
+            .map(DamageElement::new)
+            .map(CosmicElement::from)
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    elements.extend(workspace_elements(
         gpu,
         renderer,
         shell,
@@ -1529,17 +1727,8 @@ where
         current,
         cursor_mode,
         element_filter,
-    )?;
-
-    if let Some(additional_damage) = additional_damage {
-        let output_geo = output.geometry().to_local(output).as_logical();
-        let additional_damage_elements: Vec<_> = additional_damage
-            .into_iter()
-            .filter_map(|rect| rect.intersection(output_geo))
-            .map(DamageElement::new)
-            .collect();
-        damage_tracker.damage_output(age, &additional_damage_elements)?;
-    }
+        None,
+    )?);
 
     let res = damage_tracker.render_output(
         renderer,

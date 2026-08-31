@@ -2,6 +2,7 @@
 
 use crate::{
     config::{Action, PrivateAction},
+    input::InputBackendId,
     shell::{
         FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
         focus::{FocusTarget, target::KeyboardFocusTarget},
@@ -16,6 +17,7 @@ use cosmic_comp_config::{TileBehavior, workspace::WorkspaceLayout};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 use smithay::{
+    backend::input::InputTime,
     input::{Seat, pointer::MotionEvent},
     utils::{Point, Serial},
 };
@@ -27,6 +29,7 @@ use std::{os::unix::process::CommandExt, thread};
 
 use super::gestures;
 
+<<<<<<< HEAD
 /// What the `KeyboardLayout*` private actions want to do. Internal to
 /// `input::actions`, so a plain enum instead of another `PrivateAction`
 /// variant.
@@ -36,6 +39,9 @@ enum LayoutSwitch {
     /// Jump to 1-based index N.
     Set(u8),
 }
+=======
+const MAX_ZOOM: f64 = 256.0;
+>>>>>>> upstream/master
 
 fn propagate_by_default(action: &shortcuts::Action) -> bool {
     matches!(
@@ -48,9 +54,10 @@ impl State {
     pub fn handle_action(
         &mut self,
         action: Action,
+        backend_id: &InputBackendId,
         seat: &Seat<State>,
         serial: Serial,
-        time: u32,
+        time: InputTime,
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
     ) {
@@ -78,7 +85,7 @@ impl State {
             Action::Shortcut(action) => {
                 let propagate = propagate_by_default(&action);
                 self.handle_shortcut_action(
-                    action, seat, serial, time, pattern, direction, propagate,
+                    action, backend_id, seat, serial, time, pattern, direction, propagate,
                 )
             }
             Action::Private(PrivateAction::Escape) => {
@@ -286,9 +293,10 @@ impl State {
     pub fn handle_shortcut_action(
         &mut self,
         action: shortcuts::Action,
+        backend_id: &InputBackendId,
         seat: &Seat<State>,
         serial: Serial,
-        time: u32,
+        time: InputTime,
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
         propagate: bool,
@@ -375,6 +383,7 @@ impl State {
                 {
                     self.handle_shortcut_action(
                         Action::SwitchOutput(inferred),
+                        backend_id,
                         seat,
                         serial,
                         time,
@@ -414,6 +423,7 @@ impl State {
                 {
                     self.handle_shortcut_action(
                         Action::SwitchOutput(inferred),
+                        backend_id,
                         seat,
                         serial,
                         time,
@@ -535,6 +545,7 @@ impl State {
                                 } else {
                                     Action::SendToOutput(inferred)
                                 },
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -560,6 +571,7 @@ impl State {
                                 } else {
                                     Action::SendToWorkspace(1)
                                 },
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -626,6 +638,7 @@ impl State {
                                 } else {
                                     Action::SendToOutput(inferred)
                                 },
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -651,6 +664,7 @@ impl State {
                                 } else {
                                     Action::SendToLastWorkspace
                                 },
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -675,7 +689,9 @@ impl State {
                         if propagate
                             && let Some((serial, prev_output, prev_idx)) =
                                 shell.previous_workspace_idx.take()
-                            && seat.last_modifier_change().is_some_and(|s| s == serial)
+                            && seat
+                                .last_modifier_change_for(backend_id)
+                                .is_some_and(|s| s == serial)
                             && prev_output == current_output
                         {
                             let _ = shell.activate(
@@ -856,6 +872,7 @@ impl State {
                         if res.is_ok() {
                             self.handle_shortcut_action(
                                 Action::SwitchOutput(direction),
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -892,7 +909,8 @@ impl State {
                         };
 
                         if let Some(direction) = dir {
-                            if let Some(last_mod_serial) = seat.last_modifier_change() {
+                            if let Some(last_mod_serial) = seat.last_modifier_change_for(backend_id)
+                            {
                                 let mut shell = self.common.shell.write();
                                 if !shell
                                     .previous_workspace_idx
@@ -927,6 +945,7 @@ impl State {
 
                             self.handle_shortcut_action(
                                 action,
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -951,7 +970,7 @@ impl State {
                     .move_current_element(direction, seat);
                 match res {
                     MoveResult::MoveFurther(_move_further) => {
-                        if let Some(last_mod_serial) = seat.last_modifier_change() {
+                        if let Some(last_mod_serial) = seat.last_modifier_change_for(backend_id) {
                             let mut shell = self.common.shell.write();
                             if !shell
                                 .previous_workspace_idx
@@ -985,6 +1004,7 @@ impl State {
 
                         self.handle_shortcut_action(
                             action,
+                            backend_id,
                             seat,
                             serial,
                             time,
@@ -1369,7 +1389,14 @@ impl State {
         }
 
         if zoom_seat == *seat {
-            let new_level = (current_level + change).max(1.0);
+            let factor = 1.0 + change.abs();
+            let new_level = if change < 0. {
+                current_level / factor
+            } else {
+                current_level * factor
+            }
+            .clamp(1.0, MAX_ZOOM);
+            let new_level = if new_level < 1.01 { 1.0 } else { new_level };
             shell.trigger_zoom(
                 seat,
                 Some(&output),

@@ -20,7 +20,7 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         drm::DrmNode,
-        input::{ButtonState, KeyState, Keycode},
+        input::{ButtonState, InputTime, KeyState, Keycode},
         renderer::{
             Bind, Frame, Offscreen, Renderer,
             element::{
@@ -115,6 +115,7 @@ impl State {
             &self.common.display_handle,
             None,
             std::iter::empty::<(OsString, OsString)>(),
+            ["-enable-ei-portal"],
             true,
             Stdio::null(),
             Stdio::null(),
@@ -393,8 +394,9 @@ impl Common {
         sym: Keysym,
         code: Keycode,
         state: KeyState,
+        modifiers: ModifiersState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         let config = self.config.cosmic_conf.xwayland_eavesdropping.keyboard;
         if config == EavesdroppingKeyboardMode::None {
@@ -417,7 +419,6 @@ impl Common {
             .last_active()
             .get_keyboard()
             .unwrap();
-        let modifiers = keyboard.modifier_state();
         let is_modifier = sym.is_modifier_key();
 
         let xstate = self.xwayland_state.as_mut().unwrap();
@@ -457,7 +458,7 @@ impl Common {
 
         tracing::trace!("Forwaring key {} {:?} to xwayland", code.raw() - 8, state);
         for wl_keyboard in keyboard.client_keyboards(&xstate.client) {
-            wl_keyboard.key(serial.into(), time, code.raw() - 8, state.into());
+            wl_keyboard.key(serial.into(), time.millis(), code.raw() - 8, state.into());
             if xstate.last_modifier_state != Some(modifiers) {
                 xstate.last_modifier_state = Some(modifiers);
                 wl_keyboard.modifiers(
@@ -477,7 +478,7 @@ impl Common {
         button: u32,
         state: ButtonState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         if !self.config.cosmic_conf.xwayland_eavesdropping.pointer {
             return;
@@ -517,7 +518,7 @@ impl Common {
 
         tracing::trace!("Forwaring ptr button {} {:?} to Xwayland", button, state);
         for wl_pointer in pointer.client_pointers(&xstate.client) {
-            wl_pointer.button(serial.into(), time, button, state.into());
+            wl_pointer.button(serial.into(), time.millis(), button, state.into());
         }
     }
 
@@ -806,9 +807,17 @@ impl XwmHandler for State {
                 *context,
             );
         }
-        if !shell.pending_windows.iter().any(|w| w.surface == window) {
-            let fullscreen = window.is_fullscreen().then(|| seat.active_output());
-            let maximized = window.is_maximized();
+        let fullscreen = window.is_fullscreen().then(|| seat.active_output());
+        let maximized = window.is_maximized();
+        if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|w| w.surface == window)
+        {
+            pending.seat = seat;
+            pending.fullscreen = fullscreen;
+            pending.maximized = maximized;
+        } else {
             let surface = CosmicSurface::from(window);
             shell.pending_windows.push(PendingWindow {
                 surface,
@@ -865,6 +874,7 @@ impl XwmHandler for State {
                 let seat = shell.seats.last_active().clone();
                 let app_id = window.app_id();
                 std::mem::drop(shell);
+<<<<<<< HEAD
                 if let Some(payload) = maybe_payload {
                     tracing::info!(
                         "X11-DEBUG HEADER show surface_id={} app_id={:?} title={:?} \
@@ -892,6 +902,9 @@ impl XwmHandler for State {
                 }
                 self.common.event_bus.emit_window_opened(&app_id);
                 Shell::set_focus(self, Some(&target), &seat, None, false);
+=======
+                Shell::set_focus_on_x11_map(self, &target, &seat, false);
+>>>>>>> upstream/master
             }
         }
     }

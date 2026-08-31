@@ -362,6 +362,7 @@ impl XdgShellHandler for State {
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+<<<<<<< HEAD
         let app_id = CosmicSurface::from(surface.clone()).app_id();
         self.common.event_bus.emit_window_closed(&app_id);
 
@@ -376,9 +377,45 @@ impl XdgShellHandler for State {
         };
         tracing::info!("HEADER hide surface_id={}", header_id);
         self.common.shell_overlay_state.send_window_header_hide(header_id);
+=======
+        for (popup, _) in smithay::desktop::PopupManager::popups_for_surface(surface.wl_surface()) {
+            if let smithay::desktop::PopupKind::Xdg(ref xdg_popup) = popup {
+                xdg_popup.send_popup_done();
+            }
+        }
+>>>>>>> upstream/master
 
         let (output, clients) = {
             let mut shell = self.common.shell.write();
+
+            for seat in shell.seats.iter() {
+                if let Some(data) = seat.user_data().get::<PopupGrabData>() {
+                    let mut should_ungrab = false;
+                    let grab = data.take();
+                    if let Some(ref grab) = grab {
+                        if grab.has_ended() {
+                            should_ungrab = true;
+                        } else if let Some(target) = grab.current_grab()
+                            && let Some(wl_surface) = target.wl_surface()
+                            && (wl_surface.as_ref() == surface.wl_surface()
+                                || smithay::desktop::PopupManager::popups_for_surface(
+                                    surface.wl_surface(),
+                                )
+                                .any(|(p, _)| p.wl_surface() == wl_surface.as_ref()))
+                        {
+                            should_ungrab = true;
+                        }
+                    }
+                    if should_ungrab {
+                        if let Some(mut grab) = grab {
+                            grab.ungrab(PopupUngrabStrategy::All);
+                        }
+                    } else {
+                        data.set(grab);
+                    }
+                }
+            }
+
             let seat = shell.seats.last_active().clone();
 
             // Clean up pending_windows for surfaces that were never mapped.

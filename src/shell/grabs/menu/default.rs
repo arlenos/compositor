@@ -1,7 +1,8 @@
 use cosmic_settings_config::shortcuts::Action;
 use smithay::{
-    input::pointer::MotionEvent, reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::SERIAL_COUNTER, wayland::seat::WaylandFocus,
+    backend::input::InputTime, input::pointer::MotionEvent,
+    reexports::wayland_server::protocol::wl_surface::WlSurface, utils::SERIAL_COUNTER,
+    wayland::seat::WaylandFocus,
 };
 
 use crate::{
@@ -477,7 +478,163 @@ pub fn window_items(
                             }
                         }
                     }
+<<<<<<< HEAD
                 });
+=======
+                }
+            });
+        })),
+        Some(Item::new_submenu(
+            fl!("window-menu-resize"),
+            vec![
+                Item::new(fl!("window-menu-resize-edge-top"), move |handle| {
+                    let resize_clone = resize_top_clone.clone();
+                    let _ = handle.insert_idle(move |state| {
+                        let mut shell = state.common.shell.write();
+                        let seat = shell.seats.last_active().clone();
+                        let res = shell.menu_resize_request(
+                            &resize_clone,
+                            &seat,
+                            ResizeEdge::TOP,
+                            state.common.config.cosmic_conf.edge_snap_threshold,
+                        );
+
+                        std::mem::drop(shell);
+                        if let Some(((target, loc), (grab, focus))) = res {
+                            let serial = SERIAL_COUNTER.next_serial();
+                            if grab.is_touch_grab() {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial);
+                            } else {
+                                let pointer = seat.get_pointer().unwrap();
+                                pointer.motion(
+                                    state,
+                                    target,
+                                    &MotionEvent {
+                                        location: loc.as_logical().to_f64(),
+                                        serial,
+                                        time: InputTime::now(),
+                                    },
+                                );
+                                pointer.frame(state);
+                                pointer.set_grab(state, grab, serial, focus);
+                            }
+                        }
+                    });
+                })
+                .disabled(!possible_resizes.contains(ResizeEdge::TOP)),
+                Item::new(fl!("window-menu-resize-edge-left"), move |handle| {
+                    let resize_clone = resize_left_clone.clone();
+                    let _ = handle.insert_idle(move |state| {
+                        let mut shell = state.common.shell.write();
+                        let seat = shell.seats.last_active().clone();
+                        let res = shell.menu_resize_request(
+                            &resize_clone,
+                            &seat,
+                            ResizeEdge::LEFT,
+                            state.common.config.cosmic_conf.edge_snap_threshold,
+                        );
+
+                        std::mem::drop(shell);
+                        if let Some(((target, loc), (grab, focus))) = res {
+                            let serial = SERIAL_COUNTER.next_serial();
+                            if grab.is_touch_grab() {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial);
+                            } else {
+                                let pointer = seat.get_pointer().unwrap();
+                                pointer.motion(
+                                    state,
+                                    target,
+                                    &MotionEvent {
+                                        location: loc.as_logical().to_f64(),
+                                        serial,
+                                        time: InputTime::now(),
+                                    },
+                                );
+                                pointer.frame(state);
+                                pointer.set_grab(state, grab, serial, focus);
+                            }
+                        }
+                    });
+                })
+                .disabled(!possible_resizes.contains(ResizeEdge::LEFT)),
+                Item::new(fl!("window-menu-resize-edge-right"), move |handle| {
+                    let resize_clone = resize_right_clone.clone();
+                    let _ = handle.insert_idle(move |state| {
+                        let mut shell = state.common.shell.write();
+                        let seat = shell.seats.last_active().clone();
+                        let res = shell.menu_resize_request(
+                            &resize_clone,
+                            &seat,
+                            ResizeEdge::RIGHT,
+                            state.common.config.cosmic_conf.edge_snap_threshold,
+                        );
+
+                        std::mem::drop(shell);
+                        if let Some(((target, loc), (grab, focus))) = res {
+                            let serial = SERIAL_COUNTER.next_serial();
+                            if grab.is_touch_grab() {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial);
+                            } else {
+                                let pointer = seat.get_pointer().unwrap();
+                                pointer.motion(
+                                    state,
+                                    target,
+                                    &MotionEvent {
+                                        location: loc.as_logical().to_f64(),
+                                        serial,
+                                        time: InputTime::now(),
+                                    },
+                                );
+                                pointer.frame(state);
+                                pointer.set_grab(state, grab, serial, focus);
+                            }
+                        }
+                    });
+                })
+                .disabled(!possible_resizes.contains(ResizeEdge::RIGHT)),
+                Item::new(fl!("window-menu-resize-edge-bottom"), move |handle| {
+                    let resize_clone = resize_bottom_clone.clone();
+                    let _ = handle.insert_idle(move |state| {
+                        let mut shell = state.common.shell.write();
+                        let seat = shell.seats.last_active().clone();
+                        let res = shell.menu_resize_request(
+                            &resize_clone,
+                            &seat,
+                            ResizeEdge::BOTTOM,
+                            state.common.config.cosmic_conf.edge_snap_threshold,
+                        );
+
+                        std::mem::drop(shell);
+                        if let Some(((target, loc), (grab, focus))) = res {
+                            let serial = SERIAL_COUNTER.next_serial();
+                            if grab.is_touch_grab() {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial);
+                            } else {
+                                let pointer = seat.get_pointer().unwrap();
+                                pointer.motion(
+                                    state,
+                                    target,
+                                    &MotionEvent {
+                                        location: loc.as_logical().to_f64(),
+                                        serial,
+                                        time: InputTime::now(),
+                                    },
+                                );
+                                pointer.frame(state);
+                                pointer.set_grab(state, grab, serial, focus);
+                            }
+                        }
+                    });
+                })
+                .disabled(!possible_resizes.contains(ResizeEdge::BOTTOM)),
+            ],
+        )),
+        Some(
+            Item::new(fl!("window-menu-move-prev-workspace"), move |handle| {
+                let mapped = move_prev_clone.clone();
+                let _ =
+                    handle.insert_idle(move |state| move_element_prev_workspace(state, &mapped));
+>>>>>>> upstream/master
             })
             .action(WindowAction::Move),
         ),

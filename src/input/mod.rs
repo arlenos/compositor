@@ -11,7 +11,7 @@ use crate::{
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
-        LastModifierChange, SeatExt, Trigger,
+        SeatExt, Trigger,
         focus::{
             Stage, render_input_order,
             target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -25,7 +25,8 @@ use crate::{
     },
     utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::handlers::{
-        image_copy_capture::SessionHolder, xwayland_keyboard_grab::XWaylandGrabSeat,
+        image_copy_capture::{SessionHolder, cursor_capture_constraints},
+        xwayland_keyboard_grab::XWaylandGrabSeat,
     },
 };
 use calloop::{
@@ -35,53 +36,51 @@ use calloop::{
 use cosmic_comp_config::{NumlockState, workspace::WorkspaceLayout};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
+#[cfg(feature = "logind")]
+use smithay::backend::input::{Switch, SwitchState, SwitchToggleEvent};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisRelativeDirection, AxisSource, Device, DeviceCapability,
         GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _,
-        GestureSwipeUpdateEvent as _, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
-        PointerAxisEvent, ProximityState, Switch, SwitchState, SwitchToggleEvent,
-        TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
-        TabletToolTipState, TouchEvent,
+        GestureSwipeUpdateEvent as _, InputBackend, InputEvent, InputTime, KeyState,
+        PointerAxisEvent, ProximityState, TabletToolButtonEvent, TabletToolEvent,
+        TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState, TouchEvent,
     },
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
         Seat,
-        keyboard::{FilterResult, KeysymHandle, ModifiersState},
+        keyboard::{FilterResult, KeyboardSource, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
             PointerGrab, PointerHandle, RelativeMotionEvent,
         },
+        tablet::{TabletDescriptor, TabletSeatTrait, tool},
         touch::{DownEvent, MotionEvent as TouchMotionEvent, UpEvent},
     },
     output::Output,
     reexports::{
         input::Device as InputDevice,
-        wayland_server::{
-            Resource as _,
-            protocol::{wl_shm::Format as ShmFormat, wl_surface::WlSurface},
-        },
+        wayland_server::{Resource as _, protocol::wl_surface::WlSurface},
     },
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Clock, Logical, Monotonic, Point, Rectangle, SERIAL_COUNTER, Serial, Size},
     wayland::{
         compositor::CompositorHandler,
-        image_copy_capture::{BufferConstraints, CursorSessionRef},
+        image_copy_capture::CursorSessionRef,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{PointerConstraint, with_pointer_constraint},
         seat::WaylandFocus,
-        tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },
 };
-use tracing::{error, trace, warn};
+use tracing::{error, trace};
 use xkbcommon::xkb::{Keycode, Keysym};
 
 use std::{
     any::Any,
     borrow::Cow,
     cell::RefCell,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ops::ControlFlow,
     time::{Duration, Instant},
 };
@@ -89,6 +88,19 @@ use std::{
 pub mod actions;
 pub mod binding_resolver;
 pub mod gestures;
+
+/// Identifies the input backend instance an event came from, used to disambiguate device ids
+/// (which are only unique within a single backend instance, see
+/// [`smithay::backend::input::Device::id`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum InputBackendId {
+    /// The session input backend (libinput / winit / x11) these are mutually exclusive
+    Normal,
+    /// A specific Ei client connection
+    Ei(smithay::reexports::reis::eis::Connection),
+    /// The `zwp_virtual_keyboard_v1` protocol (all virtual keyboards share this source)
+    VirtualKeyboard,
+}
 
 /// Used for debouncing focus updates due to pointer motion, if after the focus change is
 /// triggered the event will cancel if the pointer moves to the original target
@@ -102,19 +114,35 @@ pub struct PointerFocusState {
 }
 
 #[derive(Default)]
-pub struct SupressedKeys(RefCell<Vec<(Keycode, Option<RegistrationToken>)>>);
+pub struct SupressedKeys(
+    RefCell<HashMap<InputBackendId, Vec<(Keycode, Option<RegistrationToken>)>>>,
+);
 #[derive(Default)]
-pub struct SupressedButtons(RefCell<HashSet<u32>>);
+pub struct SupressedButtons(RefCell<HashMap<InputBackendId, HashSet<u32>>>);
 #[derive(Default, Debug)]
-pub struct ModifiersShortcutQueue(RefCell<Option<shortcuts::Binding>>);
+pub struct ModifiersShortcutQueue(RefCell<HashMap<InputBackendId, shortcuts::Binding>>);
 
 impl SupressedKeys {
-    fn add(&self, keysym: &KeysymHandle, token: impl Into<Option<RegistrationToken>>) {
-        self.0.borrow_mut().push((keysym.raw_code(), token.into()));
+    fn add(
+        &self,
+        backend_id: &InputBackendId,
+        keysym: &KeysymHandle,
+        token: impl Into<Option<RegistrationToken>>,
+    ) {
+        self.0
+            .borrow_mut()
+            .entry(backend_id.clone())
+            .or_default()
+            .push((keysym.raw_code(), token.into()));
     }
 
-    fn filter(&self, keysym: &KeysymHandle) -> Option<Vec<RegistrationToken>> {
-        let mut keys = self.0.borrow_mut();
+    fn filter(
+        &self,
+        backend_id: &InputBackendId,
+        keysym: &KeysymHandle,
+    ) -> Option<Vec<RegistrationToken>> {
+        let mut by_source = self.0.borrow_mut();
+        let keys = by_source.get_mut(backend_id)?;
         let (removed, remaining) = keys
             .drain(..)
             .partition(|(key, _)| *key == keysym.raw_code());
@@ -131,15 +159,30 @@ impl SupressedKeys {
                 .collect::<Vec<_>>(),
         )
     }
+
+    fn clear_source(&self, backend_id: &InputBackendId) {
+        self.0.borrow_mut().remove(backend_id);
+    }
 }
 
 impl SupressedButtons {
-    fn add(&self, button: u32) {
-        self.0.borrow_mut().insert(button);
+    fn add(&self, backend_id: &InputBackendId, button: u32) {
+        self.0
+            .borrow_mut()
+            .entry(backend_id.clone())
+            .or_default()
+            .insert(button);
     }
 
-    fn remove(&self, button: u32) -> bool {
-        self.0.borrow_mut().remove(&button)
+    fn remove(&self, backend_id: &InputBackendId, button: u32) -> bool {
+        self.0
+            .borrow_mut()
+            .get_mut(backend_id)
+            .is_some_and(|buttons| buttons.remove(&button))
+    }
+
+    fn clear_source(&self, backend_id: &InputBackendId) {
+        self.0.borrow_mut().remove(backend_id);
     }
 
     /// Clear all suppressed buttons (used on focus loss).
@@ -149,31 +192,32 @@ impl SupressedButtons {
 }
 
 impl ModifiersShortcutQueue {
-    pub fn set(&self, binding: shortcuts::Binding) {
-        let mut set = self.0.borrow_mut();
-        *set = Some(binding);
+    pub fn set(&self, backend_id: &InputBackendId, binding: shortcuts::Binding) {
+        self.0.borrow_mut().insert(backend_id.clone(), binding);
     }
 
-    pub fn take(&self, binding: &shortcuts::Binding) -> bool {
+    pub fn take(&self, backend_id: &InputBackendId, binding: &shortcuts::Binding) -> bool {
         let mut set = self.0.borrow_mut();
-        if set.is_some() && set.as_ref().unwrap() == binding {
-            *set = None;
+        if set.get(backend_id).is_some_and(|queued| queued == binding) {
+            set.remove(backend_id);
             true
         } else {
             false
         }
     }
 
-    pub fn clear(&self) {
-        let mut set = self.0.borrow_mut();
-        *set = None;
+    pub fn clear(&self, backend_id: &InputBackendId) {
+        self.0.borrow_mut().remove(backend_id);
     }
 }
 
 impl State {
     #[profiling::function]
-    pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>)
-    where
+    pub fn process_input_event<B: InputBackend>(
+        &mut self,
+        event: InputEvent<B>,
+        backend_id: InputBackendId,
+    ) where
         <B as InputBackend>::Device: 'static,
     {
         crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
@@ -184,19 +228,25 @@ impl State {
                 let shell = self.common.shell.read();
                 let seat = shell.seats.last_active();
                 let led_state = seat.get_keyboard().unwrap().led_state();
-                seat.devices().add_device(&device, led_state);
+                seat.devices().add_device(&device, led_state, &backend_id);
                 if device.has_capability(DeviceCapability::TabletTool) {
-                    seat.tablet_seat().add_tablet::<Self>(
+                    seat.tablet_seat().add_wp_tablet(
                         &self.common.display_handle,
                         &TabletDescriptor::from(&device),
                     );
+                }
+                let has_keyboard = device.has_capability(DeviceCapability::Keyboard);
+                std::mem::drop(shell);
+                // send the seat's current modifier state to the new ei keyboard
+                if has_keyboard && let InputBackendId::Ei(conn) = &backend_id {
+                    self.send_ei_keyboard_modifiers(conn);
                 }
             }
             InputEvent::DeviceRemoved { device } => {
                 for seat in &mut self.common.shell.read().seats.iter() {
                     let devices = seat.devices();
-                    if devices.has_device(&device) {
-                        devices.remove_device(&device);
+                    if devices.has_device(&device, &backend_id) {
+                        devices.remove_device(&device, &backend_id);
                         if device.has_capability(DeviceCapability::TabletTool) {
                             seat.tablet_seat()
                                 .remove_tablet(&TabletDescriptor::from(&device));
@@ -217,7 +267,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -228,7 +278,7 @@ impl State {
                     trace!(?keycode, ?state, "key");
 
                     let serial = SERIAL_COUNTER.next_serial();
-                    let time = Event::time_msec(&event);
+                    let time = Event::time(&event);
                     let keyboard = seat.get_keyboard().unwrap();
                     let previous_modifiers = keyboard.modifier_state();
                     if let Some((action, pattern)) = keyboard
@@ -239,51 +289,17 @@ impl State {
                             serial,
                             time,
                             |data, modifiers, handle| {
-                                if previous_modifiers != *modifiers {
-                                    *seat
-                                        .user_data()
-                                        .get::<LastModifierChange>()
-                                        .unwrap()
-                                        .0
-                                        .lock()
-                                        .unwrap() = Some(serial);
-                                }
-
-                                let current_focus = seat.get_keyboard().unwrap().current_focus();
-                                let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
-                                    f.wl_surface()
-                                        .map(|surface| {
-                                            seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                                                .map(|inhibitor| inhibitor.is_active())
-                                                .unwrap_or(false)
-                                                || seat.has_active_xwayland_grab(&surface)
-                                        })
-                                        .unwrap_or(false)
-                                });
-                                let sym = handle.modified_sym();
-
-                                let result = Self::filter_keyboard_input(
-                                    data, &event, &seat, modifiers, handle, serial,
-                                );
-
-                                if (matches!(result, FilterResult::Forward)
-                                    && !seat.get_keyboard().unwrap().is_grabbed()
-                                    && !shortcuts_inhibited
-                                    && !matches!(
-                                        current_focus,
-                                        Some(KeyboardFocusTarget::LockSurface(_))
-                                    ))
-                                // we don't want to accidentally leave any keys pressed
-                                // and do more filtering in `xwayland_notify_key_event`
-                                // for released keys
-                                    || state == KeyState::Released
-                                {
-                                    data.common.xwayland_notify_key_event(
-                                        sym, keycode, state, serial, time,
-                                    );
-                                }
-
-                                result
+                                data.process_keyboard_filter(
+                                    &backend_id,
+                                    &seat,
+                                    modifiers,
+                                    handle,
+                                    serial,
+                                    time,
+                                    keycode,
+                                    state,
+                                    previous_modifiers,
+                                )
                             },
                         )
                         .flatten()
@@ -294,7 +310,7 @@ impl State {
                                 FilterResult::<()>::Forward
                             });
                         }
-                        self.handle_action(action, &seat, serial, time, pattern, None)
+                        self.handle_action(action, &backend_id, &seat, serial, time, pattern, None)
                     }
 
                     // If we want to track numlock state so it can be reused on the next boot...
@@ -359,10 +375,29 @@ impl State {
                 use smithay::backend::input::PointerMotionEvent;
 
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let current_output = seat.active_output();
+
+                    if self.common.config.cosmic_conf.cursor_shake_to_find
+                        && let Some(cursor_state) =
+                            seat.user_data()
+                                .get::<crate::backend::render::cursor::CursorState>()
+                    {
+                        let active = {
+                            let mut cursor = cursor_state.lock().unwrap();
+                            cursor.detect_shake(event.delta(), std::time::Instant::now());
+                            cursor.is_magnifying()
+                        };
+                        if active {
+                            self.backend.schedule_render(&current_output);
+                        }
+                    }
 
                     let mut position = seat.get_pointer().unwrap().current_location().as_global();
 
@@ -383,7 +418,7 @@ impl State {
                                 // Constraint does not apply if not within region
                                 if !constraint.region().is_none_or(|x| {
                                     x.contains(
-                                        (ptr.current_location() - *surface_loc).to_i32_round(),
+                                        (ptr.current_location() - *surface_loc).to_i32_floor(),
                                     )
                                 }) {
                                     return;
@@ -433,7 +468,7 @@ impl State {
                         &RelativeMotionEvent {
                             delta: event.delta(),
                             delta_unaccel: event.delta_unaccel(),
-                            utime: event.time(),
+                            time: event.time(),
                         },
                     );
 
@@ -452,14 +487,27 @@ impl State {
                         .unwrap_or(current_output.clone());
                     drop(shell);
                     let output_geometry = output.geometry();
-                    position.x = position.x.clamp(
-                        output_geometry.loc.x as f64,
-                        (output_geometry.loc.x + output_geometry.size.w - 1) as f64,
-                    );
-                    position.y = position.y.clamp(
-                        output_geometry.loc.y as f64,
-                        (output_geometry.loc.y + output_geometry.size.h - 1) as f64,
-                    );
+
+                    let scale = output.current_scale().fractional_scale();
+                    let physical = output
+                        .current_mode()
+                        .map(|mode| output.current_transform().transform_size(mode.size))
+                        .unwrap_or_default();
+                    let logical = physical.to_f64().to_logical(scale);
+                    let output_geometry_loc = output_geometry.loc.to_f64();
+                    // output_geometry.size is a rounded value and may undershoot/overshoot the accurate logical size
+                    // We constrain the position with:
+                    // - output_geometry.size so that we don't send leave events to a fullscreen app
+                    // - logical size so that the position doesn't end up outside the actual size of the output
+                    // See https://github.com/pop-os/cosmic-comp/pull/2568
+                    let max_x = (output_geometry_loc.x
+                        + logical.w.min(output_geometry.size.w as f64))
+                    .next_down();
+                    let max_y = (output_geometry_loc.y
+                        + logical.h.min(output_geometry.size.h as f64))
+                    .next_down();
+                    position.x = position.x.clamp(output_geometry_loc.x, max_x);
+                    position.y = position.y.clamp(output_geometry_loc.y, max_y);
 
                     // Tick the fullscreen edge-reveal state machine using the
                     // post-motion pointer position and the output it landed on.
@@ -653,7 +701,7 @@ impl State {
 
                             if let Some(region) = &confine_region
                                 && !region
-                                    .contains((pos.as_logical() - *surface_loc).to_i32_round())
+                                    .contains((pos.as_logical() - *surface_loc).to_i32_floor())
                             {
                                 return (false, None);
                             }
@@ -701,7 +749,7 @@ impl State {
                         &MotionEvent {
                             location: position.as_logical(),
                             serial,
-                            time: event.time_msec(),
+                            time: event.time(),
                         },
                     );
                     ptr.frame(self);
@@ -724,7 +772,7 @@ impl State {
                                         PointerConstraint::Confined(confined) => confined.region(),
                                     };
                                     let point =
-                                        (ptr.current_location() - surface_location).to_i32_round();
+                                        (ptr.current_location() - surface_location).to_i32_floor();
                                     if region.is_none_or(|region| region.contains(point)) {
                                         constraint.activate();
                                     }
@@ -749,30 +797,13 @@ impl State {
                         seat.set_active_output(&output);
                     }
 
-                    for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some((geometry, offset)) = seat.cursor_geometry(
-                            position.as_logical().to_buffer(
-                                output.current_scale().fractional_scale(),
-                                output.current_transform(),
-                                &output_geometry.size.to_f64().as_logical(),
-                            ),
-                            self.common.clock.now(),
-                        ) {
-                            if session
-                                .current_constraints()
-                                .map(|constraint| constraint.size != geometry.size)
-                                .unwrap_or(true)
-                            {
-                                session.update_constraints(BufferConstraints {
-                                    size: geometry.size,
-                                    shm: vec![ShmFormat::Argb8888],
-                                    dma: None,
-                                });
-                            }
-                            session.set_cursor_hotspot(offset);
-                            session.set_cursor_pos(Some(geometry.loc));
-                        }
-                    }
+                    update_output_image_copy_cursor_position(
+                        &shell,
+                        &self.common.clock,
+                        &output,
+                        &seat,
+                        position,
+                    );
                 }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
@@ -781,19 +812,47 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
-                    let output = seat.active_output();
-                    let geometry = output.geometry();
-                    let position = geometry.loc.to_f64()
-                        + smithay::backend::input::AbsolutePositionEvent::position_transformed(
-                            &event,
-                            geometry.size.as_logical(),
-                        )
-                        .as_global();
+                    let (output, position) = if matches!(&backend_id, InputBackendId::Ei(_)) {
+                        // EI absolute coordinates are in the compositor's *global*
+                        // logical space: each advertised region carries its output's
+                        // global offset, so the client sends a global position. Use
+                        // the coordinate directly and find the output it lands in,
+                        // rather than mapping relative to the focused output (which
+                        // cannot address other monitors). This is the KWin/mutter
+                        // model.
+                        let position =
+                            smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                                &event,
+                                // smithay's EI impl ignores the size and returns the
+                                // raw coordinate.
+                                Size::from((0, 0)),
+                            )
+                            .as_global();
+                        let output = self
+                            .common
+                            .shell
+                            .read()
+                            .outputs()
+                            .find(|o| o.geometry().to_f64().contains(position))
+                            .cloned()
+                            .unwrap_or_else(|| seat.active_output());
+                        (output, position)
+                    } else {
+                        let output = seat.active_output();
+                        let output_geometry = output.geometry();
+                        let position = output_geometry.loc.to_f64()
+                            + smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                                &event,
+                                output_geometry.size.as_logical(),
+                            )
+                            .as_global();
+                        (output, position)
+                    };
                     let serial = SERIAL_COUNTER.next_serial();
                     let under = State::surface_under(position, &output, &self.common.shell.write())
                         .map(|(target, pos)| (target, pos.as_logical()));
@@ -805,11 +864,12 @@ impl State {
                         &MotionEvent {
                             location: position.as_logical(),
                             serial,
-                            time: event.time_msec(),
+                            time: event.time(),
                         },
                     );
                     ptr.frame(self);
 
+<<<<<<< HEAD
                     // Tick fullscreen edge-reveal for absolute motion.
                     {
                         use crate::shell::fullscreen_reveal::RevealAction;
@@ -865,7 +925,24 @@ impl State {
                             session.set_cursor_hotspot(offset);
                             session.set_cursor_pos(Some(geometry.loc));
                         }
+=======
+                    // Keep the seat's active output following the pointer. Click-to-
+                    // focus (PointerButton) resolves its target via
+                    // `seat.active_output()`
+                    let previous_output = seat.active_output();
+                    if previous_output != output {
+                        seat.set_active_output(&output);
+>>>>>>> upstream/master
                     }
+
+                    let shell = self.common.shell.read();
+                    update_output_image_copy_cursor_position(
+                        &shell,
+                        &self.common.clock,
+                        &output,
+                        &seat,
+                        position,
+                    );
                 }
             }
             InputEvent::PointerButton { event, .. } => {
@@ -877,7 +954,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned()
                 else {
                     return;
@@ -900,7 +977,26 @@ impl State {
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
 
-                let mut pass_event = !seat.supressed_buttons().remove(button);
+                // Track buttons held by a libei source so they can be released if the connection
+                // drops mid-press
+                if let InputBackendId::Ei(conn) = &backend_id {
+                    match event.state() {
+                        ButtonState::Pressed => {
+                            self.common
+                                .ei_pointer_buttons
+                                .entry(conn.clone())
+                                .or_default()
+                                .insert(button);
+                        }
+                        ButtonState::Released => {
+                            if let Some(held) = self.common.ei_pointer_buttons.get_mut(conn) {
+                                held.remove(&button);
+                            }
+                        }
+                    }
+                }
+
+                let mut pass_event = !seat.supressed_buttons().remove(&backend_id, button);
                 if event.state() == ButtonState::Pressed {
                     // change the keyboard focus unless the pointer is grabbed
                     // We test for any matching surface type here but always use the root
@@ -915,6 +1011,7 @@ impl State {
                             let shell = self.common.shell.read();
                             State::element_under(global_position, &output, &shell, &seat)
                         };
+<<<<<<< HEAD
                         if let Some(target) = under {
                             // Check if Super/Logo is truly held down, not just
                             // a stuck modifier from nested compositor key routing.
@@ -932,6 +1029,16 @@ impl State {
 
                             if let Some(surface) = target.toplevel().map(Cow::into_owned)
                                 && logo_physically_held
+=======
+                        // Grabbing a tiling resize handle (the gap between tiles) must not change keyboard focus
+                        let on_resize_fork = matches!(
+                            seat.get_pointer().unwrap().current_focus(),
+                            Some(PointerFocusTarget::ResizeFork(_))
+                        );
+                        if let Some(target) = under.filter(|_| !on_resize_fork) {
+                            if let Some(surface) = target.toplevel().map(Cow::into_owned)
+                                && self.source_modifiers(&backend_id, &seat).logo
+>>>>>>> upstream/master
                                 && !shortcuts_inhibited
                             {
                                 let seat_clone = seat.clone();
@@ -942,17 +1049,18 @@ impl State {
                                     // aimed at the compositor and shouldn't be passed
                                     // to the application.
                                     pass_event = false;
-                                    seat.supressed_buttons().add(button);
+                                    seat.supressed_buttons().add(&backend_id, button);
                                 };
 
                                 fn dispatch_grab<G: PointerGrab<State> + 'static>(
                                     grab: Option<(G, smithay::input::pointer::Focus)>,
                                     seat: Seat<State>,
+                                    backend_id: &InputBackendId,
                                     serial: Serial,
                                     state: &mut State,
                                 ) {
                                     if let Some((target, focus)) = grab {
-                                        seat.modifiers_shortcut_queue().clear();
+                                        seat.modifiers_shortcut_queue().clear(backend_id);
 
                                         seat.get_pointer()
                                             .unwrap()
@@ -964,6 +1072,7 @@ impl State {
                                     match mouse_button {
                                         smithay::backend::input::MouseButton::Left => {
                                             supress_button();
+                                            let backend_id = backend_id.clone();
                                             self.common.event_loop_handle.insert_idle(
                                                 move |state| {
                                                     let mut shell = state.common.shell.write();
@@ -978,12 +1087,19 @@ impl State {
                                                         false,
                                                     );
                                                     drop(shell);
-                                                    dispatch_grab(res, seat_clone, serial, state);
+                                                    dispatch_grab(
+                                                        res,
+                                                        seat_clone,
+                                                        &backend_id,
+                                                        serial,
+                                                        state,
+                                                    );
                                                 },
                                             );
                                         }
                                         smithay::backend::input::MouseButton::Right => {
                                             supress_button();
+                                            let backend_id = backend_id.clone();
                                             self.common.event_loop_handle.insert_idle(
                                                 move |state| {
                                                     let mut shell = state.common.shell.write();
@@ -1041,7 +1157,13 @@ impl State {
                                                         false,
                                                     );
                                                     drop(shell);
-                                                    dispatch_grab(res, seat_clone, serial, state);
+                                                    dispatch_grab(
+                                                        res,
+                                                        seat_clone,
+                                                        &backend_id,
+                                                        serial,
+                                                        state,
+                                                    );
                                                 },
                                             );
                                         }
@@ -1072,7 +1194,7 @@ impl State {
                         button,
                         event.state(),
                         serial,
-                        event.time_msec(),
+                        event.time(),
                     );
                 }
 
@@ -1084,12 +1206,12 @@ impl State {
                             button,
                             state: event.state(),
                             serial,
-                            time: event.time_msec(),
+                            time: event.time(),
                         },
                     );
                     ptr.frame(self);
                 } else if event.state() == ButtonState::Released {
-                    ptr.unset_grab(self, serial, event.time_msec())
+                    ptr.unset_grab(self, serial, event.time())
                 }
             }
             InputEvent::PointerAxis { event, .. } => {
@@ -1105,13 +1227,13 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
 
-                    if seat.get_keyboard().unwrap().modifier_state().logo
+                    if self.source_modifiers(&backend_id, &seat).logo
                         && self
                             .common
                             .config
@@ -1119,7 +1241,7 @@ impl State {
                             .accessibility_zoom
                             .enable_mouse_zoom_shortcuts
                     {
-                        seat.modifiers_shortcut_queue().clear();
+                        seat.modifiers_shortcut_queue().clear(&backend_id);
                         if let Some(mut percentage) = event
                             .amount_v120(Axis::Vertical)
                             .map(|val| val / 120.)
@@ -1140,10 +1262,17 @@ impl State {
                             self.update_zoom(&seat, change, event.source() == AxisSource::Wheel);
                         }
                     } else {
-                        let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
-                        if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
+                        let mut frame = AxisFrame::new(event.time()).source(event.source());
+                        let horizontal_amount = event
+                            .amount(Axis::Horizontal)
+                            .or_else(|| Some(event.amount_v120(Axis::Horizontal)? * 15.0 / 120.));
+                        if let Some(horizontal_amount) = horizontal_amount {
                             if horizontal_amount != 0.0 {
                                 frame = frame
+                                    .relative_direction(
+                                        Axis::Horizontal,
+                                        event.relative_direction(Axis::Horizontal),
+                                    )
                                     .value(Axis::Horizontal, scroll_factor * horizontal_amount);
                                 if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
                                     frame = frame.v120(
@@ -1155,10 +1284,17 @@ impl State {
                                 frame = frame.stop(Axis::Horizontal);
                             }
                         }
-                        if let Some(vertical_amount) = event.amount(Axis::Vertical) {
+                        let vertical_amount = event
+                            .amount(Axis::Vertical)
+                            .or_else(|| Some(event.amount_v120(Axis::Vertical)? * 15.0 / 120.));
+                        if let Some(vertical_amount) = vertical_amount {
                             if vertical_amount != 0.0 {
-                                frame =
-                                    frame.value(Axis::Vertical, scroll_factor * vertical_amount);
+                                frame = frame
+                                    .relative_direction(
+                                        Axis::Vertical,
+                                        event.relative_direction(Axis::Vertical),
+                                    )
+                                    .value(Axis::Vertical, scroll_factor * vertical_amount);
                                 if let Some(discrete) = event.amount_v120(Axis::Vertical) {
                                     frame = frame.v120(
                                         Axis::Vertical,
@@ -1182,7 +1318,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1195,7 +1331,7 @@ impl State {
                             self,
                             &GestureSwipeBeginEvent {
                                 serial,
-                                time: event.time_msec(),
+                                time: event.time(),
                                 fingers: event.fingers(),
                             },
                         );
@@ -1208,7 +1344,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1216,7 +1352,7 @@ impl State {
                     if let Some(ref mut gesture_state) = self.common.gesture_state {
                         let first_update = gesture_state.update(
                             event.delta(),
-                            Duration::from_millis(event.time_msec() as u64),
+                            Duration::from_millis(event.time().millis() as u64),
                         );
                         // Decide on action if first update
                         if first_update {
@@ -1292,7 +1428,7 @@ impl State {
                         pointer.gesture_swipe_update(
                             self,
                             &GestureSwipeUpdateEvent {
-                                time: event.time_msec(),
+                                time: event.time(),
                                 delta: event.delta(),
                             },
                         );
@@ -1309,7 +1445,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1341,7 +1477,7 @@ impl State {
                             self,
                             &GestureSwipeEndEvent {
                                 serial,
-                                time: event.time_msec(),
+                                time: event.time(),
                                 cancelled: event.cancelled(),
                             },
                         );
@@ -1354,7 +1490,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1364,7 +1500,7 @@ impl State {
                         self,
                         &GesturePinchBeginEvent {
                             serial,
-                            time: event.time_msec(),
+                            time: event.time(),
                             fingers: event.fingers(),
                         },
                     );
@@ -1376,7 +1512,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1384,7 +1520,7 @@ impl State {
                     pointer.gesture_pinch_update(
                         self,
                         &GesturePinchUpdateEvent {
-                            time: event.time_msec(),
+                            time: event.time(),
                             delta: event.delta(),
                             scale: event.scale(),
                             rotation: event.rotation(),
@@ -1398,7 +1534,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1408,7 +1544,7 @@ impl State {
                         self,
                         &GesturePinchEndEvent {
                             serial,
-                            time: event.time_msec(),
+                            time: event.time(),
                             cancelled: event.cancelled(),
                         },
                     );
@@ -1420,7 +1556,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1430,7 +1566,7 @@ impl State {
                         self,
                         &GestureHoldBeginEvent {
                             serial,
-                            time: event.time_msec(),
+                            time: event.time(),
                             fingers: event.fingers(),
                         },
                     );
@@ -1442,7 +1578,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1452,7 +1588,7 @@ impl State {
                         self,
                         &GestureHoldEndEvent {
                             serial,
-                            time: event.time_msec(),
+                            time: event.time(),
                             cancelled: event.cancelled(),
                         },
                     );
@@ -1461,17 +1597,40 @@ impl State {
 
             InputEvent::TouchDown { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let Some(output) =
-                        mapped_output_for_device(&self.common.config, &shell, &event.device())
+                    // Check if the touch is from an ei device or a mapped device
+                    // EI absolute coordinates are already in the compositor's global logical
+                    // space (each advertised region carries its output's global offset), so use
+                    // them directly and find the output they land in.
+                    let (output, position) = if matches!(&backend_id, InputBackendId::Ei(_)) {
+                        let position =
+                            smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                                &event,
+                                Size::from((0, 0)),
+                            )
+                            .as_global();
+                        let output = shell
+                            .outputs()
+                            .find(|o| o.geometry().to_f64().contains(position))
                             .cloned()
-                    else {
-                        return;
+                            .unwrap_or_else(|| seat.active_output());
+                        (output, position)
+                    } else {
+                        let Some(output) =
+                            mapped_output_for_device(&self.common.config, &shell, &event.device())
+                                .cloned()
+                        else {
+                            return;
+                        };
+                        let position =
+                            transform_output_mapped_position(&output, &event, shell.zoom_state());
+                        (output, position)
                     };
-
-                    let position =
-                        transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1486,24 +1645,43 @@ impl State {
                             slot: event.slot(),
                             location: position.as_logical(),
                             serial,
-                            time: event.time_msec(),
+                            time: event.time(),
                         },
                     );
                 }
             }
             InputEvent::TouchMotion { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let Some(output) =
-                        mapped_output_for_device(&self.common.config, &shell, &event.device())
+                    let (output, position) = if matches!(&backend_id, InputBackendId::Ei(_)) {
+                        let position =
+                            smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                                &event,
+                                Size::from((0, 0)),
+                            )
+                            .as_global();
+                        let output = shell
+                            .outputs()
+                            .find(|o| o.geometry().to_f64().contains(position))
                             .cloned()
-                    else {
-                        return;
+                            .unwrap_or_else(|| seat.active_output());
+                        (output, position)
+                    } else {
+                        let Some(output) =
+                            mapped_output_for_device(&self.common.config, &shell, &event.device())
+                                .cloned()
+                        else {
+                            return;
+                        };
+                        let position =
+                            transform_output_mapped_position(&output, &event, shell.zoom_state());
+                        (output, position)
                     };
-
-                    let position =
-                        transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1516,7 +1694,7 @@ impl State {
                         &TouchMotionEvent {
                             slot: event.slot(),
                             location: position.as_logical(),
-                            time: event.time_msec(),
+                            time: event.time(),
                         },
                     );
                 }
@@ -1529,7 +1707,10 @@ impl State {
                     shell.set_overview_mode(None, self.common.event_loop_handle.clone());
                 }
 
-                let maybe_seat = shell.seats.for_device(&event.device()).cloned();
+                let maybe_seat = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     std::mem::drop(shell);
@@ -1539,7 +1720,7 @@ impl State {
                         self,
                         &UpEvent {
                             slot: event.slot(),
-                            time: event.time_msec(),
+                            time: event.time(),
                             serial,
                         },
                     );
@@ -1551,7 +1732,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1565,7 +1746,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1576,7 +1757,11 @@ impl State {
 
             InputEvent::TabletToolAxis { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let Some(output) =
@@ -1600,49 +1785,52 @@ impl State {
                         &MotionEvent {
                             location: position.as_logical(),
                             serial: SERIAL_COUNTER.next_serial(),
-                            time: self.common.clock.now().as_millis(),
+                            time: InputTime::now(),
                         },
                     );
 
                     let tablet_seat = seat.tablet_seat();
 
-                    let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
                     let tool = tablet_seat.get_tool(&event.tool());
 
-                    if let (Some(tablet), Some(tool)) = (tablet, tool) {
-                        if event.pressure_has_changed() {
-                            tool.pressure(event.pressure());
-                        }
-                        if event.distance_has_changed() {
-                            tool.distance(event.distance());
-                        }
-                        if event.tilt_has_changed() {
-                            tool.tilt(event.tilt());
-                        }
-                        if event.slider_has_changed() {
-                            tool.slider_position(event.slider_position());
-                        }
-                        if event.rotation_has_changed() {
-                            tool.rotation(event.rotation());
-                        }
-                        if event.wheel_has_changed() {
-                            tool.wheel(event.wheel_delta(), event.wheel_delta_discrete());
-                        }
+                    if let Some(tool) = tool {
+                        let frame = tool::AxisFrame {
+                            pressure: event.pressure_has_changed().then(|| event.pressure()),
+                            distance: event.distance_has_changed().then(|| event.distance()),
+
+                            tilt: event.tilt_has_changed().then(|| event.tilt()),
+                            rotation: event.rotation_has_changed().then(|| event.rotation()),
+
+                            slider: event.slider_has_changed().then(|| event.slider_position()),
+                            wheel: event
+                                .wheel_has_changed()
+                                .then(|| (event.wheel_delta(), event.wheel_delta_discrete())),
+                        };
+
+                        tool.axis(self, frame);
 
                         tool.motion(
-                            position.as_logical(),
+                            self,
                             under
                                 .and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc))),
-                            &tablet,
-                            SERIAL_COUNTER.next_serial(),
-                            event.time_msec(),
+                            &tool::MotionEvent {
+                                location: position.as_logical(),
+                                serial: SERIAL_COUNTER.next_serial(),
+                                time: event.time(),
+                            },
                         );
+
+                        tool.frame(self, event.time());
                     }
                 }
             }
             InputEvent::TabletToolProximity { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let Some(output) =
@@ -1666,7 +1854,7 @@ impl State {
                         &MotionEvent {
                             location: position.as_logical(),
                             serial: SERIAL_COUNTER.next_serial(),
-                            time: self.common.clock.now().as_millis(),
+                            time: InputTime::now(),
                         },
                     );
 
@@ -1674,25 +1862,53 @@ impl State {
 
                     let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
                     let dh = self.common.display_handle.clone();
-                    let tool = tablet_seat.add_tool::<Self>(self, &dh, &event.tool());
+                    let tool = tablet_seat
+                        .get_tool(&event.tool())
+                        .unwrap_or_else(|| tablet_seat.add_wp_tool(self, &dh, &event.tool()));
 
                     if let Some(tablet) = tablet {
+                        let serial = SERIAL_COUNTER.next_serial();
+
+                        let frame = tool::AxisFrame {
+                            pressure: event.pressure_has_changed().then(|| event.pressure()),
+                            distance: event.distance_has_changed().then(|| event.distance()),
+
+                            tilt: event.tilt_has_changed().then(|| event.tilt()),
+                            rotation: event.rotation_has_changed().then(|| event.rotation()),
+
+                            slider: event.slider_has_changed().then(|| event.slider_position()),
+                            wheel: event
+                                .wheel_has_changed()
+                                .then(|| (event.wheel_delta(), event.wheel_delta_discrete())),
+                        };
+
                         match event.state() {
                             ProximityState::In => {
-                                if let Some(under) = under.and_then(|(f, loc)| {
+                                let under = under.and_then(|(f, loc)| {
                                     f.wl_surface().map(|s| (s.into_owned(), loc))
-                                }) {
-                                    tool.proximity_in(
-                                        position.as_logical(),
-                                        under,
-                                        &tablet,
-                                        SERIAL_COUNTER.next_serial(),
-                                        event.time_msec(),
-                                    )
-                                }
+                                });
+                                tool.proximity_in(
+                                    self,
+                                    under,
+                                    tablet,
+                                    &tool::ProximityInEvent {
+                                        location: position.as_logical(),
+                                        axis: Some(frame),
+                                        serial: SERIAL_COUNTER.next_serial(),
+                                        time: event.time(),
+                                    },
+                                )
                             }
-                            ProximityState::Out => tool.proximity_out(event.time_msec()),
+                            ProximityState::Out => tool.proximity_out(
+                                self,
+                                &tool::ProximityOutEvent {
+                                    serial,
+                                    time: event.time(),
+                                },
+                            ),
                         }
+
+                        tool.frame(self, event.time());
                     }
                 }
             }
@@ -1702,20 +1918,35 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
+                        let serial = SERIAL_COUNTER.next_serial();
                         match event.tip_state() {
                             TabletToolTipState::Down => {
-                                tool.tip_down(SERIAL_COUNTER.next_serial(), event.time_msec());
+                                tool.down(
+                                    self,
+                                    &tool::DownEvent {
+                                        serial,
+                                        time: event.time(),
+                                    },
+                                );
                             }
                             TabletToolTipState::Up => {
-                                tool.tip_up(event.time_msec());
+                                tool.up(
+                                    self,
+                                    &tool::UpEvent {
+                                        serial,
+                                        time: event.time(),
+                                    },
+                                );
                             }
                         }
+
+                        tool.frame(self, event.time());
                     }
                 }
             }
@@ -1725,24 +1956,30 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
                         tool.button(
-                            event.button(),
-                            event.button_state(),
-                            SERIAL_COUNTER.next_serial(),
-                            event.time_msec(),
+                            self,
+                            &tool::ButtonEvent {
+                                button: event.button(),
+                                state: event.button_state(),
+                                serial: SERIAL_COUNTER.next_serial(),
+                                time: event.time(),
+                            },
                         );
+
+                        tool.frame(self, event.time());
                     }
                 }
             }
             InputEvent::Special(_) => {}
+            #[allow(unused_variables)]
             InputEvent::SwitchToggle { event } => {
-                #[cfg(feature = "systemd")]
+                #[cfg(feature = "logind")]
                 if event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
                     let backend = self.backend.lock();
                     let output = backend
@@ -1762,7 +1999,7 @@ impl State {
 
                     if let Err(err) = self.refresh_output_config() {
                         if !closed {
-                            warn!(?err, "Failed to re-enable internal connector");
+                            tracing::warn!(?err, "Failed to re-enable internal connector");
                             if let Some(output) = output {
                                 use cosmic_comp_config::output::comp::OutputState;
 
@@ -1781,15 +2018,335 @@ impl State {
         }
     }
 
+    /// The modifier state held by the source that produced an event.
+    pub(crate) fn source_modifiers(
+        &self,
+        _backend_id: &InputBackendId,
+        seat: &Seat<State>,
+    ) -> ModifiersState {
+        seat.get_keyboard()
+            .map(|k| k.modifier_state())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn clear_input_source_state(&mut self, backend_id: &InputBackendId) {
+        let seats = self
+            .common
+            .shell
+            .read()
+            .seats
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        for seat in seats {
+            seat.supressed_keys().clear_source(backend_id);
+            seat.supressed_buttons().clear_source(backend_id);
+            seat.modifiers_shortcut_queue().clear(backend_id);
+            seat.clear_last_modifier_change(backend_id);
+        }
+    }
+
+    /// Release the keys this libei connection still holds on the shared seat, so they don't stay
+    /// stuck in the focused client. Keeps the connection's source valid (only clears held keys),
+    /// so it's safe to call both on disconnect and on a keymap change. Does not remove the source
+    /// from [`Common::ei_keyboard_source`], the disconnect path does that.
+    pub(crate) fn release_ei_keyboard(&mut self, conn: &smithay::reexports::reis::eis::Connection) {
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let Some(keyboard) = seat.get_keyboard() else {
+            return;
+        };
+        if let Some(source) = self.common.ei_keyboard_source.get(conn).copied() {
+            keyboard.release_source(self, source);
+        }
+    }
+
+    /// Release any pointer buttons this libei connection still holds
+    pub(crate) fn release_ei_pointer(&mut self, conn: &smithay::reexports::reis::eis::Connection) {
+        let buttons: Vec<u32> = self
+            .common
+            .ei_pointer_buttons
+            .get(conn)
+            .map(|held| held.iter().copied().collect())
+            .unwrap_or_default();
+        if buttons.is_empty() {
+            return;
+        }
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let Some(pointer) = seat.get_pointer() else {
+            return;
+        };
+        let time = InputTime::now();
+        for button in buttons {
+            let serial = SERIAL_COUNTER.next_serial();
+            pointer.button(
+                self,
+                &smithay::input::pointer::ButtonEvent {
+                    button,
+                    state: smithay::backend::input::ButtonState::Released,
+                    serial,
+                    time,
+                },
+            );
+        }
+        pointer.frame(self);
+    }
+
+    /// Mirror the seat's current modifier state to every libei sender with a keyboard via
+    /// `ei_keyboard.modifiers`
+    pub(crate) fn broadcast_ei_keyboard_modifiers(&self, seat: &Seat<State>) {
+        if self.common.ei_seats.is_empty() {
+            return;
+        }
+        let Some(keyboard) = seat.get_keyboard() else {
+            return;
+        };
+        let s = keyboard.modifier_state().serialized;
+        for ei_seat in self.common.ei_seats.values() {
+            ei_seat.keyboard_modifiers(s.depressed, s.locked, s.latched, s.layout_effective);
+        }
+    }
+
+    /// Send the seat's current modifier state to a single libei connection, used when that
+    /// connection's `ei_keyboard` device is created. The EI spec expects the current (nonzero)
+    /// modifier state to be announced once the device is live, so the client doesn't have to
+    /// wait for the next change to learn e.g. that Caps Lock is on.
+    pub(crate) fn send_ei_keyboard_modifiers(
+        &self,
+        conn: &smithay::reexports::reis::eis::Connection,
+    ) {
+        let Some(ei_seat) = self.common.ei_seats.get(conn) else {
+            return;
+        };
+        let mods = {
+            let shell = self.common.shell.read();
+            shell
+                .seats
+                .last_active()
+                .get_keyboard()
+                .map(|keyboard| keyboard.modifier_state().serialized)
+        };
+        if let Some(s) = mods {
+            ei_seat.keyboard_modifiers(s.depressed, s.locked, s.latched, s.layout_effective);
+        }
+    }
+
+    pub(crate) fn process_keyboard_filter(
+        &mut self,
+        backend_id: &InputBackendId,
+        seat: &Seat<State>,
+        modifiers: &ModifiersState,
+        handle: KeysymHandle<'_>,
+        serial: Serial,
+        time: InputTime,
+        keycode: Keycode,
+        key_state: KeyState,
+        previous_modifiers: ModifiersState,
+    ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
+        if previous_modifiers != *modifiers {
+            seat.set_last_modifier_change(backend_id, serial);
+            self.broadcast_ei_keyboard_modifiers(seat);
+        }
+
+        let current_focus = seat.get_keyboard().unwrap().current_focus();
+        let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
+            f.wl_surface()
+                .map(|surface| {
+                    seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                        .map(|inhibitor| inhibitor.is_active())
+                        .unwrap_or(false)
+                        || seat.has_active_xwayland_grab(&surface)
+                })
+                .unwrap_or(false)
+        });
+        let sym = handle.modified_sym();
+
+        let result = self.filter_keyboard_input(
+            backend_id, seat, modifiers, handle, serial, keycode, key_state, time,
+        );
+
+        if (matches!(result, FilterResult::Forward)
+            && !seat.get_keyboard().unwrap().is_grabbed()
+            && !shortcuts_inhibited
+            && !matches!(current_focus, Some(KeyboardFocusTarget::LockSurface(_))))
+        // we don't want to accidentally leave any keys pressed
+            || key_state == KeyState::Released
+        {
+            self.common
+                .xwayland_notify_key_event(sym, keycode, key_state, *modifiers, serial, time);
+        }
+
+        result
+    }
+
+    /// Inject a key from an auxiliary source (a virtual keyboard, or libei) into the shared
+    /// seat keyboard, tagged with `source` so its held keys are tracked independently of the
+    /// physical keyboard
+    ///
+    /// `handle_shortcuts` is `false` when synthesizing releases so still-held keys are just
+    /// forwarded without re-triggering bindings.
+    pub(crate) fn inject_source_key(
+        &mut self,
+        source: KeyboardSource,
+        backend_id: &InputBackendId,
+        seat: &Seat<State>,
+        keycode: Keycode,
+        key_state: KeyState,
+        handle_shortcuts: bool,
+    ) {
+        let Some(keyboard) = seat.get_keyboard() else {
+            return;
+        };
+        let serial = SERIAL_COUNTER.next_serial();
+        let time = InputTime::now();
+        let previous_modifiers = keyboard.modifier_state();
+        let result = keyboard
+            .input_from_source(
+                source,
+                self,
+                keycode,
+                key_state,
+                serial,
+                time,
+                |data, modifiers, handle| {
+                    if handle_shortcuts {
+                        data.process_keyboard_filter(
+                            backend_id,
+                            seat,
+                            modifiers,
+                            handle,
+                            serial,
+                            time,
+                            keycode,
+                            key_state,
+                            previous_modifiers,
+                        )
+                    } else {
+                        FilterResult::Forward
+                    }
+                },
+            )
+            .flatten();
+
+        if let Some((action, pattern)) = result {
+            self.handle_action(action, backend_id, seat, serial, time, pattern, None);
+        }
+    }
+
+    /// Inject a real key from a libei connection's `ei_keyboard` into the shared seat keyboard,
+    /// tagged with the connection's source so it behaves like any other keyboard (its keycodes
+    /// are interpreted with the seat keymap, which the compositor already forced onto the
+    /// `ei_keyboard` device).
+    pub(crate) fn inject_ei_key(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keycode: Keycode,
+        key_state: KeyState,
+    ) {
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let backend_id = InputBackendId::Ei(conn.clone());
+        let Some(source) = self.common.ei_keyboard_source.get(conn).copied() else {
+            return;
+        };
+        self.inject_source_key(source, &backend_id, &seat, keycode, key_state, true);
+    }
+
+    /// Inject a keysym from a libei `ei_text` device.
+    pub(crate) fn inject_ei_text_keysym(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keysym: u32,
+        key_state: KeyState,
+    ) {
+        use smithay::wayland::input_method::InputMethodSeat;
+        use smithay::wayland::text_input::TextInputSeat;
+
+        let keysym = Keysym::new(keysym);
+
+        // `ei_text` is a tap: act on the press, ignore the release.
+        if key_state != KeyState::Pressed {
+            return;
+        }
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let Some(keyboard) = seat.get_keyboard() else {
+            return;
+        };
+
+        let mods = keyboard.modifier_state();
+        let no_mods = !(mods.ctrl || mods.alt || mods.shift || mods.logo);
+
+        // Is this keysym plain text, or not (Escape, F-keys, arrows, ...)?
+        let is_text = keysym.key_char().is_some_and(|c| !c.is_control());
+
+        // Resolve to a real keycode and feed it through the shared seat when this is *not* plain
+        // text, or when a modifier is held.
+        if !is_text || !no_mods {
+            if let Some(keycode) = keyboard.keycode_for_keysym(keysym)
+                && let Some(source) = self.common.ei_keyboard_source.get(conn).copied()
+            {
+                let backend_id = InputBackendId::Ei(conn.clone());
+                self.inject_source_key(
+                    source,
+                    &backend_id,
+                    &seat,
+                    keycode,
+                    KeyState::Pressed,
+                    true,
+                );
+                self.inject_source_key(
+                    source,
+                    &backend_id,
+                    &seat,
+                    keycode,
+                    KeyState::Released,
+                    true,
+                );
+                return;
+            }
+            // No keycode for this keysym in the seat keymap (out-of-layout / Unicode), so fall
+            // through to the text paths below. Any held modifier is lost — best effort.
+            tracing::warn!(
+                "[ei-text]   -> keysym not in seat keymap; falling back (modifier not applied)"
+            );
+        }
+
+        // No modifier held: a printable, non-control character committed directly through the
+        // text-input protocol when a text-input client is focused (and no real IME). This also
+        // covers out-of-layout / Unicode that has no keycode.
+        if no_mods
+            && is_text
+            && let Some(c) = keysym.key_char()
+            && !seat.input_method().has_instance()
+        {
+            let text_input = seat.text_input();
+            let mut handled = false;
+            text_input.with_active_text_input(|ti, _surface| {
+                ti.commit_string(Some(c.to_string()));
+                handled = true;
+            });
+            if handled {
+                text_input.done(false);
+                return;
+            }
+        }
+
+        // Otherwise inject the keysym as a keycode tap via a temporary keymap delivered to just
+        // the focused client (reaches non-text-input apps: terminals, games, ...). This never
+        // touches the seat's own keyboard state.
+        keyboard.inject_text_keysyms(self, &[keysym]);
+    }
+
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
     #[profiling::function]
-    pub fn filter_keyboard_input<B: InputBackend, E: KeyboardKeyEvent<B>>(
+    pub fn filter_keyboard_input(
         &mut self,
-        event: &E,
+        backend_id: &InputBackendId,
         seat: &Seat<Self>,
         modifiers: &ModifiersState,
         handle: KeysymHandle<'_>,
         serial: Serial,
+        keycode: Keycode,
+        key_state: KeyState,
+        time: InputTime,
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
         // Pre-compute for layout-agnostic shortcut matching
         let raw_syms = handle.raw_syms();
@@ -1807,7 +2364,12 @@ impl State {
         let keyboard_grabbed = keyboard.with_grab(|_serial, grab| {
             grab.is::<SwapWindowGrab>() || grab.is::<PopupKeyboardGrab<State>>()
         }) == Some(true);
-        let is_grabbed = keyboard_grabbed || pointer.is_grabbed();
+        // A virtual-keyboard key can arrive while the seat's pointer is grabbed by that
+        // same on-screen keyboard's own button press (the implicit grab from clicking an OSK
+        // key). That pointer grab must not capture the injected key, otherwise e.g.
+        // pressing esc on a virtual keyboard gets swallowed here
+        let from_vk = matches!(backend_id, InputBackendId::VirtualKeyboard);
+        let is_grabbed = keyboard_grabbed || (pointer.is_grabbed() && !from_vk);
 
         let current_focus = keyboard.current_focus();
         //this should fall back to active output since there may not be a focused output
@@ -1824,9 +2386,9 @@ impl State {
                 .unwrap_or(false)
         });
 
-        self.common
-            .a11y_keyboard_monitor_state
-            .key_event(modifiers, &handle, event.state());
+        if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
+            a11y_keyboard_monitor.key_event(modifiers, &handle, key_state);
+        }
 
         // Leave move overview mode, if any modifier was released
         if let Some(Trigger::KeyboardMove(action_modifiers)) =
@@ -1847,7 +2409,7 @@ impl State {
                 || (action_pattern.modifiers.shift && !modifiers.shift)
                 || (action_pattern.key.is_some()
                     && key_matches(action_pattern.key.unwrap())
-                    && event.state() == KeyState::Released))
+                    && key_state == KeyState::Released))
         {
             shell.set_overview_mode(None, self.common.event_loop_handle.clone());
 
@@ -1863,7 +2425,7 @@ impl State {
         // Leave or update resize mode, if modifiers changed or initial key was released
         if let Some(action_pattern) = shell.resize_mode().0.active_binding() {
             if action_pattern.key.is_some()
-                && event.state() == KeyState::Released
+                && key_state == KeyState::Released
                 && key_matches(action_pattern.key.unwrap())
             {
                 shell.set_resize_mode(
@@ -1916,7 +2478,7 @@ impl State {
                 let action = Action::Private(PrivateAction::Resizing(
                     direction,
                     edge.into(),
-                    cosmic_keystate_from_smithay(event.state()),
+                    cosmic_keystate_from_smithay(key_state),
                 ));
                 let key_pattern = shortcuts::Binding {
                     modifiers: cosmic_modifiers_from_smithay(*modifiers),
@@ -1925,8 +2487,8 @@ impl State {
                     description: None,
                 };
 
-                if event.state() == KeyState::Released {
-                    if let Some(tokens) = seat.supressed_keys().filter(&handle) {
+                if key_state == KeyState::Released {
+                    if let Some(tokens) = seat.supressed_keys().filter(backend_id, &handle) {
                         for token in tokens {
                             self.common.event_loop_handle.remove(token);
                         }
@@ -1935,8 +2497,8 @@ impl State {
                     let seat_clone = seat.clone();
                     let action_clone = action.clone();
                     let key_pattern_clone = key_pattern.clone();
+                    let backend_id_clone = backend_id.clone();
                     let start = Instant::now();
-                    let time = event.time_msec();
                     let token = self
                         .common
                         .event_loop_handle
@@ -1946,9 +2508,12 @@ impl State {
                                 let duration = current.duration_since(start).as_millis();
                                 state.handle_action(
                                     action_clone.clone(),
+                                    &backend_id_clone,
                                     &seat_clone,
                                     serial,
-                                    time.overflowing_add(duration as u32).0,
+                                    InputTime::from_millis(
+                                        time.millis().overflowing_add(duration as u32).0,
+                                    ),
                                     key_pattern_clone.clone(),
                                     None,
                                 );
@@ -1957,7 +2522,7 @@ impl State {
                         )
                         .ok();
 
-                    seat.supressed_keys().add(&handle, token);
+                    seat.supressed_keys().add(backend_id, &handle, token);
                 }
                 return FilterResult::Intercept(Some((action, key_pattern)));
             }
@@ -1968,13 +2533,13 @@ impl State {
         // cancel grabs
         if is_grabbed
             && handle.modified_sym() == Keysym::Escape
-            && event.state() == KeyState::Pressed
+            && key_state == KeyState::Pressed
             && !modifiers.alt
             && !modifiers.ctrl
             && !modifiers.logo
             && !modifiers.shift
         {
-            seat.supressed_keys().add(&handle, None);
+            seat.supressed_keys().add(backend_id, &handle, None);
             return FilterResult::Intercept(Some((
                 Action::Private(PrivateAction::Escape),
                 shortcuts::Binding {
@@ -1986,66 +2551,59 @@ impl State {
             )));
         }
 
-        if event.state() == KeyState::Released {
-            let removed = self
-                .common
-                .a11y_keyboard_monitor_state
-                .remove_active_virtual_mod(handle.modified_sym());
-            // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
-            if removed
-                && handle.modified_sym() == Keysym::Caps_Lock
-                && (modifiers.serialized.locked & 2) != 0
+        if let Some(mut a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
+            if key_state == KeyState::Released {
+                let removed =
+                    a11y_keyboard_monitor.remove_active_virtual_mod(handle.modified_sym());
+                // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
+                if removed
+                    && handle.modified_sym() == Keysym::Caps_Lock
+                    && (modifiers.serialized.locked & 2) != 0
+                {
+                    let seat = seat.clone();
+                    let key_code = keycode;
+                    self.common.event_loop_handle.insert_idle(move |state| {
+                        if let Some(keyboard) = seat.get_keyboard() {
+                            let serial = SERIAL_COUNTER.next_serial();
+                            let time = InputTime::now();
+                            keyboard.input(
+                                state,
+                                key_code,
+                                KeyState::Pressed,
+                                serial,
+                                time,
+                                |_, _, _| FilterResult::<()>::Forward,
+                            );
+                            let serial = SERIAL_COUNTER.next_serial();
+                            keyboard.input(
+                                state,
+                                key_code,
+                                KeyState::Released,
+                                serial,
+                                time,
+                                |_, _, _| FilterResult::<()>::Forward,
+                            );
+                        }
+                    });
+                }
+            } else if key_state == KeyState::Pressed
+                && a11y_keyboard_monitor.has_virtual_mod(handle.modified_sym())
             {
-                let seat = seat.clone();
-                let key_code = event.key_code();
-                self.common.event_loop_handle.insert_idle(move |state| {
-                    if let Some(keyboard) = seat.get_keyboard() {
-                        let serial = SERIAL_COUNTER.next_serial();
-                        let time = state.common.clock.now().as_millis();
-                        keyboard.input(
-                            state,
-                            key_code,
-                            KeyState::Pressed,
-                            serial,
-                            time,
-                            |_, _, _| FilterResult::<()>::Forward,
-                        );
-                        let serial = SERIAL_COUNTER.next_serial();
-                        keyboard.input(
-                            state,
-                            key_code,
-                            KeyState::Released,
-                            serial,
-                            time,
-                            |_, _, _| FilterResult::<()>::Forward,
-                        );
-                    }
-                });
+                a11y_keyboard_monitor.add_active_virtual_mod(handle.modified_sym());
+
+                tracing::debug!(
+                    "active virtual mods: {:?}",
+                    a11y_keyboard_monitor.active_virtual_mods()
+                );
+                seat.supressed_keys().add(backend_id, &handle, None);
+
+                return FilterResult::Intercept(None);
             }
-        } else if event.state() == KeyState::Pressed
-            && self
-                .common
-                .a11y_keyboard_monitor_state
-                .has_virtual_mod(handle.modified_sym())
-        {
-            self.common
-                .a11y_keyboard_monitor_state
-                .add_active_virtual_mod(handle.modified_sym());
-
-            tracing::debug!(
-                "active virtual mods: {:?}",
-                self.common
-                    .a11y_keyboard_monitor_state
-                    .active_virtual_mods()
-            );
-            seat.supressed_keys().add(&handle, None);
-
-            return FilterResult::Intercept(None);
         }
 
         // Skip released events for initially surpressed keys
-        if event.state() == KeyState::Released
-            && let Some(tokens) = seat.supressed_keys().filter(&handle)
+        if key_state == KeyState::Released
+            && let Some(tokens) = seat.supressed_keys().filter(backend_id, &handle)
         {
             for token in tokens {
                 self.common.event_loop_handle.remove(token);
@@ -2054,7 +2612,7 @@ impl State {
         }
 
         // Handle VT switches
-        if event.state() == KeyState::Pressed
+        if key_state == KeyState::Pressed
             && (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw())
                 .contains(&handle.modified_sym().raw())
         {
@@ -2063,20 +2621,18 @@ impl State {
             ) {
                 error!(?err, "Failed switching virtual terminal.");
             }
-            seat.supressed_keys().add(&handle, None);
+            seat.supressed_keys().add(backend_id, &handle, None);
             return FilterResult::Intercept(None);
         }
 
-        if event.state() == KeyState::Pressed
-            && (self.common.a11y_keyboard_monitor_state.has_keyboard_grab()
-                || self
-                    .common
-                    .a11y_keyboard_monitor_state
-                    .has_key_grab(modifiers, handle.modified_sym()))
+        if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor()
+            && key_state == KeyState::Pressed
+            && (a11y_keyboard_monitor.has_keyboard_grab()
+                || a11y_keyboard_monitor.has_key_grab(modifiers, handle.modified_sym()))
         {
             let modifiers_queue = seat.modifiers_shortcut_queue();
-            modifiers_queue.clear();
-            seat.supressed_keys().add(&handle, None);
+            modifiers_queue.clear(backend_id);
+            seat.supressed_keys().add(backend_id, &handle, None);
             return FilterResult::Intercept(None);
         }
 
@@ -2203,11 +2759,11 @@ impl State {
 
                 // is this a released (triggered) modifier-only binding?
                 if binding.key.is_none()
-                    && event.state() == KeyState::Released
+                    && key_state == KeyState::Released
                     && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
-                    && modifiers_queue.take(binding)
+                    && modifiers_queue.take(backend_id, binding)
                 {
-                    modifiers_queue.clear();
+                    modifiers_queue.clear(backend_id);
                     return FilterResult::Intercept(Some((
                         Action::Shortcut(action.clone()),
                         binding.clone(),
@@ -2216,21 +2772,21 @@ impl State {
 
                 // could this potentially become a modifier-only binding?
                 if binding.key.is_none()
-                    && event.state() == KeyState::Pressed
+                    && key_state == KeyState::Pressed
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
-                    modifiers_queue.set(binding.clone());
+                    modifiers_queue.set(backend_id, binding.clone());
                     clear_queue = false;
                 }
 
                 // is this a normal binding?
                 if binding.key.is_some()
-                    && event.state() == KeyState::Pressed
+                    && key_state == KeyState::Pressed
                     && key_matches(binding.key.unwrap())
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
-                    modifiers_queue.clear();
-                    seat.supressed_keys().add(&handle, None);
+                    modifiers_queue.clear(backend_id);
+                    seat.supressed_keys().add(backend_id, &handle, None);
                     return FilterResult::Intercept(Some((
                         Action::Shortcut(action.clone()),
                         binding.clone(),
@@ -2241,7 +2797,7 @@ impl State {
 
         // no binding
         if clear_queue {
-            seat.modifiers_shortcut_queue().clear();
+            seat.modifiers_shortcut_queue().clear(backend_id);
         }
         // keys are passed through to apps
         FilterResult::Forward
@@ -2394,6 +2950,7 @@ impl State {
                         layer,
                         popup,
                         location,
+                        ..
                     } => {
                         if layer.can_receive_keyboard_focus() {
                             let surface = popup.wl_surface();
@@ -2411,7 +2968,9 @@ impl State {
                             }
                         }
                     }
-                    Stage::LayerSurface { layer, location } => {
+                    Stage::LayerSurface {
+                        layer, location, ..
+                    } => {
                         if under_from_surface_tree(
                             layer.wl_surface(),
                             global_pos.as_logical(),
@@ -2454,7 +3013,7 @@ impl State {
                         if Rectangle::new(offset.as_local(), output_geo.size)
                             .intersection(output_geo)
                             .is_some_and(|geometry| {
-                                geometry.contains(global_pos.to_local(output).to_i32_round())
+                                geometry.contains(global_pos.to_local(output).to_i32_floor())
                             })
                             && let Some(element) = workspace.popup_element_under(location, seat)
                         {
@@ -2468,7 +3027,7 @@ impl State {
                         if Rectangle::new(offset.as_local(), output_geo.size)
                             .intersection(output_geo)
                             .is_some_and(|geometry| {
-                                geometry.contains(global_pos.to_local(output).to_i32_round())
+                                geometry.contains(global_pos.to_local(output).to_i32_floor())
                             })
                             && let Some(element) = workspace.toplevel_element_under(location, seat)
                         {
@@ -2563,7 +3122,9 @@ impl State {
                             ))));
                         }
                     }
-                    Stage::LayerSurface { layer, location } => {
+                    Stage::LayerSurface {
+                        layer, location, ..
+                    } => {
                         let surface = layer.wl_surface();
                         if let Some((surface, surface_loc)) = under_from_surface_tree(
                             surface,
@@ -2646,6 +3207,7 @@ impl State {
         surface: &WlSurface,
         pointer: &PointerHandle<Self>,
         mut location: Point<f64, Logical>,
+        constraint: Option<&PointerConstraint>,
     ) {
         let Some(client) = surface.client() else {
             return;
@@ -2660,7 +3222,7 @@ impl State {
             });
 
             if let Some((output, geometry, surface_offset)) = found {
-                let mut pos_in_element = location + surface_offset.to_f64();
+                let pos_in_element = location + surface_offset.to_f64();
                 let window_size = geometry.size.to_f64();
 
                 let is_legal = |p: Point<f64, Logical>| {
@@ -2670,54 +3232,59 @@ impl State {
                         return false;
                     }
 
-                    with_pointer_constraint(surface, pointer, |constraint| {
-                        if let Some(constraint) = constraint
-                            && let Some(region) = constraint.region()
-                        {
-                            let point_in_surface = (p - surface_offset.to_f64()).to_i32_round();
-                            return region.contains(point_in_surface);
-                        }
-                        true
-                    })
+                    if let Some(constraint) = constraint
+                        && let Some(region) = constraint.region()
+                    {
+                        let point_in_surface = (p - surface_offset.to_f64()).to_i32_floor();
+                        return region.contains(point_in_surface);
+                    }
+                    true
                 };
 
                 let workspace_origin = output.geometry().loc.to_f64();
                 let origin = geometry.loc.to_f64();
 
-                if !is_legal(pos_in_element) {
-                    let original_global = pointer.current_location();
-
-                    let original_pos_in_element = Point::new(
-                        original_global.x - workspace_origin.x - origin.x,
-                        original_global.y - workspace_origin.y - origin.y,
-                    );
-
-                    let y_only_pos = Point::new(original_pos_in_element.x, pos_in_element.y);
-                    let x_only_pos = Point::new(pos_in_element.x, original_pos_in_element.y);
-
-                    if is_legal(y_only_pos) {
-                        pos_in_element = y_only_pos;
-                    } else if is_legal(x_only_pos) {
-                        pos_in_element = x_only_pos;
-                    } else {
-                        pos_in_element = original_pos_in_element;
-                    }
+                if is_legal(pos_in_element) {
+                    let x = workspace_origin.x + origin.x + pos_in_element.x;
+                    let y = workspace_origin.y + origin.y + pos_in_element.y;
+                    Some((Point::<_, Global>::new(x, y), output.clone()))
+                } else {
+                    None
                 }
-
-                let x = workspace_origin.x + origin.x + pos_in_element.x;
-                let y = workspace_origin.y + origin.y + pos_in_element.y;
-                Some((Point::new(x, y), output.clone()))
             } else {
                 None
             }
         };
 
         if let Some((point, output)) = point_and_output {
+            // TODO: Replace with `wl_pointer.warp`
             let original_position = pointer.current_location();
-            pointer.set_location(point);
+            let serial = SERIAL_COUNTER.next_serial();
+            let under = State::surface_under(point, &output, &self.common.shell.write())
+                .map(|(target, pos)| (target, pos.as_logical()));
+            let time = InputTime::now();
+            pointer.relative_motion(
+                self,
+                under.clone(),
+                &RelativeMotionEvent {
+                    delta: (0., 0.).into(),
+                    delta_unaccel: (0., 0.).into(),
+                    time,
+                },
+            );
+            pointer.motion(
+                self,
+                under,
+                &MotionEvent {
+                    location: point.as_logical(),
+                    serial,
+                    time,
+                },
+            );
+            pointer.frame(self);
 
             let mut shell = self.common.shell.write();
-            shell.update_pointer_position(point.as_global().to_local(&output), &output);
+            shell.update_pointer_position(point.to_local(&output), &output);
 
             let seat = shell
                 .seats
@@ -2732,36 +3299,19 @@ impl State {
                     self.common.config.cosmic_conf.accessibility_zoom.view_moves,
                 );
 
-                let output_geometry = output.geometry();
-                for session in cursor_sessions_for_output(&shell, &output) {
-                    if let Some((geometry, offset)) = seat.cursor_geometry(
-                        point.to_buffer(
-                            output.current_scale().fractional_scale(),
-                            output.current_transform(),
-                            &output_geometry.size.to_f64().as_logical(),
-                        ),
-                        self.common.clock.now(),
-                    ) {
-                        if session
-                            .current_constraints()
-                            .map(|constraint| constraint.size != geometry.size)
-                            .unwrap_or(true)
-                        {
-                            session.update_constraints(BufferConstraints {
-                                size: geometry.size,
-                                shm: vec![ShmFormat::Argb8888],
-                                dma: None,
-                            });
-                        }
-                        session.set_cursor_hotspot(offset);
-                        session.set_cursor_pos(Some(geometry.loc));
-                    }
-                }
+                update_output_image_copy_cursor_position(
+                    &shell,
+                    &self.common.clock,
+                    &output,
+                    &seat,
+                    point,
+                );
             }
         }
     }
 }
 
+// Output and workspace sessions for the given output
 fn cursor_sessions_for_output<'a>(
     shell: &'a Shell,
     output: &'a Output,
@@ -2770,14 +3320,9 @@ fn cursor_sessions_for_output<'a>(
         .active_space(output)
         .into_iter()
         .flat_map(|workspace| {
-            let fullscreen_cursors: Vec<_> = workspace
-                .get_fullscreen_surfaces()
-                .flat_map(|f| f.surface.cursor_sessions())
-                .collect();
             workspace
                 .cursor_sessions()
                 .into_iter()
-                .chain(fullscreen_cursors)
                 .chain(output.cursor_sessions())
         })
 }
@@ -2822,6 +3367,7 @@ fn mapped_output_for_device<'a, D: Device + 'static>(
     map_to_output.or_else(|| shell.builtin_output())
 }
 
+<<<<<<< HEAD
 /// May this pointer target be given the click?
 ///
 /// The rule is `crate::presented`'s: a surface that has never reached the screen
@@ -2863,3 +3409,37 @@ fn target_may_receive_input(target: &PointerFocusTarget) -> bool {
     }
 }
 
+=======
+pub fn update_output_image_copy_cursor_position(
+    shell: &Shell,
+    clock: &Clock<Monotonic>,
+    output: &Output,
+    seat: &Seat<State>,
+    position: Point<f64, Global>,
+) {
+    let output_geometry = output.geometry();
+    for session in cursor_sessions_for_output(shell, output) {
+        if let Some(cursor_geometry) = seat.cursor_geometry(
+            (position - output_geometry.loc.to_f64())
+                .as_logical()
+                .to_buffer(
+                    output.current_scale().fractional_scale(),
+                    output.current_transform(),
+                    &output_geometry.size.to_f64().as_logical(),
+                ),
+            clock.now(),
+        ) {
+            let constraints = cursor_capture_constraints(Some(cursor_geometry));
+            if session
+                .current_constraints()
+                .map(|current_constraints| current_constraints.size != constraints.size)
+                .unwrap_or(true)
+            {
+                session.update_constraints(constraints);
+            }
+            session.set_cursor_hotspot(cursor_geometry.hotspot);
+            session.set_cursor_pos(Some(cursor_geometry.geometry.loc));
+        }
+    }
+}
+>>>>>>> upstream/master
