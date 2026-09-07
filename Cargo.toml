@@ -125,6 +125,24 @@ version = "0.2.0"
 features = ["svg"]
 optional = true
 
+# The helper clients are Wayland clients, not part of the compositor, and their
+# dependencies arrive with `test-client`. Without this they were still compiled
+# by any plain `cargo build`/`cargo test`, which failed on the missing crates -
+# so the test suite has not built in any configuration.
+[[bin]]
+name = "cosmic-comp"
+path = "src/main.rs"
+
+[[bin]]
+name = "test-client"
+path = "src/bin/test-client.rs"
+required-features = ["test-client"]
+
+[[bin]]
+name = "ghost-repro"
+path = "src/bin/ghost-repro.rs"
+required-features = ["test-client"]
+
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
