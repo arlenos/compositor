@@ -150,6 +150,11 @@ name = "lock-probe"
 path = "src/bin/lock-probe.rs"
 required-features = ["test-client"]
 
+[[bin]]
+name = "wallpaper-probe"
+path = "src/bin/wallpaper-probe.rs"
+required-features = ["test-client"]
+
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
