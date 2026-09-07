@@ -4,11 +4,8 @@ use super::{
 };
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage,
-        clipped_surface::ClippedSurfaceRenderElement,
-        cursor::CursorState,
-        element::{AsGlowRenderer, FromGlesError},
-        shadow::ShadowShader,
+        IndicatorShader, Key, Usage, clipped_surface::ClippedSurfaceRenderElement,
+        cursor::CursorState, element::AsGlowRenderer, shadow::ShadowShader,
     },
     shell::{
         element::{CosmicMappedKey, CosmicMappedKeyInner},
@@ -1816,7 +1813,6 @@ impl<R> RenderElement<R> for CosmicStackRenderElement<R>
 where
     R: AsGlowRenderer,
     R::TextureId: 'static,
-    R::Error: FromGlesError,
 {
     fn draw(
         &self,
@@ -1841,7 +1837,7 @@ where
                     opaque_regions,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicStackRenderElement::Window(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
@@ -1882,7 +1878,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicStackRenderElement::Window(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
