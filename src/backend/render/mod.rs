@@ -484,6 +484,7 @@ pub fn cursor_elements<'a, 'frame, R>(
     output: &Output,
     mode: CursorMode,
     exclude_dnd_icon: bool,
+    scanout_node: Option<DrmNode>,
 ) -> Vec<CosmicElement<R>>
 where
     R: AsGlowRenderer,
@@ -557,7 +558,14 @@ where
             .lock()
             .unwrap()
             .as_ref()
-            .map(|state| state.render::<CosmicMappedRenderElement<R>, R>(renderer, output, lt))
+            .map(|state| {
+                state.render::<CosmicMappedRenderElement<R>, R>(
+                    renderer,
+                    output,
+                    lt,
+                    scanout_node,
+                )
+            })
         {
             elements.extend(grab_elements.into_iter().map(|elem| {
                 CosmicElement::MoveGrab(RescaleRenderElement::from_element(
@@ -623,6 +631,7 @@ pub fn output_elements<R>(
     output: &Output,
     cursor_mode: CursorMode,
     _fps: Option<(&EguiState, &Timings)>,
+    scanout_node: Option<DrmNode>,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
     R: AsGlowRenderer,
@@ -698,6 +707,7 @@ where
         workspace,
         cursor_mode,
         element_filter,
+        scanout_node,
     )?;
 
     #[cfg(feature = "debug")]
@@ -721,6 +731,7 @@ pub fn workspace_elements<R>(
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
+    scanout_node: Option<DrmNode>,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
     R: AsGlowRenderer,
@@ -752,6 +763,7 @@ where
             output,
             cursor_mode,
             element_filter == ElementFilter::ExcludeWorkspaceOverview,
+            scanout_node,
         ));
     }
 
@@ -921,7 +933,7 @@ where
 
                 elements.extend(
                     layout
-                        .render_popups(renderer, alpha)
+                        .render_popups(renderer, alpha, scanout_node)
                         .into_iter()
                         .map(Into::into)
                         .flat_map(crop_to_output)
@@ -964,6 +976,7 @@ where
                             resize_indicator.clone(),
                             active_hint,
                             alpha,
+                            scanout_node,
                         )
                         .into_iter()
                         .map(Into::into)
@@ -978,6 +991,7 @@ where
                         last_active_seat,
                         !move_active && is_active_space,
                         overview.clone(),
+                        scanout_node,
                     ) {
                         Ok(elements) => {
                             elements
@@ -1006,6 +1020,7 @@ where
                         overview.clone(),
                         resize_indicator.clone(),
                         active_hint,
+                        scanout_node,
                     ) {
                         Ok(elements) => {
                             elements
@@ -1529,6 +1544,7 @@ where
         current,
         cursor_mode,
         element_filter,
+        None,
     )?;
 
     if let Some(additional_damage) = additional_damage {

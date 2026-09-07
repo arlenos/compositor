@@ -139,7 +139,7 @@ dependencies = [
 [[package]]
 name = "arlen-theme"
 version = "0.1.0"
-source = "git+https://github.com/arlenos/arlen#1a9f6099a0a75cefb0e85354a53ae852da1f32e0"
+source = "git+https://github.com/arlenos/arlen#fe1eaabb057bdd3fa551ecef50918873c77102a3"
 dependencies = [
  "dirs 5.0.1",
  "notify 7.0.0",
@@ -763,7 +763,7 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.2.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?branch=main#160b086abe03cd34a8a375d7fbe47b24308d1f38"
+source = "git+https://github.com/pop-os//cosmic-protocols?branch=main#0d0b0b573fe4836ede4c237dadd365033cd28296"
 dependencies = [
  "bitflags 2.11.0",
  "wayland-backend",
@@ -6025,4 +6025,4 @@ dependencies = [
 [[patch.unused]]
 name = "cosmic-client-toolkit"
 version = "0.2.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?branch=main#160b086abe03cd34a8a375d7fbe47b24308d1f38"
+source = "git+https://github.com/pop-os//cosmic-protocols?branch=main#0d0b0b573fe4836ede4c237dadd365033cd28296"

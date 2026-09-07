@@ -96,7 +96,6 @@ pub struct Device {
     pub inner: InnerDevice,
     pub drm: GbmDrmOutputManager,
 
-    supports_atomic: bool,
     pub texture_formats: FormatSet,
     event_token: Option<RegistrationToken>,
     pub socket: Option<Socket>,
@@ -722,7 +721,6 @@ impl Device {
         let (drm, notifier) = DrmDevice::new(fd.clone(), false)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let dev_node = DrmNode::from_dev_id(dev)?;
-        let supports_atomic = drm.is_atomic();
 
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
@@ -842,7 +840,6 @@ impl Device {
                 active_clients,
             },
 
-            supports_atomic,
             texture_formats,
             event_token: Some(token),
             socket,
@@ -851,8 +848,7 @@ impl Device {
 
     pub fn enumerate_surfaces(&mut self) -> Result<OutputChanges> {
         // enumerate our outputs
-        let config =
-            drm_helpers::display_configuration(self.drm.device_mut(), self.supports_atomic)?;
+        let config = drm_helpers::display_configuration(self.drm.device_mut())?;
 
         let surfaces = self
             .inner
@@ -957,6 +953,7 @@ impl LockedDevice<'_> {
                         now,
                         output,
                         CursorMode::All,
+                        None,
                         None,
                     )
                     .with_context(|| "Failed to render outputs")?,
