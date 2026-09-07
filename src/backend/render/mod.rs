@@ -19,6 +19,7 @@ use crate::{
             shadow::{SHADOW_SHADER, ShadowShader},
             wayland::{
                 SurfaceRenderElement,
+                blur_effect::BlurShaders,
                 clipped_surface::{CLIPPING_SHADER, ClippingShader},
                 push_render_elements_from_surface_tree,
             },
@@ -26,7 +27,7 @@ use crate::{
     },
     config::ScreenFilter,
     shell::{
-        CosmicMappedRenderElement, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
+        CosmicMappedRenderElement, OutputId, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
         WorkspaceRenderElement,
         element::CosmicMappedKey,
         focus::{FocusTarget, Stage, render_input_order, target::WindowGroup},
@@ -38,8 +39,11 @@ use crate::{
     wayland::{
         handlers::{
             compositor::FRAME_TIME_FILTER,
+            corner_radius::{pad_rect, surface_corners, surface_padding},
             data_device::get_dnd_icon,
-            image_copy_capture::{FrameHolder, SessionData, render_session},
+            image_copy_capture::{
+                FrameHolder, SessionData, render_element_buffers, render_session,
+            },
         },
         protocols::workspace::WorkspaceHandle,
     },
@@ -53,7 +57,7 @@ use smithay::{
             Color32F, Offscreen, Texture, TextureFilter,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
-                Element, Id, Kind, RenderElement, WeakId,
+                Element, Id, Kind, NamespacedElement, RenderElement, WeakId,
                 texture::{TextureRenderBuffer, TextureRenderElement},
                 utils::{
                     ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, Relocate,
@@ -76,7 +80,7 @@ use smithay::{
     utils::{
         IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
     },
-    wayland::{dmabuf::get_dmabuf, session_lock::LockSurface},
+    wayland::{compositor::with_states, dmabuf::get_dmabuf, session_lock::LockSurface},
 };
 
 #[cfg(feature = "debug")]
@@ -273,7 +277,7 @@ impl IndicatorShader {
             .filter(|(old_settings, _)| &settings == old_settings)
             .is_none()
         {
-            let thickness: f32 = ((thickness as f64 * scale).ceil() / scale) as f32;
+            let thickness: f32 = ((thickness as f64 * scale) / scale) as f32;
             let shader = Self::get(renderer);
 
             let elem = PixelShaderElement::new(
@@ -434,6 +438,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("geo_size", UniformType::_2f),
             UniformName::new("corner_radius", UniformType::_4f),
             UniformName::new("input_to_geo", UniformType::Matrix3x3),
+            UniformName::new("noise", UniformType::_1f),
         ],
     )?;
     let shadow_shader = renderer.compile_custom_pixel_shader(
@@ -449,6 +454,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("window_corner_radius", UniformType::_4f),
         ],
     )?;
+    let blur_shaders = BlurShaders::compile(renderer)?;
 
     let egl_context = renderer.egl_context();
     egl_context
@@ -466,6 +472,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     egl_context
         .user_data()
         .insert_if_missing(|| ShadowShader(shadow_shader));
+    egl_context.user_data().insert_if_missing(|| blur_shaders);
 
     Ok(())
 }
@@ -483,6 +490,7 @@ pub fn cursor_elements<'a, 'frame, R>(
     seats: impl Iterator<Item = &'a Seat<State>>,
     zoom_state: Option<&ZoomState>,
     lt: &arlen_theme::ArlenTheme,
+    blur_strength: usize,
     now: Time<Monotonic>,
     output: &Output,
     mode: CursorMode,
@@ -519,6 +527,7 @@ pub fn cursor_elements<'a, 'frame, R>(
                 scale.into(),
                 zoom_scale,
                 now,
+                blur_strength,
                 mode != CursorMode::NotDefault,
                 &mut |elem, hotspot| {
                     push(CosmicElement::Cursor(RescaleRenderElement::from_element(
@@ -543,6 +552,7 @@ pub fn cursor_elements<'a, 'frame, R>(
                 &dnd_icon.surface,
                 (location + dnd_icon.offset.to_f64()).to_i32_round(),
                 scale,
+                blur_strength,
                 &mut |elem| push(CosmicElement::Dnd(elem)),
             );
         }
@@ -727,6 +737,7 @@ where
     if seats.is_empty() {
         return Ok(Vec::new());
     }
+    let blur_strength = crate::theme::arlen_blur_strength(&shell_ref.arlen_theme);
     let scale = output.current_scale().fractional_scale();
     // we don't want to hold a shell lock across `cursor_elements`,
     // that is prone to deadlock with the main-thread on some grabs.
@@ -739,6 +750,7 @@ where
             seats.iter(),
             zoom_level,
             lt,
+            blur_strength,
             now,
             output,
             cursor_mode,
@@ -829,15 +841,29 @@ where
                 // via the shell overlay protocol.
             }
             Stage::SessionLock(lock_surface) => {
-                session_lock_elements(renderer, output, lock_surface, &mut |elem| {
+                session_lock_elements(renderer, output, lock_surface, blur_strength, &mut |elem| {
                     elements.extend(crop_to_output(elem.into()).map(Into::into))
                 })
             }
             Stage::LayerPopup {
-                popup, location, ..
+                popup,
+                location,
+                workspace_idx,
+                ..
             } => {
                 let mut geometry = popup.geometry().as_global();
                 geometry.loc += location;
+
+                let radii = with_states(popup.wl_surface(), |states| {
+                    surface_corners(states, geometry.size.as_logical())
+                })
+                .unwrap_or([0; 4]);
+
+                let namespace = output
+                    .user_data()
+                    .get::<OutputId>()
+                    .map(|id| id.namespace_for_workspace(workspace_idx))
+                    .unwrap_or(workspace_idx);
 
                 push_render_elements_from_surface_tree(
                     renderer,
@@ -850,15 +876,43 @@ where
                     Scale::from(scale),
                     1.0,
                     false,
-                    [0; 4],
+                    radii,
+                    None,
+                    blur_strength,
                     FRAME_TIME_FILTER,
-                    &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
+                    &mut |elem| {
+                        elements.extend(
+                            crop_to_output(NamespacedElement::new(elem, namespace).into())
+                                .map(Into::into),
+                        )
+                    },
                     None,
                 )
             }
-            Stage::LayerSurface { layer, location } => {
+            Stage::LayerSurface {
+                layer,
+                location,
+                workspace_idx,
+            } => {
                 let mut geometry = layer.geometry().as_global();
                 geometry.loc += location;
+                let geometry = geometry.to_local(output).as_logical();
+
+                let padded = with_states(layer.wl_surface(), |states| {
+                    surface_padding(states, geometry.size)
+                        .and_then(|padding| pad_rect(geometry, &padding))
+                })
+                .unwrap_or(geometry);
+                let radii = with_states(layer.wl_surface(), |states| {
+                    surface_corners(states, padded.size)
+                })
+                .unwrap_or([0; 4]);
+
+                let namespace = output
+                    .user_data()
+                    .get::<OutputId>()
+                    .map(|id| id.namespace_for_workspace(workspace_idx))
+                    .unwrap_or(workspace_idx);
 
                 push_render_elements_from_surface_tree(
                     renderer,
@@ -867,13 +921,20 @@ where
                         .to_local(output)
                         .as_logical()
                         .to_physical_precise_round(scale),
-                    geometry.to_local(output).as_logical().to_f64(),
+                    geometry.to_f64(),
                     Scale::from(scale),
                     1.0,
                     false,
-                    [0; 4],
+                    radii,
+                    padded.to_f64(),
+                    blur_strength,
                     FRAME_TIME_FILTER,
-                    &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
+                    &mut |elem| {
+                        elements.extend(
+                            crop_to_output(NamespacedElement::new(elem, namespace).into())
+                                .map(Into::into),
+                        )
+                    },
                     None,
                 );
             }
@@ -894,6 +955,8 @@ where
                         1.0,
                         false,
                         [0; 4],
+                        None,
+                        blur_strength,
                         FRAME_TIME_FILTER,
                         &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
                         None,
@@ -1021,6 +1084,7 @@ fn session_lock_elements<R>(
     renderer: &mut R,
     output: &Output,
     lock_surface: Option<&LockSurface>,
+    blur_strength: usize,
     push: &mut dyn FnMut(SurfaceRenderElement<R>),
 ) where
     R: AsGlowRenderer,
@@ -1037,6 +1101,8 @@ fn session_lock_elements<R>(
             1.0,
             false,
             [0; 4],
+            None,
+            blur_strength,
             FRAME_TIME_FILTER,
             push,
             None,
@@ -1458,11 +1524,16 @@ where
                             }
                         }
 
-                        Ok(RenderOutputResult {
-                            damage: res.0,
-                            sync,
-                            states: res.1,
-                        })
+                        let buffers = render_element_buffers(renderer, &elements);
+
+                        Ok((
+                            RenderOutputResult {
+                                damage: res.0,
+                                sync,
+                                states: res.1,
+                            },
+                            buffers,
+                        ))
                     },
                 )? {
                     pending_image_copy_data.send_success_when_ready(
@@ -1503,7 +1574,19 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let elements: Vec<CosmicElement<R>> = workspace_elements(
+    let mut elements: Vec<CosmicElement<R>> = if let Some(additional_damage) = additional_damage {
+        let output_geo = output.geometry().to_local(output).as_logical();
+        additional_damage
+            .into_iter()
+            .filter_map(|rect| rect.intersection(output_geo))
+            .map(DamageElement::new)
+            .map(CosmicElement::from)
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    elements.extend(workspace_elements(
         gpu,
         renderer,
         shell,
@@ -1515,17 +1598,7 @@ where
         cursor_mode,
         element_filter,
         None,
-    )?;
-
-    if let Some(additional_damage) = additional_damage {
-        let output_geo = output.geometry().to_local(output).as_logical();
-        let additional_damage_elements: Vec<_> = additional_damage
-            .into_iter()
-            .filter_map(|rect| rect.intersection(output_geo))
-            .map(DamageElement::new)
-            .collect();
-        damage_tracker.damage_output(age, &additional_damage_elements)?;
-    }
+    )?);
 
     let res = damage_tracker.render_output(
         renderer,

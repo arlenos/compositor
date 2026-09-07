@@ -464,6 +464,12 @@ pub fn create_seat(
     seat
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct CursorGeometry {
+    pub geometry: Rectangle<i32, Buffer>,
+    pub hotspot: Point<i32, Buffer>,
+}
+
 pub trait SeatExt {
     fn id(&self) -> usize;
 
@@ -488,7 +494,7 @@ pub trait SeatExt {
         &self,
         loc: impl Into<Point<f64, Buffer>>,
         time: Time<Monotonic>,
-    ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)>;
+    ) -> Option<CursorGeometry>;
     fn cursor_image_status(&self) -> CursorImageStatus;
     fn set_cursor_image_status(&self, status: CursorImageStatus);
 }
@@ -593,7 +599,7 @@ impl SeatExt for Seat<State> {
         &self,
         loc: impl Into<Point<f64, Buffer>>,
         time: Time<Monotonic>,
-    ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)> {
+    ) -> Option<CursorGeometry> {
         let location = loc.into().to_i32_round();
 
         match self.cursor_image_status() {
@@ -612,7 +618,10 @@ impl SeatExt for Seat<State> {
                     (geo.loc.x, geo.loc.y).into(),
                     geo.size.to_buffer(1, Transform::Normal),
                 );
-                Some((buffer_geo, (hotspot.x, hotspot.y).into()))
+                Some(CursorGeometry {
+                    geometry: buffer_geo,
+                    hotspot: (hotspot.x, hotspot.y).into(),
+                })
             }
             CursorImageStatus::Named(cursor_icon) => {
                 let seat_userdata = self.user_data();
@@ -624,10 +633,13 @@ impl SeatExt for Seat<State> {
                     .get_named_cursor(cursor_icon)
                     .get_image(1, time.as_millis());
 
-                Some((
-                    Rectangle::new(location, (frame.width as i32, frame.height as i32).into()),
-                    (frame.xhot as i32, frame.yhot as i32).into(),
-                ))
+                Some(CursorGeometry {
+                    geometry: Rectangle::new(
+                        location,
+                        (frame.width as i32, frame.height as i32).into(),
+                    ),
+                    hotspot: (frame.xhot as i32, frame.yhot as i32).into(),
+                })
             }
             CursorImageStatus::Hidden => None,
         }

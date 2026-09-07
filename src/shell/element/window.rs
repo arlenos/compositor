@@ -451,11 +451,12 @@ impl CosmicWindow {
 
         let p = self.p();
         p.window.push_popup_render_elements(
-                renderer,
-                window_loc,
-                scale,
-                alpha,
-                scanout_node,
+            renderer,
+            window_loc,
+            scale,
+            alpha,
+            scanout_node,
+            crate::theme::arlen_blur_strength(&crate::theme::arlen_theme()),
             &mut |elem| push(elem.into()),
         )
     }
@@ -634,6 +635,7 @@ impl CosmicWindow {
                 scanout_node,
                 clip,
                 radii,
+                crate::theme::arlen_blur_strength(&crate::theme::arlen_theme()),
                 &mut |elem| push_above(elem.into()),
                 Some(&mut |elem| push_below(elem.into())),
             )
@@ -1647,7 +1649,7 @@ impl<R: Renderer + ImportAll + ImportMem> From<SurfaceRenderElement<R>>
 impl<R> Element for CosmicWindowRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &RendererId {
         match self {
@@ -1756,7 +1758,7 @@ where
 impl<R> RenderElement<R> for CosmicWindowRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,

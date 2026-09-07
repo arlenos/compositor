@@ -75,7 +75,7 @@ impl SwapIndicator {
     }
 
     /// No-op -- output tracking is unused.
-    pub fn output_enter(&self, _output: &Output, _overlap: Rectangle<i32, Logical>) {}
+    pub fn output_enter(&self, _output: &Output) {}
 
     /// No-op -- output tracking is unused.
     pub fn output_leave(&self, _output: &Output) {}

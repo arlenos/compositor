@@ -68,13 +68,22 @@ pub fn stack_hover(
 }
 
 impl StackHover {
+    /// Upstream's constructor name; this fork keeps the free `stack_hover`
+    /// function too, because our own call sites use it.
+    pub fn new(
+        evlh: calloop::LoopHandle<'static, crate::state::State>,
+        size: Size<i32, Logical>,
+    ) -> StackHover {
+        stack_hover(evlh, size)
+    }
+
     /// Updates the indicator's logical size.
     pub fn resize(&self, size: Size<i32, Logical>) {
         self.inner.lock().unwrap().size = size;
     }
 
     /// No-op -- output tracking is unused.
-    pub fn output_enter(&self, _output: &Output, _overlap: Rectangle<i32, Logical>) {}
+    pub fn output_enter(&self, _output: &Output) {}
 
     /// No-op -- output tracking is unused.
     pub fn output_leave(&self, _output: &Output) {}

@@ -175,7 +175,7 @@ fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error
 }
 
 render_elements! {
-    pub CursorRenderElement<R> where R: ImportAll + ImportMem + AsGlowRenderer;
+    pub CursorRenderElement<R> where R: ImportAll + ImportMem + AsGlowRenderer, R::TextureId: Send;
     Static=MemoryRenderBufferRenderElement<R>,
     Surface=SurfaceRenderElement<R>,
 }
@@ -185,6 +185,7 @@ pub fn draw_surface_cursor<R>(
     surface: &wl_surface::WlSurface,
     location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
+    blur_strength: usize,
     push: &mut dyn FnMut(CursorRenderElement<R>, Point<i32, Physical>),
 ) where
     R: Renderer + ImportAll + AsGlowRenderer,
@@ -211,6 +212,8 @@ pub fn draw_surface_cursor<R>(
         1.0,
         false,
         [0; 4],
+        None,
+        blur_strength,
         Kind::Cursor,
         &mut |elem| push(elem.into(), h),
         None,
@@ -223,6 +226,7 @@ pub fn draw_dnd_icon<R>(
     surface: &wl_surface::WlSurface,
     location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
+    blur_strength: usize,
     push: &mut dyn FnMut(SurfaceRenderElement<R>),
 ) where
     R: Renderer + ImportAll + AsGlowRenderer,
@@ -244,6 +248,8 @@ pub fn draw_dnd_icon<R>(
         1.0,
         false,
         [0; 4],
+        None,
+        blur_strength,
         FRAME_TIME_FILTER,
         push,
         None,
@@ -330,6 +336,7 @@ pub fn draw_cursor<R>(
     scale: Scale<f64>,
     buffer_scale: f64,
     time: Time<Monotonic>,
+    blur_strength: usize,
     draw_default: bool,
     push: &mut dyn FnMut(CursorRenderElement<R>, Point<i32, Physical>),
 ) where
@@ -406,7 +413,7 @@ pub fn draw_cursor<R>(
             hotspot.to_physical_precise_round(scale),
         );
     } else if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
-        draw_surface_cursor(renderer, wl_surface, location, scale, push);
+        draw_surface_cursor(renderer, wl_surface, location, scale, blur_strength, push);
     }
 }
 

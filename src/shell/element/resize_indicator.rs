@@ -129,7 +129,11 @@ impl ResizeIndicator {
     pub fn resize(&self, _size: Size<i32, Logical>) {}
 
     /// No-op -- output tracking is unused.
-    pub fn output_enter(&self, _output: &Output, _overlap: Rectangle<i32, Logical>) {}
+    pub fn set_edges(&self, edges: ResizeEdge) {
+        *self.inner.lock().unwrap().edges.lock().unwrap() = edges;
+    }
+
+    pub fn output_enter(&self, _output: &Output) {}
 
     /// No-op -- output tracking is unused.
     pub fn output_leave(&self, _output: &Output) {}

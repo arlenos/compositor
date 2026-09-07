@@ -7,13 +7,13 @@ use calloop::LoopHandle;
 use cosmic_comp_config::AppearanceConfig;
 use id_tree::NodeId;
 use smithay::{
+    backend::renderer::element::memory::MemoryRenderBufferRenderElement,
     backend::{
         drm::DrmNode,
         input::KeyState,
         renderer::{
             element::{
                 Element, Kind, RenderElement, UnderlyingStorage,
-                memory::MemoryRenderBufferRenderElement,
                 utils::{CropRenderElement, RelocateRenderElement, RescaleRenderElement},
             },
             gles::element::PixelShaderElement,
@@ -1143,7 +1143,7 @@ where
 impl<R> Element for CosmicMappedRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
@@ -1364,7 +1364,7 @@ where
 impl<R> RenderElement<R> for CosmicMappedRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,

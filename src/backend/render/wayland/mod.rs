@@ -12,13 +12,16 @@ use smithay::{
 use tracing::warn;
 
 use crate::backend::render::{
-    element::AsGlowRenderer, wayland::clipped_surface::ClippedSurfaceRenderElement,
+    element::AsGlowRenderer,
+    wayland::{blur_effect::BlurElement, clipped_surface::ClippedSurfaceRenderElement},
 };
 
+pub mod blur_effect;
 pub mod clipped_surface;
 
 render_elements! {
-    pub SurfaceRenderElement<R> where R: AsGlowRenderer + ImportAll;
+    pub SurfaceRenderElement<R> where R: AsGlowRenderer + ImportAll, R::TextureId: Send;
+    Blur=BlurElement,
     Clipped=ClippedSurfaceRenderElement<R>,
     Wayland=WaylandSurfaceRenderElement<R>,
 }
@@ -32,6 +35,8 @@ pub fn push_render_elements_from_surface_tree<R>(
     alpha: f32,
     should_clip: bool,
     radii: [u8; 4],
+    blur_geometry: impl Into<Option<Rectangle<f64, Logical>>>,
+    blur_strength: usize,
     kind: impl Into<KindEvaluation>,
     push_above: &mut dyn FnMut(SurfaceRenderElement<R>),
     mut push_below: Option<&mut dyn FnMut(SurfaceRenderElement<R>)>,
@@ -40,7 +45,8 @@ pub fn push_render_elements_from_surface_tree<R>(
     R::TextureId: Clone + 'static,
 {
     let location = location.into().to_f64();
-    let geometry = geometry.into().to_f64();
+    let geometry = geometry.into();
+    let blur_geometry = blur_geometry.into();
     let scale = scale.into();
     let kind = kind.into();
     let mut passed_main = false;
@@ -67,6 +73,7 @@ pub fn push_render_elements_from_surface_tree<R>(
             let mut location = *location;
             let kind = kind.eval(states);
             let data = states.data_map.get::<RendererSurfaceStateUserData>();
+            let mut blur = Ok(None);
 
             if let Some(data) = data {
                 let has_view = if let Some(view) = data.lock().unwrap().view() {
@@ -82,6 +89,15 @@ pub fn push_render_elements_from_surface_tree<R>(
                         renderer, surface, states, location, alpha, kind,
                     ) {
                         Ok(Some(surface)) => {
+                            let blur_geo = blur_geometry.unwrap_or(geometry);
+                            blur = BlurElement::from_surface(
+                                renderer,
+                                states,
+                                blur_geo,
+                                scale.x,
+                                radii,
+                                blur_strength,
+                            );
                             let elem: SurfaceRenderElement<R> = if radii.iter().any(|r| *r != 0)
                                 && should_clip
                                 && ClippedSurfaceRenderElement::will_clip(
@@ -112,6 +128,16 @@ pub fn push_render_elements_from_surface_tree<R>(
 
             if surface == main_surface {
                 passed_main = true;
+            }
+
+            if let Ok(Some(elem)) = blur {
+                if let Some(push_below) = push_below.as_mut()
+                    && passed_main
+                {
+                    push_below(elem.into());
+                } else {
+                    push_above(elem.into());
+                }
             }
         },
         |_, _, _| true,

@@ -63,6 +63,16 @@ pub fn replace_arlen_theme(theme: arlen_theme::ArlenTheme) {
 
 /// Active window hint color from ArlenTheme as `[r, g, b]`.
 /// Falls back to the theme's accent if `[wm].window_hint` is unset.
+/// How strongly to blur what sits behind a window surface.
+///
+/// Upstream reads two libcosmic flags here - `frosted_windows` gates it and
+/// `frosted` picks the strength - and the Arlen theme carries the single
+/// decision as `depth.blur_enabled`, so this is on or off rather than a scale.
+/// Zero means no blur, which is what upstream's disabled branch passes.
+pub(crate) fn arlen_blur_strength(lt: &arlen_theme::ArlenTheme) -> usize {
+    if lt.depth.blur_enabled { 1 } else { 0 }
+}
+
 pub(crate) fn arlen_hint_rgb(lt: &arlen_theme::ArlenTheme) -> [f32; 3] {
     if let Some(hint) = lt.wm.window_hint {
         [hint[0], hint[1], hint[2]]

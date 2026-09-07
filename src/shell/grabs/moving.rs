@@ -6,10 +6,7 @@ use crate::{
     },
     shell::{
         CosmicMapped, CosmicSurface, Direction, ManagedLayer,
-        element::{
-            CosmicMappedRenderElement,
-            stack_hover::{StackHover, stack_hover},
-        },
+        element::{CosmicMappedRenderElement, stack_hover::StackHover},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
         layout::floating::TiledCorners,
     },
@@ -24,7 +21,7 @@ use smithay::{
         drm::DrmNode,
         input::ButtonState,
         renderer::{
-            ImportAll, ImportMem, Renderer,
+            ImportAll, ImportMem,
             element::{RenderElement, utils::RescaleRenderElement},
         },
     },
@@ -77,7 +74,7 @@ impl MoveGrabState {
         scanout_node: Option<DrmNode>,
         push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
     ) where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        R: AsGlowRenderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
@@ -488,7 +485,7 @@ impl MoveGrab {
                         if let Some(indicator) =
                             grab_state.stacking_indicator.as_ref().map(|x| &x.0)
                         {
-                            indicator.output_enter(output, overlap);
+                            indicator.output_enter(output);
                         }
                     }
                 } else if self.window_outputs.remove(output) {
@@ -509,15 +506,13 @@ impl MoveGrab {
                     state.common.shell_overlay_state.send_indicator_hide(1);
                 }
                 grab_state.stacking_indicator = indicator_location.map(|geo| {
-                    let element = stack_hover(
+                    let size = geo.size.as_logical();
+                    let element = StackHover::new(
                         state.common.event_loop_handle.clone(),
-                        geo.size.as_logical(),
+                        size,
                     );
                     for output in &self.window_outputs {
-                        element.output_enter(
-                            output,
-                            Rectangle::from_size(output.geometry().size.as_logical()),
-                        );
+                        element.output_enter(output);
                     }
                     (element, geo.loc.as_logical())
                 });

@@ -3292,7 +3292,7 @@ impl TilingLayout {
         location_f64: Point<f64, Local>,
         seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         for (mapped, geo) in self.mapped() {
             if !mapped.bbox().contains((location - geo.loc).as_logical()) {
@@ -3319,9 +3319,13 @@ impl TilingLayout {
         location_f64: Point<f64, Local>,
         seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         for (mapped, geo) in self.mapped() {
+            // Tiled windows are rendered cropped to their tile (`geo`), so input must be bound to the tile as well
+            if !geo.contains(location) {
+                continue;
+            }
             if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                 continue;
             }
@@ -3347,7 +3351,7 @@ impl TilingLayout {
         overview: OverviewMode,
         seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         if matches!(overview, OverviewMode::None) {
             for (mapped, geo) in self.mapped() {
@@ -3382,10 +3386,14 @@ impl TilingLayout {
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         let tree = &self.queue.trees.back().unwrap().0;
         let root = tree.root_node_id()?;
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         if matches!(overview, OverviewMode::None) {
             for (mapped, geo) in self.mapped() {
+                // Tiled windows are rendered cropped to their tile (`geo`), so input must be bound to the tile as well
+                if !geo.contains(location) {
+                    continue;
+                }
                 if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                     continue;
                 }
@@ -3439,7 +3447,7 @@ impl TilingLayout {
                         ..
                     },
                 )) => {
-                    let test_point = (location.to_f64() - last_geometry.loc.to_f64()
+                    let test_point = (location_f64 - last_geometry.loc.to_f64()
                         + mapped.geometry().loc.to_f64().as_local())
                     .as_logical();
                     mapped
@@ -3544,7 +3552,7 @@ impl TilingLayout {
         }
 
         let location_f64 = location_f64.unwrap();
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         if matches!(
             overview.active_trigger(),
@@ -3793,7 +3801,7 @@ impl TilingLayout {
                             TargetZone::WindowStack(id, last_geometry)
                         } else {
                             let left_right = {
-                                let relative_loc = (location.x - last_geometry.loc.x) as f64;
+                                let relative_loc = location_f64.x - last_geometry.loc.x as f64;
                                 if relative_loc < last_geometry.size.w as f64 / 2.0 {
                                     (Direction::Left, relative_loc / last_geometry.size.w as f64)
                                 } else {
@@ -3804,7 +3812,7 @@ impl TilingLayout {
                                 }
                             };
                             let up_down = {
-                                let relative_loc = (location.y - last_geometry.loc.y) as f64;
+                                let relative_loc = location_f64.y - last_geometry.loc.y as f64;
                                 if relative_loc < last_geometry.size.h as f64 / 2.0 {
                                     (Direction::Up, relative_loc / last_geometry.size.h as f64)
                                 } else {
@@ -4146,6 +4154,7 @@ impl TilingLayout {
         &self,
         renderer: &mut R,
         seat: Option<&Seat<State>>,
+        focused: Option<&CosmicMapped>,
         non_exclusive_zone: Rectangle<i32, Local>,
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
@@ -4272,6 +4281,7 @@ impl TilingLayout {
             old_geometries,
             is_overview,
             seat,
+            focused,
             &self.output,
             percentage,
             draw_groups,
@@ -5422,6 +5432,7 @@ fn render_new_tree_windows<R>(
     old_geometries: Option<HashMap<NodeId, Rectangle<i32, Local>>>,
     is_overview: bool,
     seat: Option<&Seat<State>>,
+    focused: Option<&CosmicMapped>,
     output: &Output,
     percentage: f32,
     transition: Option<f32>,
@@ -5440,14 +5451,19 @@ fn render_new_tree_windows<R>(
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
 {
-    let focused = seat
-        .and_then(|seat| {
-            seat.get_keyboard()
-                .unwrap()
-                .current_focus()
-                .and_then(|target| TilingLayout::currently_focused_node(target_tree, target))
-        })
-        .map(|(id, _)| id);
+    let focused = match seat.and_then(|seat| seat.get_keyboard().unwrap().current_focus()) {
+        Some(target @ KeyboardFocusTarget::Group(_)) => {
+            TilingLayout::currently_focused_node(target_tree, target).map(|(id, _)| id)
+        }
+        _ => focused.and_then(|mapped| {
+            let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
+            target_tree
+                .get(&node_id)
+                .ok()
+                .filter(|node| node.data().is_mapped(Some(mapped)))
+                .map(|_| node_id)
+        }),
+    };
     let focused_geo = if let Some(focused) = focused.as_ref() {
         geometries
             .as_ref()
@@ -5483,13 +5499,12 @@ fn render_new_tree_windows<R>(
 
     let mut group_backdrop = None;
     let mut indicators = SmallVec::<[CosmicMappedRenderElement<R>; 2]>::new_const();
-    let mut resize_element = None;
+    let mut resize_elements = SmallVec::<[CosmicMappedRenderElement<R>; 10]>::new_const();
     let mut swap_elements = SmallVec::<[CosmicMappedRenderElement<R>; 4]>::new_const();
 
-    let output_geo = output.geometry();
     let output_scale = output.current_scale().fractional_scale();
 
-    let (swap_indicator, swap_tree) = overview.1.unzip();
+    let (mut swap_indicator, swap_tree) = overview.1.unzip();
     let swap_desc = swap_desc.filter(|_| is_active_output);
     let swap_tree = swap_tree.flatten().filter(|_| is_active_output);
     let lt = crate::theme::arlen_theme();
@@ -5563,6 +5578,8 @@ fn render_new_tree_windows<R>(
             scanout_node,
             false,
             [0, 0, 0, 0],
+            // TODO
+            0,
             &mut |elem| {
                 swap_elements.push(CosmicMappedRenderElement::GrabbedWindow(
                     RescaleRenderElement::from_element(
@@ -5704,10 +5721,11 @@ fn render_new_tree_windows<R>(
                                         .unwrap_or(false)
                                 })
                                 .unwrap_or(false))
-                        && let Some(swap) = swap_indicator.as_ref()
+                        && let Some(swap) = swap_indicator.as_mut()
                     {
-                        swap.resize(geo.size.as_logical());
-                        swap.output_enter(output, output_geo.as_logical());
+                        let size = geo.size.as_logical();
+                        swap.resize(size);
+                        swap.output_enter(output);
                         swap.push_render_elements(
                             renderer,
                             geo.loc.as_logical().to_physical_precise_round(output_scale),
@@ -5724,7 +5742,7 @@ fn render_new_tree_windows<R>(
                     geo.size += (36, 36).into();
 
                     resize.resize(geo.size.as_logical());
-                    resize.output_enter(output, output_geo.as_logical());
+                    resize.output_enter(output);
                     let possible_edges =
                         TilingLayout::possible_resizes(target_tree, node_id.clone());
                     if !possible_edges.is_empty() {
@@ -5757,7 +5775,7 @@ fn render_new_tree_windows<R>(
                             output_scale.into(),
                             alpha * mode.alpha().unwrap_or(1.0),
                             &mut |elem| {
-                                resize_element = Some(elem.into());
+                                resize_elements.push(elem.into());
                             },
                         );
                     }
@@ -5919,7 +5937,7 @@ fn render_new_tree_windows<R>(
         },
     );
 
-    for elem in resize_element
+    for elem in resize_elements
         .into_iter()
         .chain(swap_elements)
         .chain(indicators)

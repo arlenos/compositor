@@ -16,6 +16,7 @@ use crate::{
         element::CosmicStack, focus::FocusTarget, grabs::fullscreen_items,
         layout::tiling::PlaceholderType,
     },
+    utils,
     wayland::{
         handlers::data_device::{self, get_dnd_icon},
         protocols::workspace::{State as WState, WorkspaceCapabilities},
@@ -1626,12 +1627,31 @@ impl Workspaces {
 #[derive(Debug)]
 pub struct InvalidWorkspaceIndex;
 
+utils::id_gen!(next_output_id, OUTPUT_ID, OUTPUT_IDS);
+pub struct OutputId(usize);
+
+impl OutputId {
+    pub fn namespace_for_workspace(&self, idx: usize) -> usize {
+        self.0 | (idx << 32)
+    }
+}
+
+impl Drop for OutputId {
+    fn drop(&mut self) {
+        OUTPUT_IDS.lock().unwrap().remove(&self.0);
+    }
+}
+
 impl Common {
     pub fn add_output(&mut self, output: &Output) {
         let mut shell = self.shell.write();
         shell
             .workspaces
             .add_output(output, &mut self.workspace_state.update());
+
+        output
+            .user_data()
+            .insert_if_missing_threadsafe(|| OutputId(next_output_id()));
 
         if let Some(state) = shell.zoom_state.as_ref() {
             output.user_data().insert_if_missing_threadsafe(|| {
@@ -3423,6 +3443,12 @@ impl Shell {
             increment: zoom_config.increment,
             movement: zoom_config.view_moves,
         });
+
+        self.update_focal_point(
+            seat,
+            seat.get_pointer().unwrap().current_location().as_global(),
+            zoom_config.view_moves,
+        );
     }
 
     pub fn update_focal_point(
@@ -5080,13 +5106,13 @@ impl Shell {
                 }
 
                 (initial_window_location, layer, workspace.handle)
-            } else if let Some(sticky_layer) = self
-                .workspaces
-                .sets
-                .get_mut(&cursor_output)
-                .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
-                .map(|set| &mut set.sticky_layer)
-            {
+            } else {
+                let sticky_layer = self
+                    .workspaces
+                    .sets
+                    .get_mut(&cursor_output)
+                    .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
+                    .map(|set| &mut set.sticky_layer)?;
                 let elem_geo = sticky_layer.element_geometry(&old_mapped).unwrap();
                 let mut initial_window_location = elem_geo.loc.to_global(&cursor_output);
 
@@ -5129,8 +5155,6 @@ impl Shell {
                     ManagedLayer::Sticky,
                     self.active_space(&cursor_output).unwrap().handle,
                 )
-            } else {
-                return None;
             };
 
         toplevel_leave_workspace(&window, &workspace_handle);
@@ -5456,14 +5480,13 @@ impl Shell {
                 .unwrap()
                 .to_global(&set.output);
             (&mut set.sticky_layer, geometry)
-        } else if let Some(workspace) = self.space_for_mut(mapped) {
+        } else {
+            let workspace = self.space_for_mut(mapped)?;
             let geometry = workspace
                 .element_geometry(mapped)
                 .unwrap()
                 .to_global(workspace.output());
             (&mut workspace.floating_layer, geometry)
-        } else {
-            return None;
         };
 
         let new_loc = if edge.contains(ResizeEdge::LEFT) {
@@ -5500,7 +5523,8 @@ impl Shell {
             ReleaseMode::Click,
         ) {
             grab.into()
-        } else if let Some(ws) = self.space_for_mut(mapped) {
+        } else {
+            let ws = self.space_for_mut(mapped)?;
             let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
             let (node, left_up_idx, orientation) = ws.tiling_layer.resize_request(node_id, edge)?;
             ResizeForkGrab::new(
@@ -5513,8 +5537,6 @@ impl Shell {
                 ReleaseMode::Click,
             )
             .into()
-        } else {
-            return None;
         };
 
         Some(((focus, new_loc), (grab, Focus::Keep)))
@@ -5855,10 +5877,9 @@ impl Shell {
             .find(|set| set.sticky_layer.mapped().any(|m| m == &mapped))
         {
             &mut set.sticky_layer
-        } else if let Some(workspace) = self.space_for_mut(&mapped) {
-            &mut workspace.floating_layer
         } else {
-            return None;
+            let workspace = self.space_for_mut(&mapped)?;
+            &mut workspace.floating_layer
         };
 
         let grab: ResizeGrab = if let Some(grab) = floating_layer.resize_request(
@@ -5870,7 +5891,8 @@ impl Shell {
             ReleaseMode::NoMouseButtons,
         ) {
             grab.into()
-        } else if let Some(ws) = self.space_for_mut(&mapped) {
+        } else {
+            let ws = self.space_for_mut(&mapped)?;
             let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
             let (node, left_up_idx, orientation) =
                 ws.tiling_layer.resize_request(node_id, edges)?;
@@ -5884,8 +5906,6 @@ impl Shell {
                 ReleaseMode::NoMouseButtons,
             )
             .into()
-        } else {
-            return None;
         };
 
         Some((grab, Focus::Clear))
@@ -6242,7 +6262,8 @@ impl Shell {
                 })),
                 Some(from),
             );
-        } else if let Some(workspace) = self.space_for_mut(&mapped) {
+        } else {
+            let workspace = self.space_for_mut(&mapped)?;
             if mapped.is_minimized() {
                 // TODO: Rewrite the `MinimizedWindow` to restore to fullscreen
                 return None;
@@ -6290,8 +6311,6 @@ impl Shell {
                 },
                 Some(from),
             );
-        } else {
-            return None;
         };
 
         Some(KeyboardFocusTarget::Fullscreen(window))
@@ -6348,6 +6367,20 @@ impl Shell {
         let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
 
         if let Some(active) = self.active_space(output) {
+            for fs in active.get_fullscreen_surfaces() {
+                fs.surface.take_presentation_feedback(
+                    &mut output_presentation_feedback,
+                    surface_primary_scanout_output,
+                    |surface, _| {
+                        surface_presentation_feedback_flags_from_states(
+                            surface,
+                            None,
+                            render_element_states,
+                        )
+                    },
+                );
+            }
+
             active.mapped().for_each(|mapped| {
                 mapped.active_window().take_presentation_feedback(
                     &mut output_presentation_feedback,
@@ -6382,13 +6415,14 @@ impl Shell {
 
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
+            let namespace = self.workspaces.active_num(output).1;
             layer_surface.take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
                     surface_presentation_feedback_flags_from_states(
                         surface,
-                        None,
+                        Some(namespace),
                         render_element_states,
                     )
                 },

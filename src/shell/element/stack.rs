@@ -725,12 +725,14 @@ impl CosmicStack {
         let windows = p.windows.lock().unwrap();
         let active = p.active.load(Ordering::SeqCst);
 
+        let blur_strength = crate::theme::arlen_blur_strength(&crate::theme::arlen_theme());
         windows[active].push_popup_render_elements(
-                renderer,
-                window_loc,
-                scale,
-                alpha,
-                scanout_node,
+            renderer,
+            window_loc,
+            scale,
+            alpha,
+            scanout_node,
+            blur_strength,
             &mut |elem| push(elem.into()),
         )
     }
@@ -868,6 +870,7 @@ impl CosmicStack {
                 scanout_node,
                 radii.is_some(),
                 radii.unwrap_or([0; 4]),
+                crate::theme::arlen_blur_strength(&crate::theme::arlen_theme()),
                 &mut |elem| push_above(elem.into()),
                 Some(&mut |elem| push_below(elem.into())),
             );
@@ -1659,7 +1662,7 @@ impl<R: Renderer + ImportAll + ImportMem> From<SurfaceRenderElement<R>>
 impl<R> Element for CosmicStackRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &RendererId {
         match self {
@@ -1768,7 +1771,7 @@ where
 impl<R> RenderElement<R> for CosmicStackRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,
