@@ -1,7 +1,7 @@
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage, clipped_surface::ClippedSurfaceRenderElement,
-        cursor::CursorState, element::AsGlowRenderer, shadow::ShadowShader,
+        IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
+        shadow::ShadowShader, wayland::SurfaceRenderElement,
     },
     shell::{
         element::{CosmicMappedKey, CosmicMappedKeyInner},
@@ -22,7 +22,6 @@ use smithay::{
             element::{
                 Element, Id as RendererId, Kind, RenderElement,
                 UnderlyingStorage, memory::MemoryRenderBufferRenderElement,
-                surface::WaylandSurfaceRenderElement,
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
@@ -439,7 +438,7 @@ impl CosmicWindow {
         scanout_node: Option<DrmNode>,
     ) -> Vec<C>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         C: From<CosmicWindowRenderElement<R>>,
     {
@@ -617,38 +616,25 @@ impl CosmicWindow {
         // via the shell overlay protocol. The previous 1px border used
         // lt.color.border_default (#e2e2e8) which appeared white on dark backgrounds.
 
-        let window_elements = {
-            let p = self.p();
-            p.window
-                .render_elements::<R, WaylandSurfaceRenderElement<R>>(
-                    renderer,
-                    window_loc,
-                    scale,
-                    alpha,
-                    scanout_override,
-                    scanout_node,
-                )
-        };
-        if window_elements.is_empty() {
-            return Vec::new();
+        // The border upstream draws here is chrome, which desktop-shell owns;
+        // the SSD radii adjustment below is not, so it stays.
+        if has_ssd {
+            radii[1] = 0;
+            radii[3] = 0;
         }
-
-        elements.extend(window_elements.into_iter().map(|elem| {
-            if has_ssd {
-                radii[1] = 0;
-                radii[3] = 0;
-            }
-            if radii.iter().any(|x| *x != 0)
-                && clip
-                && ClippedSurfaceRenderElement::will_clip(&elem, scale, geo, radii)
-            {
-                CosmicWindowRenderElement::Clipped(ClippedSurfaceRenderElement::new(
-                    renderer, elem, scale, geo, radii,
-                ))
-            } else {
-                CosmicWindowRenderElement::Window(elem)
-            }
-        }));
+        elements.extend({
+            let p = self.p();
+            p.window.render_elements::<R, CosmicWindowRenderElement<R>>(
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_override,
+                scanout_node,
+                clip,
+                radii,
+            )
+        });
 
         // SSD header rendering removed: desktop-shell renders headers via protocol.
 
@@ -1659,8 +1645,7 @@ pub enum CosmicWindowRenderElement<R: Renderer + ImportAll + ImportMem> {
     Header(MemoryRenderBufferRenderElement<R>),
     Shadow(PixelShaderElement),
     Border(PixelShaderElement),
-    Window(WaylandSurfaceRenderElement<R>),
-    Clipped(ClippedSurfaceRenderElement<R>),
+    Window(SurfaceRenderElement<R>),
 }
 
 impl<R: Renderer + ImportAll + ImportMem> From<MemoryRenderBufferRenderElement<R>>
@@ -1671,25 +1656,18 @@ impl<R: Renderer + ImportAll + ImportMem> From<MemoryRenderBufferRenderElement<R
     }
 }
 
-impl<R: Renderer + ImportAll + ImportMem> From<WaylandSurfaceRenderElement<R>>
+impl<R: Renderer + ImportAll + ImportMem> From<SurfaceRenderElement<R>>
     for CosmicWindowRenderElement<R>
 {
-    fn from(value: WaylandSurfaceRenderElement<R>) -> Self {
+    fn from(value: SurfaceRenderElement<R>) -> Self {
         Self::Window(value)
-    }
-}
-
-impl<R: Renderer + ImportAll + ImportMem> From<ClippedSurfaceRenderElement<R>>
-    for CosmicWindowRenderElement<R>
-{
-    fn from(value: ClippedSurfaceRenderElement<R>) -> Self {
-        Self::Clipped(value)
     }
 }
 
 impl<R> Element for CosmicWindowRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R::TextureId: 'static,
 {
     fn id(&self) -> &RendererId {
         match self {
@@ -1697,7 +1675,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.id(),
             CosmicWindowRenderElement::Border(elem) => elem.id(),
             CosmicWindowRenderElement::Window(elem) => elem.id(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.id(),
         }
     }
 
@@ -1707,7 +1684,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.current_commit(),
             CosmicWindowRenderElement::Border(elem) => elem.current_commit(),
             CosmicWindowRenderElement::Window(elem) => elem.current_commit(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.current_commit(),
         }
     }
 
@@ -1717,7 +1693,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.src(),
             CosmicWindowRenderElement::Border(elem) => elem.src(),
             CosmicWindowRenderElement::Window(elem) => elem.src(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.src(),
         }
     }
 
@@ -1727,7 +1702,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.geometry(scale),
             CosmicWindowRenderElement::Border(elem) => elem.geometry(scale),
             CosmicWindowRenderElement::Window(elem) => elem.geometry(scale),
-            CosmicWindowRenderElement::Clipped(elem) => elem.geometry(scale),
         }
     }
 
@@ -1737,7 +1711,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.location(scale),
             CosmicWindowRenderElement::Border(elem) => elem.location(scale),
             CosmicWindowRenderElement::Window(elem) => elem.location(scale),
-            CosmicWindowRenderElement::Clipped(elem) => elem.location(scale),
         }
     }
 
@@ -1747,7 +1720,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.transform(),
             CosmicWindowRenderElement::Border(elem) => elem.transform(),
             CosmicWindowRenderElement::Window(elem) => elem.transform(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.transform(),
         }
     }
 
@@ -1761,7 +1733,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.damage_since(scale, commit),
             CosmicWindowRenderElement::Border(elem) => elem.damage_since(scale, commit),
             CosmicWindowRenderElement::Window(elem) => elem.damage_since(scale, commit),
-            CosmicWindowRenderElement::Clipped(elem) => elem.damage_since(scale, commit),
         }
     }
 
@@ -1771,7 +1742,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.opaque_regions(scale),
             CosmicWindowRenderElement::Border(elem) => elem.opaque_regions(scale),
             CosmicWindowRenderElement::Window(elem) => elem.opaque_regions(scale),
-            CosmicWindowRenderElement::Clipped(elem) => elem.opaque_regions(scale),
         }
     }
 
@@ -1781,7 +1751,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.alpha(),
             CosmicWindowRenderElement::Border(elem) => elem.alpha(),
             CosmicWindowRenderElement::Window(elem) => elem.alpha(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.alpha(),
         }
     }
 
@@ -1791,7 +1760,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.kind(),
             CosmicWindowRenderElement::Border(elem) => elem.kind(),
             CosmicWindowRenderElement::Window(elem) => elem.kind(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.kind(),
         }
     }
 
@@ -1801,7 +1769,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.is_framebuffer_effect(),
             CosmicWindowRenderElement::Border(elem) => elem.is_framebuffer_effect(),
             CosmicWindowRenderElement::Window(elem) => elem.is_framebuffer_effect(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.is_framebuffer_effect(),
         }
     }
 }
@@ -1839,9 +1806,6 @@ where
             CosmicWindowRenderElement::Window(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
-            CosmicWindowRenderElement::Clipped(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions, cache)
-            }
         }
     }
 
@@ -1852,7 +1816,6 @@ where
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
             CosmicWindowRenderElement::Window(elem) => elem.underlying_storage(renderer),
-            CosmicWindowRenderElement::Clipped(elem) => elem.underlying_storage(renderer),
         }
     }
 
@@ -1878,9 +1841,6 @@ where
                 .map_err(R::from_gles_error)
             }
             CosmicWindowRenderElement::Window(elem) => {
-                elem.capture_framebuffer(frame, src, dst, cache)
-            }
-            CosmicWindowRenderElement::Clipped(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
         }
