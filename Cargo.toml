@@ -11,7 +11,9 @@ members = ["cosmic-comp-config"]
 
 [dependencies]
 wayland-client = { version = "0.31", optional = true }
-wayland-protocols = { version = "0.32", features = ["client"], optional = true }
+# `staging` carries ext-session-lock-v1 and ext-idle-notify-v1, which the lock
+# probe speaks.
+wayland-protocols = { version = "0.32", features = ["client", "staging"], optional = true }
 wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
 tempfile = { version = "3", optional = true }
 prost = "0.13"
@@ -141,6 +143,11 @@ required-features = ["test-client"]
 [[bin]]
 name = "ghost-repro"
 path = "src/bin/ghost-repro.rs"
+required-features = ["test-client"]
+
+[[bin]]
+name = "lock-probe"
+path = "src/bin/lock-probe.rs"
 required-features = ["test-client"]
 
 [features]
