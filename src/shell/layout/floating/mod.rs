@@ -9,11 +9,12 @@ use std::{
 use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
 use keyframe::{ease, functions::EaseInOutCubic};
+use smallvec::SmallVec;
 use smithay::{
     backend::{
         drm::DrmNode,
         renderer::element::{
-            AsRenderElements, RenderElement,
+            RenderElement,
             utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
         },
     },
@@ -1435,8 +1436,8 @@ impl FloatingLayout {
         renderer: &mut R,
         alpha: f32,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<CosmicMappedRenderElement<R>>
-    where
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -1445,8 +1446,6 @@ impl FloatingLayout {
     {
         let output = self.space.outputs().next().unwrap();
         let output_scale = output.current_scale().fractional_scale();
-
-        let mut elements = Vec::default();
 
         for elem in self
             .animations
@@ -1462,20 +1461,17 @@ impl FloatingLayout {
                 .unwrap_or_else(|| (self.space.element_geometry(elem).unwrap().as_local(), alpha));
 
             let render_location = geometry.loc - elem.geometry().loc.as_local();
-            elements.extend(
-                elem.popup_render_elements(
-                    renderer,
-                    render_location
-                        .as_logical()
-                        .to_physical_precise_round(output_scale),
-                    output_scale.into(),
-                    alpha,
-                    scanout_node,
-                ),
+            elem.push_popup_render_elements(
+                renderer,
+                render_location
+                    .as_logical()
+                    .to_physical_precise_round(output_scale),
+                output_scale.into(),
+                alpha,
+                scanout_node,
+                push,
             );
         }
-
-        elements
     }
 
     #[profiling::function]
@@ -1487,8 +1483,8 @@ impl FloatingLayout {
         indicator_thickness: u8,
         alpha: f32,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<CosmicMappedRenderElement<R>>
-    where
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -1501,8 +1497,7 @@ impl FloatingLayout {
             layers.non_exclusive_zone()
         };
         let output_scale = output.current_scale().fractional_scale();
-
-        let mut elements = Vec::default();
+        let mut lower_elements = SmallVec::<[_; 4]>::new_const();
 
         for elem in self
             .animations
@@ -1516,33 +1511,46 @@ impl FloatingLayout {
                 .get(elem)
                 .map(|anim| (*anim.previous_geometry(), alpha * anim.alpha()))
                 .unwrap_or_else(|| (self.space.element_geometry(elem).unwrap().as_local(), alpha));
-
             let render_location = geometry.loc - elem.geometry().loc.as_local();
-            let mut window_elements = elem.render_elements(
-                renderer,
-                render_location
-                    .as_logical()
-                    .to_physical_precise_round(output_scale),
-                None,
-                output_scale.into(),
-                alpha,
-                None,
-                scanout_node,
-            );
-            window_elements.extend(
-                elem.shadow_render_element(
-                    renderer,
-                    render_location
-                        .as_logical()
-                        .to_physical_precise_round(output_scale),
-                    None,
-                    output_scale.into(),
-                    1.,
-                    alpha,
-                ),
-            );
 
-            if let Some(anim) = self.animations.get(elem) {
+            if focused == Some(elem) && !elem.is_maximized(false) {
+                let hint_rgb = crate::theme::arlen_hint_rgb(&crate::theme::arlen_theme());
+                let radius = elem.corner_radius(geometry.size.as_logical(), indicator_thickness);
+                if indicator_thickness > 0 {
+                    let element = IndicatorShader::focus_element(
+                        renderer,
+                        Key::Window(Usage::FocusIndicator, elem.key()),
+                        geometry,
+                        indicator_thickness,
+                        radius,
+                        alpha,
+                        output_scale,
+                        hint_rgb,
+                    );
+                    push(element.into());
+                }
+
+                if let Some((mode, resize)) = resize_indicator.as_mut() {
+                    let mut resize_geometry = geometry;
+                    resize_geometry.loc -= (18, 18).into();
+                    resize_geometry.size += (36, 36).into();
+
+                    resize.resize(resize_geometry.size.as_logical());
+                    resize.output_enter(output, Rectangle::default() /* unused */);
+                    resize.push_render_elements(
+                        renderer,
+                        resize_geometry
+                            .loc
+                            .as_logical()
+                            .to_physical_precise_round(output_scale),
+                        output_scale.into(),
+                        alpha * mode.alpha().unwrap_or(1.0),
+                        &mut |elem| push(CosmicMappedRenderElement::Window(elem.into())),
+                    );
+                }
+            }
+
+            let maybe_map = if let Some(anim) = self.animations.get(elem) {
                 let original_geo = anim.previous_geometry();
                 geometry = anim.geometry(
                     output_geometry,
@@ -1560,99 +1568,89 @@ impl FloatingLayout {
                     y: geometry.size.h as f64 / buffer_size.h as f64,
                 };
 
-                window_elements = window_elements
-                    .into_iter()
-                    .map(|element| match element {
-                        CosmicMappedRenderElement::Stack(elem) => {
-                            CosmicMappedRenderElement::MovingStack({
-                                let rescaled = RescaleRenderElement::from_element(
-                                    elem,
-                                    original_geo
-                                        .loc
-                                        .as_logical()
-                                        .to_physical_precise_round(output_scale),
-                                    scale,
-                                );
+                Some(move |element| match element {
+                    CosmicMappedRenderElement::Stack(elem) => {
+                        CosmicMappedRenderElement::MovingStack({
+                            let rescaled = RescaleRenderElement::from_element(
+                                elem,
+                                original_geo
+                                    .loc
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
+                                scale,
+                            );
 
-                                RelocateRenderElement::from_element(
-                                    rescaled,
-                                    (geometry.loc - original_geo.loc)
-                                        .as_logical()
-                                        .to_physical_precise_round(output_scale),
-                                    Relocate::Relative,
-                                )
-                            })
-                        }
-                        CosmicMappedRenderElement::Window(elem) => {
-                            CosmicMappedRenderElement::MovingWindow({
-                                let rescaled = RescaleRenderElement::from_element(
-                                    elem,
-                                    original_geo
-                                        .loc
-                                        .as_logical()
-                                        .to_physical_precise_round(output_scale),
-                                    scale,
-                                );
+                            RelocateRenderElement::from_element(
+                                rescaled,
+                                (geometry.loc - original_geo.loc)
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
+                                Relocate::Relative,
+                            )
+                        })
+                    }
+                    CosmicMappedRenderElement::Window(elem) => {
+                        CosmicMappedRenderElement::MovingWindow({
+                            let rescaled = RescaleRenderElement::from_element(
+                                elem,
+                                original_geo
+                                    .loc
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
+                                scale,
+                            );
 
-                                RelocateRenderElement::from_element(
-                                    rescaled,
-                                    (geometry.loc - original_geo.loc)
-                                        .as_logical()
-                                        .to_physical_precise_round(output_scale),
-                                    Relocate::Relative,
-                                )
-                            })
-                        }
-                        x => x,
-                    })
-                    .collect();
-            }
-
-            if focused == Some(elem) && !elem.is_maximized(false) {
-                if let Some((mode, resize)) = resize_indicator.as_mut() {
-                    let mut resize_geometry = geometry;
-                    resize_geometry.loc -= (18, 18).into();
-                    resize_geometry.size += (36, 36).into();
-
-                    resize.resize(resize_geometry.size.as_logical());
-                    resize.output_enter(output, Rectangle::default() /* unused */);
-                    window_elements = resize
-                        .render_elements::<CosmicWindowRenderElement<R>>(
-                            renderer,
-                            resize_geometry
-                                .loc
-                                .as_logical()
-                                .to_physical_precise_round(output_scale),
-                            output_scale.into(),
-                            alpha * mode.alpha().unwrap_or(1.0),
-                        )
-                        .into_iter()
-                        .map(CosmicMappedRenderElement::Window)
-                        .chain(window_elements.into_iter())
-                        .collect();
+                            RelocateRenderElement::from_element(
+                                rescaled,
+                                (geometry.loc - original_geo.loc)
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
+                                Relocate::Relative,
+                            )
+                        })
+                    }
+                    x => x,
+                })
+            } else {
+                None
+            };
+            let map_anim = |elem| {
+                if let Some(map) = maybe_map {
+                    map(elem)
+                } else {
+                    elem
                 }
+            };
 
-                let hint_rgb = crate::theme::arlen_hint_rgb(&crate::theme::arlen_theme());
-                let radius = elem.corner_radius(geometry.size.as_logical(), indicator_thickness);
-                if indicator_thickness > 0 {
-                    let element = IndicatorShader::focus_element(
-                        renderer,
-                        Key::Window(Usage::FocusIndicator, elem.key()),
-                        geometry,
-                        indicator_thickness,
-                        radius,
-                        alpha,
-                        output_scale,
-                        hint_rgb,
-                    );
-                    window_elements.insert(0, element.into());
-                }
+            elem.push_render_elements(
+                renderer,
+                render_location
+                    .as_logical()
+                    .to_physical_precise_round(output_scale),
+                None,
+                output_scale.into(),
+                alpha,
+                None,
+                scanout_node,
+                &mut |elem| push(map_anim(elem)),
+                &mut |elem| lower_elements.push(map_anim(elem)),
+            );
+            if let Some(shadow_element) = elem.shadow_render_element(
+                renderer,
+                render_location
+                    .as_logical()
+                    .to_physical_precise_round(output_scale),
+                None,
+                output_scale.into(),
+                1.,
+                alpha,
+            ) {
+                push(map_anim(shadow_element));
             }
-
-            elements.extend(window_elements);
+            for elem in lower_elements.drain(..) {
+                push(elem);
+            }
         }
-
-        elements
     }
 
     pub fn snap_to_corner(&self, mapped: &CosmicMapped, corners: &TiledCorners) {

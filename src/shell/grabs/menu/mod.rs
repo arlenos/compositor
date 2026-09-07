@@ -5,9 +5,9 @@ use std::{
 
 use calloop::LoopHandle;
 use smithay::{
-    backend::renderer::{
-        ImportMem, Renderer,
-        element::memory::MemoryRenderBufferRenderElement,
+    backend::{
+        input::{ButtonState, TouchSlot},
+        renderer::{ImportMem, Renderer, element::memory::MemoryRenderBufferRenderElement},
     },
     input::{
         Seat,
@@ -49,17 +49,20 @@ pub struct MenuGrabState {
 pub type SeatMenuGrabState = Mutex<Option<MenuGrabState>>;
 
 impl MenuGrabState {
-    /// Render elements for the menu.
+    /// Render the menu.
     ///
-    /// With the overlay protocol active, rendering is handled entirely by
-    /// desktop-shell, so this always returns an empty list.
-    pub fn render<I, R>(&self, _renderer: &mut R, _output: &Output) -> Vec<I>
-    where
+    /// With the overlay protocol active, desktop-shell draws the menu, so this
+    /// pushes nothing; the signature exists so the render path still lines up.
+    pub fn render<R>(
+        &self,
+        _renderer: &mut R,
+        _output: &Output,
+        _push: &mut dyn FnMut(MemoryRenderBufferRenderElement<R>),
+    ) where
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
-        I: From<MemoryRenderBufferRenderElement<R>>,
     {
-        Vec::new()
+
     }
 
     /// Whether the menu is positioned in screen space.

@@ -18,13 +18,14 @@ use crate::{
 };
 
 use calloop::LoopHandle;
+use smallvec::SmallVec;
 use smithay::{
     backend::{
         drm::DrmNode,
         input::ButtonState,
         renderer::{
             ImportAll, ImportMem, Renderer,
-            element::{AsRenderElements, RenderElement, utils::RescaleRenderElement},
+            element::{RenderElement, utils::RescaleRenderElement},
         },
     },
     desktop::{WindowSurfaceType, layer_map_for_output, space::SpaceElement},
@@ -68,18 +69,17 @@ pub struct MoveGrabState {
 
 impl MoveGrabState {
     #[profiling::function]
-    pub fn render<I, R>(
+    pub fn render<R>(
         &self,
         renderer: &mut R,
         output: &Output,
         lt: &arlen_theme::ArlenTheme,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<I>
-    where
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        I: From<CosmicMappedRenderElement<R>>,
     {
         let scale = if self.previous == ManagedLayer::Tiling {
             0.6 + ((1.0
@@ -104,7 +104,7 @@ impl MoveGrabState {
             .intersection(window_geo)
             .is_none()
         {
-            return Vec::new();
+            return;
         }
 
         let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
@@ -114,13 +114,32 @@ impl MoveGrabState {
             + self.window_offset
             - scaling_offset;
 
+        for (indicator, location) in self.stacking_indicator.iter() {
+            indicator.push_render_elements(
+                renderer,
+                location.to_physical_precise_round(output_scale),
+                output_scale,
+                1.0,
+                &mut |elem| push(elem.into()),
+            );
+        }
+
+        self.window.push_popup_render_elements::<R>(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            output_scale,
+            alpha,
+            scanout_node,
+            push,
+        );
+
         let hint_rgb = crate::theme::arlen_hint_rgb(lt);
         let radius = self
             .element()
             .corner_radius(window_geo.size, self.indicator_thickness);
 
-        let focus_element = if self.indicator_thickness > 0 {
-            Some(CosmicMappedRenderElement::from(
+        if self.indicator_thickness > 0 {
+            push(
                 IndicatorShader::focus_element(
                     renderer,
                     Key::Window(Usage::MoveGrabIndicator, self.window.key()),
@@ -139,11 +158,56 @@ impl MoveGrabState {
                     alpha,
                     output_scale.x,
                     hint_rgb,
-                ),
-            ))
-        } else {
-            None
+                )
+                .into(),
+            )
+        }
+
+        let map_window_element = |elem| match elem {
+            CosmicMappedRenderElement::Stack(stack) => {
+                CosmicMappedRenderElement::GrabbedStack(RescaleRenderElement::from_element(
+                    stack,
+                    render_location
+                        .to_physical_precise_round(output.current_scale().fractional_scale()),
+                    scale,
+                ))
+            }
+            CosmicMappedRenderElement::Window(window) => {
+                CosmicMappedRenderElement::GrabbedWindow(RescaleRenderElement::from_element(
+                    window,
+                    render_location
+                        .to_physical_precise_round(output.current_scale().fractional_scale()),
+                    scale,
+                ))
+            }
+            x => x,
         };
+
+        let mut lower_elements = SmallVec::<[CosmicMappedRenderElement<R>; 4]>::new_const();
+        self.window.push_render_elements(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            None,
+            output_scale,
+            alpha,
+            Some(false),
+            scanout_node,
+            &mut |elem| push(map_window_element(elem)),
+            &mut |elem| lower_elements.push(map_window_element(elem)),
+        );
+        if let Some(shadow_element) = self.window.shadow_render_element(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            None,
+            output_scale,
+            scale,
+            alpha,
+        ) {
+            push(shadow_element);
+        }
+        for elem in lower_elements.into_iter() {
+            push(elem);
+        }
 
         let non_exclusive_geometry = {
             let layers = layer_map_for_output(output);
@@ -154,122 +218,92 @@ impl MoveGrabState {
         let thickness = self.indicator_thickness.max(1);
         let lt_radius = lt.effective_window_corners().map(|r| r.round() as u8);
 
-        // Snap-zone visual is only meaningful for floating drags
-        // (the screen-edge snap behaviour). For tiling drags, the
-        // tile-swap path (see Drop impl below) renders its own
-        // target highlight; showing screen-edge snap zones in
-        // tiling mode would be a false promise — the drop handler
-        // never acts on them. (Codex/Tim review.)
-        let snapping_indicator = match (&self.snapping_zone, self.previous) {
-            (Some(t), ManagedLayer::Floating) if &self.cursor_output == output => {
-                // Skeleton-style backdrop: theme's primary fg colour at
-                // 12% alpha mirrors the shell's `Skeleton` primitive
-                // (color-mix(fg-shell 12%, transparent)) so the
-                // compositor and the in-shell visual language agree.
-                // The IndicatorShader outline above keeps the accent-
-                // tinted hint colour for the rim.
-                let base_color = lt.color.fg_primary;
-                let overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
-                vec![
-                    CosmicMappedRenderElement::from(IndicatorShader::element(
-                        renderer,
-                        Key::Window(Usage::SnappingIndicator, self.window.key()),
-                        overlay_geometry,
-                        thickness,
-                        lt_radius,
-                        1.0,
-                        output_scale.x,
-                        hint_rgb,
-                    )),
-                    CosmicMappedRenderElement::from(BackdropShader::element(
-                        renderer,
-                        Key::Window(Usage::SnappingIndicator, self.window.key()),
-                        t.overlay_geometry(non_exclusive_geometry, gaps),
-                        lt.effective_window_corners()[0],
-                        0.12,
-                        [base_color[0], base_color[1], base_color[2]],
-                    )),
-                ]
-            }
-            _ => vec![],
+        if let (Some(t), ManagedLayer::Floating) = (&self.snapping_zone, self.previous)
+            && &self.cursor_output == output
+        {
+            // Skeleton-style backdrop: the theme's primary fg colour at 12%
+            // alpha mirrors the shell's `Skeleton` primitive, so the compositor
+            // and the in-shell visual language agree. The outline keeps the
+            // accent-tinted hint colour for the rim.
+            let base_color = lt.color.fg_primary;
+            let overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
         };
 
-        let w_elements = self
-            .window
-            .render_elements::<R, CosmicMappedRenderElement<R>>(
-                renderer,
-                (render_location - self.window.geometry().loc)
-                    .to_physical_precise_round(output_scale),
-                None,
-                output_scale,
-                alpha,
-                Some(false),
-                scanout_node,
-            );
-        let p_elements = self
-            .window
-            .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
-                renderer,
-                (render_location - self.window.geometry().loc)
-                    .to_physical_precise_round(output_scale),
-                output_scale,
-                alpha,
-                scanout_node,
-            );
-        let shadow_element = self.window.shadow_render_element(
+        let mut lower_elements = SmallVec::<[CosmicMappedRenderElement<R>; 4]>::new_const();
+        self.window.push_render_elements(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            None,
+            output_scale,
+            alpha,
+            Some(false),
+            scanout_node,
+            &mut |elem| push(map_window_element(elem)),
+            &mut |elem| lower_elements.push(map_window_element(elem)),
+        );
+        if let Some(shadow_element) = self.window.shadow_render_element(
             renderer,
             (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
             None,
             output_scale,
             scale,
             alpha,
-        );
+        ) {
+            push(shadow_element);
+        }
+        for elem in lower_elements.into_iter() {
+            push(elem);
+        }
 
-        self.stacking_indicator
-            .iter()
-            .flat_map(|(indicator, location)| {
-                indicator.render_elements(
+        let non_exclusive_geometry = {
+            let layers = layer_map_for_output(output);
+            layers.non_exclusive_zone()
+        };
+
+        let gaps = (lt.wm.gaps_inner as i32, lt.wm.gaps_outer as i32);
+        let thickness = self.indicator_thickness.max(1);
+        let lt_radius = lt.effective_window_corners().map(|r| r.round() as u8);
+
+        // Snap-zone visual is only meaningful for floating drags (the
+        // screen-edge snap behaviour). For tiling drags the tile-swap path in
+        // the Drop impl renders its own target highlight, so showing
+        // screen-edge snap zones there would promise something the drop
+        // handler never acts on.
+        if let (Some(t), ManagedLayer::Floating) = (&self.snapping_zone, self.previous)
+            && &self.cursor_output == output
+        {
+            // Skeleton-style backdrop: the theme's primary fg colour at 12%
+            // alpha mirrors the shell's `Skeleton` primitive, so the compositor
+            // and the in-shell visual language agree. The outline keeps the
+            // accent-tinted hint colour for the rim.
+            let base_color = lt.color.fg_primary;
+            let overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
+
+            push(
+                IndicatorShader::element(
                     renderer,
-                    location.to_physical_precise_round(output_scale),
-                    output_scale,
+                    Key::Window(Usage::SnappingIndicator, self.window.key()),
+                    overlay_geometry,
+                    thickness,
+                    lt_radius,
                     1.0,
+                    output_scale.x,
+                    hint_rgb,
                 )
-            })
-            .chain(p_elements)
-            .chain(focus_element)
-            .chain(
-                w_elements
-                    .into_iter()
-                    .chain(shadow_element)
-                    .map(|elem| match elem {
-                        CosmicMappedRenderElement::Stack(stack) => {
-                            CosmicMappedRenderElement::GrabbedStack(
-                                RescaleRenderElement::from_element(
-                                    stack,
-                                    render_location.to_physical_precise_round(
-                                        output.current_scale().fractional_scale(),
-                                    ),
-                                    scale,
-                                ),
-                            )
-                        }
-                        CosmicMappedRenderElement::Window(window) => {
-                            CosmicMappedRenderElement::GrabbedWindow(
-                                RescaleRenderElement::from_element(
-                                    window,
-                                    render_location.to_physical_precise_round(
-                                        output.current_scale().fractional_scale(),
-                                    ),
-                                    scale,
-                                ),
-                            )
-                        }
-                        x => x,
-                    }),
+                .into(),
+            );
+            push(
+                BackdropShader::element(
+                    renderer,
+                    Key::Window(Usage::SnappingIndicator, self.window.key()),
+                    t.overlay_geometry(non_exclusive_geometry, gaps),
+                    lt.effective_window_corners()[0],
+                    0.12,
+                    [base_color[0], base_color[1], base_color[2]],
+                )
+                .into(),
             )
-            .chain(snapping_indicator)
-            .map(I::from)
-            .collect()
+        }
     }
 
     pub fn element(&self) -> CosmicMapped {

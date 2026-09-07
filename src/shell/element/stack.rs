@@ -27,8 +27,8 @@ use smithay::{
         renderer::{
             ImportAll, ImportMem, Renderer,
             element::{
-                Element, Id as RendererId, Kind, RenderElement,
-                UnderlyingStorage, memory::MemoryRenderBufferRenderElement,
+                Element, Id as RendererId, Kind, RenderElement, UnderlyingStorage,
+                memory::MemoryRenderBufferRenderElement,
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
@@ -708,35 +708,31 @@ impl CosmicStack {
         self.handle.clone()
     }
 
-    pub fn popup_render_elements<R, C>(
+    pub fn push_popup_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
+        push: &mut dyn FnMut(CosmicStackRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicStackRenderElement<R>>,
     {
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
         let p = self.p();
         let windows = p.windows.lock().unwrap();
         let active = p.active.load(Ordering::SeqCst);
 
-        windows[active]
-            .popup_render_elements::<R, CosmicStackRenderElement<R>>(
+        windows[active].push_popup_render_elements(
                 renderer,
                 window_loc,
                 scale,
                 alpha,
                 scanout_node,
-            )
-            .into_iter()
-            .map(C::from)
-            .collect()
+            &mut |elem| push(elem.into()),
+        )
     }
 
     pub fn shadow_render_element<R, C>(
@@ -803,7 +799,7 @@ impl CosmicStack {
         )
     }
 
-    pub fn render_elements<R, C>(
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
@@ -812,17 +808,17 @@ impl CosmicStack {
         alpha: f32,
         scanout_override: Option<bool>,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
+        push_above: &mut dyn FnMut(CosmicStackRenderElement<R>),
+        push_below: &mut dyn FnMut(CosmicStackRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicStackRenderElement<R>>,
     {
         if !{
             let p = self.p();
             p.override_alive.load(Ordering::Acquire)
         } {
-            return Vec::new();
+            return;
         }
 
         let geometry = {
@@ -833,11 +829,8 @@ impl CosmicStack {
         let _stack_loc = location + geometry.loc;
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
 
-        // No tab bar rendering from IcedElement; tab bar is rendered by desktop-shell
-        // via the shell overlay protocol.
-        let mut elements = Vec::new();
-
-        elements.extend({
+        // No tab bar: desktop-shell draws it over the shell overlay protocol.
+        {
             let p = self.p();
             let windows = p.windows.lock().unwrap();
             let active = p.active.load(Ordering::SeqCst);
@@ -863,10 +856,10 @@ impl CosmicStack {
             let window_key =
                 CosmicMappedKey(CosmicMappedKeyInner::Stack(Arc::downgrade(&self.inner)));
 
-            // No border and no caller-side clipping: the window chrome is
-            // desktop-shell's job through the shell overlay protocol, and
-            // upstream moved the rounding into `render_elements` itself.
-            windows[active].render_elements::<R, CosmicStackRenderElement<R>>(
+            // No border: the window chrome is desktop-shell's job through the
+            // shell overlay protocol.
+            let radii = radii.map(|[a, _, c, _]| [a, 0, c, 0]);
+            windows[active].push_render_elements(
                 renderer,
                 window_loc,
                 scale,
@@ -875,10 +868,10 @@ impl CosmicStack {
                 scanout_node,
                 radii.is_some(),
                 radii.unwrap_or([0; 4]),
-            )
-        });
-
-        elements.into_iter().map(C::from).collect()
+                &mut |elem| push_above(elem.into()),
+                Some(&mut |elem| push_below(elem.into())),
+            );
+        }
     }
 
     pub fn update_appearance_conf(&self, appearance: &AppearanceConfig) {

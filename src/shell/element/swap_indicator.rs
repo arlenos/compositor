@@ -104,6 +104,26 @@ where
     }
 }
 
+impl SwapIndicator {
+    /// Push this indicator's elements.
+    ///
+    /// desktop-shell draws the indicators over the shell overlay protocol, so
+    /// nothing is pushed; the method exists because upstream's render path now
+    /// asks every element to push rather than to return a `Vec`.
+    pub fn push_render_elements<R>(
+        &self,
+        _renderer: &mut R,
+        _location: Point<i32, Physical>,
+        _scale: Scale<f64>,
+        _alpha: f32,
+        _push: &mut dyn FnMut(MemoryRenderBufferRenderElement<R>),
+    ) where
+        R: Renderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+    }
+}
+
 impl IsAlive for SwapIndicator {
     fn alive(&self) -> bool {
         true

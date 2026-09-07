@@ -20,8 +20,8 @@ use smithay::{
         renderer::{
             ImportAll, ImportMem, Renderer,
             element::{
-                Element, Id as RendererId, Kind, RenderElement,
-                UnderlyingStorage, memory::MemoryRenderBufferRenderElement,
+                Element, Id as RendererId, Kind, RenderElement, UnderlyingStorage,
+                memory::MemoryRenderBufferRenderElement,
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
@@ -428,19 +428,18 @@ impl CosmicWindow {
         self.handle.clone()
     }
 
-    /// Render popup elements for this window.
-    pub fn popup_render_elements<R, C>(
+    /// Push this window's popup elements.
+    pub fn push_popup_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        push: &mut dyn FnMut(CosmicWindowRenderElement<R>),
+    ) where
+        R: Renderer + AsGlowRenderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicWindowRenderElement<R>>,
     {
         let has_ssd = self.p().has_ssd(false);
 
@@ -451,17 +450,14 @@ impl CosmicWindow {
         };
 
         let p = self.p();
-        p.window
-            .popup_render_elements::<R, CosmicWindowRenderElement<R>>(
+        p.window.push_popup_render_elements(
                 renderer,
                 window_loc,
                 scale,
                 alpha,
                 scanout_node,
-            )
-            .into_iter()
-            .map(C::from)
-            .collect()
+            &mut |elem| push(elem.into()),
+        )
     }
 
     /// Render a shadow element for this window.
@@ -546,8 +542,8 @@ impl CosmicWindow {
         )
     }
 
-    /// Render all elements for this window (border, surface, clipping).
-    pub fn render_elements<R, C>(
+    /// Push all of this window's elements: the Arlen header, then the surface.
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
@@ -556,11 +552,11 @@ impl CosmicWindow {
         alpha: f32,
         scanout_override: Option<bool>,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
+        push_above: &mut dyn FnMut(CosmicWindowRenderElement<R>),
+        push_below: &mut dyn FnMut(CosmicWindowRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicWindowRenderElement<R>>,
     {
         let (has_ssd, is_tiled, is_maximized, mut radii, appearance) = {
             let p = self.p();
@@ -598,8 +594,6 @@ impl CosmicWindow {
             location
         };
 
-        let mut elements = Vec::new();
-
         let mut geo = {
             let p = self.p();
             SpaceElement::geometry(&p.window).to_f64()
@@ -612,19 +606,26 @@ impl CosmicWindow {
             geo.size = geo.size.clamp(Size::default(), max_size.to_f64());
         }
 
-        // Window border removed: desktop-shell handles all window chrome
-        // via the shell overlay protocol. The previous 1px border used
-        // lt.color.border_default (#e2e2e8) which appeared white on dark backgrounds.
+        // No border: desktop-shell owns the window chrome over the shell
+        // overlay protocol. The SSD radii adjustment is not chrome, so it stays.
+        //
+        // Feature 4-C: the compositor-rasterised Arlen header is pushed FIRST,
+        // because the first element pushed is the topmost one, and the header
+        // has to paint over the client content. It is eligible only for
+        // SSD-mode windows - the compositor reserved SSD_HEIGHT px at the top
+        // of the geometry for it - and `header_render_element` answers `None`
+        // otherwise.
+        if let Some(header_element) = self.header_render_element::<R>(renderer, location, scale) {
+            push_above(CosmicWindowRenderElement::from(header_element));
+        }
 
-        // The border upstream draws here is chrome, which desktop-shell owns;
-        // the SSD radii adjustment below is not, so it stays.
         if has_ssd {
             radii[1] = 0;
             radii[3] = 0;
         }
-        elements.extend({
+        {
             let p = self.p();
-            p.window.render_elements::<R, CosmicWindowRenderElement<R>>(
+            p.window.push_render_elements(
                 renderer,
                 window_loc,
                 scale,
@@ -633,31 +634,10 @@ impl CosmicWindow {
                 scanout_node,
                 clip,
                 radii,
+                &mut |elem| push_above(elem.into()),
+                Some(&mut |elem| push_below(elem.into())),
             )
-        });
-
-        // SSD header rendering removed: desktop-shell renders headers via protocol.
-
-        // Feature 4-C: prepend the compositor-rasterised Arlen
-        // window header so it paints ON TOP of the client content.
-        // `elements[0]` is topmost in smithay's render order, so we
-        // insert at position 0. The header is eligible only for
-        // SSD-mode windows (the compositor reserved SSD_HEIGHT px
-        // at the top of the geometry for us); `header_render_element`
-        // short-circuits to `None` otherwise.
-        if let Some(header_element) =
-            self.header_render_element::<R>(renderer, location, scale)
-        {
-            elements.insert(
-                0,
-                CosmicWindowRenderElement::from(
-                    header_element,
-                )
-                .into(),
-            );
         }
-
-        elements.into_iter().map(C::from).collect()
     }
 
     /// Update the appearance configuration, adjusting tiling state if needed.
