@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub mod a11y;
+pub mod background_effect;
 pub mod buffer;
 pub mod compositor;
 pub mod corner_radius;
@@ -19,6 +20,7 @@ pub mod idle_notify;
 pub mod image_capture_source;
 pub mod image_copy_capture;
 pub mod input_method;
+pub mod keyboard_layout;
 pub mod keyboard_shortcuts_inhibit;
 pub mod layer_shell;
 pub mod output;
@@ -29,6 +31,7 @@ pub mod shell_overlay;
 pub mod titlebar;
 pub mod window_attach;
 pub mod pointer_constraints;
+pub mod pointer_warp;
 pub mod primary_selection;
 pub mod seat;
 pub mod security_context;

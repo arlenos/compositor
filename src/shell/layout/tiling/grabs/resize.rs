@@ -4,26 +4,38 @@ use crate::{
     backend::render::cursor::CursorState,
     shell::{
         focus::target::PointerFocusTarget,
-        grabs::{GrabStartData, ReleaseMode},
+        grabs::{GrabStartData, GrabType, ReleaseMode},
         layout::Orientation,
     },
     utils::prelude::*,
 };
 use id_tree::{NodeId, Tree};
 use smithay::{
-    backend::input::ButtonState,
+    backend::input::{ButtonState, InputTime, TabletToolDescriptor},
     input::{
         Seat,
         pointer::{
-            AxisFrame, ButtonEvent, CursorIcon, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
-            PointerTarget, RelativeMotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent, CursorIcon, Focus,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
+            MotionEvent as PointerMotionEvent, PointerGrab, PointerInnerHandle, PointerTarget,
+            RelativeMotionEvent,
+        },
+        tablet::{
+            Tablet, TabletSeatHandler, TabletSeatTrait,
+            tool::{
+                AxisFrame as TabletAxisFrame, ButtonEvent as TabletButtonEvent,
+                DownEvent as TabletDownEvent, GrabStartData as TabletToolGrabStartData,
+                GrabTrigger as TabletToolGrabTrigger, MotionEvent as TabletMotionEvent,
+                ProximityInEvent, ProximityOutEvent, TabletToolGrab, TabletToolInnerHandle,
+                TabletToolTarget, UpEvent as TabletUpEvent,
+            },
         },
         touch::{
-            DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
-            OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, TouchTarget, UpEvent,
+            DownEvent as TouchDownEvent, FrameMarker, GrabStartData as TouchGrabStartData,
+            MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchGrab,
+            TouchInnerHandle, TouchTarget, UpEvent as TouchUpEvent,
         },
     },
     output::WeakOutput,
@@ -47,7 +59,7 @@ impl IsAlive for ResizeForkTarget {
 }
 
 impl PointerTarget<State> for ResizeForkTarget {
-    fn enter(&self, seat: &Seat<State>, _data: &mut State, _event: &MotionEvent) {
+    fn enter(&self, seat: &Seat<State>, _data: &mut State, _event: &PointerMotionEvent) {
         let user_data = seat.user_data();
         let cursor_state = user_data.get::<CursorState>().unwrap();
         cursor_state
@@ -59,19 +71,13 @@ impl PointerTarget<State> for ResizeForkTarget {
             });
     }
 
-    fn leave(
-        &self,
-        seat: &Seat<State>,
-        _data: &mut State,
-        _serial: smithay::utils::Serial,
-        _time: u32,
-    ) {
+    fn leave(&self, seat: &Seat<State>, _data: &mut State, _serial: Serial, _time: InputTime) {
         let user_data = seat.user_data();
         let cursor_state = user_data.get::<CursorState>().unwrap();
         cursor_state.lock().unwrap().unset_shape();
     }
 
-    fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
+    fn button(&self, seat: &Seat<State>, data: &mut State, event: &PointerButtonEvent) {
         if event.button == 0x110 && event.state == ButtonState::Pressed {
             let seat = seat.clone();
             let node = self.node.clone();
@@ -105,7 +111,7 @@ impl PointerTarget<State> for ResizeForkTarget {
         }
     }
 
-    fn motion(&self, _seat: &Seat<State>, _data: &mut State, _event: &MotionEvent) {}
+    fn motion(&self, _seat: &Seat<State>, _data: &mut State, _event: &PointerMotionEvent) {}
     fn relative_motion(
         &self,
         _seat: &Seat<State>,
@@ -113,7 +119,7 @@ impl PointerTarget<State> for ResizeForkTarget {
         _event: &RelativeMotionEvent,
     ) {
     }
-    fn axis(&self, _seat: &Seat<State>, _data: &mut State, _frame: AxisFrame) {}
+    fn axis(&self, _seat: &Seat<State>, _data: &mut State, _frame: PointerAxisFrame) {}
     fn frame(&self, _seat: &Seat<State>, _data: &mut State) {}
     fn gesture_swipe_begin(&self, _: &Seat<State>, _: &mut State, _: &GestureSwipeBeginEvent) {}
     fn gesture_swipe_update(&self, _: &Seat<State>, _: &mut State, _: &GestureSwipeUpdateEvent) {}
@@ -126,7 +132,7 @@ impl PointerTarget<State> for ResizeForkTarget {
 }
 
 impl TouchTarget<State> for ResizeForkTarget {
-    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, _seq: Serial) {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &TouchDownEvent) {
         let seat = seat.clone();
         let node = self.node.clone();
         let output = self.output.clone();
@@ -157,24 +163,128 @@ impl TouchTarget<State> for ResizeForkTarget {
         });
     }
 
-    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &UpEvent, _seq: Serial) {}
+    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &TouchUpEvent) {}
+    fn motion(&self, _seat: &Seat<State>, _data: &mut State, _event: &TouchMotionEvent) {}
+    fn frame(&self, _seat: &Seat<State>, _data: &mut State, _frame: FrameMarker) {}
+    fn cancel(&self, _seat: &Seat<State>, _data: &mut State, _frame: FrameMarker) {}
+    fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent) {}
+    fn orientation(&self, _seat: &Seat<State>, _data: &mut State, _event: &OrientationEvent) {}
+    fn last_frame(&self, _seat: &Seat<State>, _data: &mut State) -> Option<FrameMarker> {
+        None
+    }
+}
+
+impl TabletToolTarget<State> for ResizeForkTarget {
+    fn down(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &TabletDownEvent,
+    ) {
+        let seat = seat.clone();
+        let node = self.node.clone();
+        let output = self.output.clone();
+        let left_up_idx = self.left_up_idx;
+        let orientation = self.orientation;
+        let serial = event.serial;
+        let time = event.time;
+        let tool = tool_descriptor.clone();
+        data.common.event_loop_handle.insert_idle(move |state| {
+            let pointer = seat.get_pointer().unwrap();
+            let location = pointer.current_location();
+            let tablet = seat.tablet_seat().get_tool(&tool).unwrap();
+            tablet.set_grab(
+                state,
+                ResizeForkGrab::new(
+                    GrabStartData::TabletTool {
+                        tool,
+                        data: TabletToolGrabStartData {
+                            focus: None,
+                            location,
+                            trigger: TabletToolGrabTrigger::Tip,
+                        },
+                    },
+                    location.as_global(),
+                    node,
+                    left_up_idx,
+                    orientation,
+                    output,
+                    ReleaseMode::NoMouseButtons,
+                ),
+                time,
+                serial,
+                Focus::Keep,
+            )
+        });
+    }
     fn motion(
         &self,
         _seat: &Seat<State>,
         _data: &mut State,
-        _event: &TouchMotionEvent,
-        _seq: Serial,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &TabletMotionEvent,
     ) {
     }
-    fn frame(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {}
-    fn cancel(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {}
-    fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent, _seq: Serial) {}
-    fn orientation(
+    fn proximity_out(
+        &self,
+        seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+    ) {
+        let user_data = seat.user_data();
+        let cursor_state = user_data.get::<CursorState>().unwrap();
+        cursor_state.lock().unwrap().unset_shape();
+    }
+
+    fn proximity_in(
+        &self,
+        seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _tablet: &Tablet,
+        _serial: Serial,
+    ) {
+        let user_data = seat.user_data();
+        let cursor_state = user_data.get::<CursorState>().unwrap();
+        cursor_state
+            .lock()
+            .unwrap()
+            .set_shape(match self.orientation {
+                Orientation::Horizontal => CursorIcon::RowResize,
+                Orientation::Vertical => CursorIcon::ColResize,
+            });
+    }
+    fn up(
         &self,
         _seat: &Seat<State>,
         _data: &mut State,
-        _event: &OrientationEvent,
-        _seq: Serial,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &TabletUpEvent,
+    ) {
+    }
+    fn axis(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _frame: TabletAxisFrame,
+    ) {
+    }
+    fn button(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &TabletButtonEvent,
+    ) {
+    }
+    fn frame(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _time: InputTime,
     ) {
     }
 }
@@ -348,10 +458,19 @@ impl ResizeForkGrab {
         false
     }
 
-    pub fn is_touch_grab(&self) -> bool {
+    pub fn grab_type(&self) -> GrabType {
         match self.start_data {
-            GrabStartData::Touch(_) => true,
-            GrabStartData::Pointer(_) => false,
+            GrabStartData::Pointer(_) => GrabType::Pointer,
+            GrabStartData::Touch(_) => GrabType::Touch,
+            GrabStartData::TabletTool { .. } => GrabType::TabletTool,
+        }
+    }
+
+    pub fn tool(&self) -> Option<&TabletToolDescriptor> {
+        if let GrabStartData::TabletTool { tool, .. } = &self.start_data {
+            Some(tool)
+        } else {
+            None
         }
     }
 }
@@ -362,7 +481,7 @@ impl PointerGrab<State> for ResizeForkGrab {
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &MotionEvent,
+        event: &PointerMotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
         handle.motion(data, None, event);
@@ -387,7 +506,7 @@ impl PointerGrab<State> for ResizeForkGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        event: &ButtonEvent,
+        event: &PointerButtonEvent,
     ) {
         handle.button(data, event);
         match self.release {
@@ -408,7 +527,7 @@ impl PointerGrab<State> for ResizeForkGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        details: AxisFrame,
+        details: PointerAxisFrame,
     ) {
         handle.axis(data, details)
     }
@@ -507,24 +626,22 @@ impl TouchGrab<State> for ResizeForkGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &DownEvent,
-        seq: Serial,
+        event: &TouchDownEvent,
     ) {
-        handle.down(data, None, event, seq)
+        handle.down(data, None, event)
     }
 
     fn up(
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        event: &UpEvent,
-        seq: Serial,
+        event: &TouchUpEvent,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
             handle.unset_grab(self, data);
         }
 
-        handle.up(data, event, seq);
+        handle.up(data, event);
     }
 
     fn motion(
@@ -533,7 +650,6 @@ impl TouchGrab<State> for ResizeForkGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &TouchMotionEvent,
-        seq: Serial,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot
             && self.update_location(data, event.location, false)
@@ -541,14 +657,14 @@ impl TouchGrab<State> for ResizeForkGrab {
             handle.unset_grab(self, data);
         }
 
-        handle.motion(data, None, event, seq);
+        handle.motion(data, None, event);
     }
 
-    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
-        handle.frame(data, seq)
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        handle.frame(data)
     }
 
-    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         handle.unset_grab(self, data);
     }
 
@@ -557,9 +673,8 @@ impl TouchGrab<State> for ResizeForkGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &ShapeEvent,
-        seq: Serial,
     ) {
-        handle.shape(data, event, seq)
+        handle.shape(data, event)
     }
 
     fn start_data(&self) -> &TouchGrabStartData<State> {
@@ -574,12 +689,104 @@ impl TouchGrab<State> for ResizeForkGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &OrientationEvent,
-        seq: Serial,
     ) {
-        handle.orientation(data, event, seq)
+        handle.orientation(data, event)
     }
 
     fn unset(&mut self, data: &mut State) {
         self.update_location(data, self.last_loc.as_logical(), true);
+    }
+}
+
+impl TabletToolGrab<State> for ResizeForkGrab {
+    fn start_data(&self) -> &TabletToolGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::TabletTool { data, .. } => data,
+            _ => unreachable!(),
+        }
+    }
+
+    fn proximity_out(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &ProximityOutEvent,
+    ) {
+        handle.proximity_out(data, event);
+        handle.unset_grab(self, data, event.serial, event.time, true);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        _focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &TabletMotionEvent,
+    ) {
+        handle.motion(data, None, event);
+
+        if self.update_location(data, event.location, false) {
+            handle.unset_grab(self, data, event.serial, event.time, true);
+        }
+    }
+
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletDownEvent,
+    ) {
+        handle.down(data, event);
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletUpEvent,
+    ) {
+        handle.up(data, event);
+        handle.unset_grab(self, data, event.serial, event.time, true);
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletButtonEvent,
+    ) {
+        handle.button(data, event)
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        frame: TabletAxisFrame,
+    ) {
+        handle.axis(data, frame)
+    }
+
+    fn frame(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        time: InputTime,
+    ) {
+        handle.frame(data, time)
+    }
+
+    fn unset(&mut self, data: &mut State) {
+        self.update_location(data, self.last_loc.as_logical(), true);
+    }
+
+    fn proximity_in(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &ProximityInEvent,
+    ) {
+        handle.proximity_in(data, focus, event);
     }
 }

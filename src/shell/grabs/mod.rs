@@ -1,18 +1,26 @@
 use calloop::LoopHandle;
 use cosmic_settings_config::shortcuts;
 use smithay::{
+    backend::input::{InputTime, TabletToolDescriptor},
     input::{
         Seat,
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
-            RelativeMotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
+            MotionEvent, PointerGrab, PointerInnerHandle, RelativeMotionEvent,
+        },
+        tablet::tool::{
+            AxisFrame as TabletAxisFrame, ButtonEvent as TabletButtonEvent,
+            DownEvent as TabletDownEvent, GrabStartData as TabletGrabStartData,
+            MotionEvent as TabletMotionEvent, ProximityOutEvent, TabletToolGrab,
+            TabletToolInnerHandle, UpEvent as TabletUpEvent,
         },
         touch::{
-            DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
-            OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, UpEvent,
+            DownEvent as TouchDownEvent, GrabStartData as TouchGrabStartData,
+            MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchGrab,
+            TouchInnerHandle, UpEvent as TouchUpEvent,
         },
     },
     output::Output,
@@ -39,6 +47,17 @@ use super::{
 pub enum GrabStartData {
     Touch(TouchGrabStartData<State>),
     Pointer(PointerGrabStartData<State>),
+    TabletTool {
+        tool: TabletToolDescriptor,
+        data: TabletGrabStartData<State>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum GrabType {
+    Touch,
+    Pointer,
+    TabletTool,
 }
 
 impl GrabStartData {
@@ -46,6 +65,7 @@ impl GrabStartData {
         match self {
             Self::Touch(touch) => touch.focus.as_ref(),
             Self::Pointer(pointer) => pointer.focus.as_ref(),
+            Self::TabletTool { data, .. } => data.focus.as_ref(),
         }
     }
 
@@ -53,6 +73,7 @@ impl GrabStartData {
         match self {
             Self::Touch(touch) => touch.focus = focus,
             Self::Pointer(pointer) => pointer.focus = focus,
+            Self::TabletTool { data, .. } => data.focus = focus,
         }
     }
 
@@ -60,6 +81,7 @@ impl GrabStartData {
         match self {
             Self::Touch(touch) => touch.location,
             Self::Pointer(pointer) => pointer.location,
+            Self::TabletTool { data, .. } => data.location,
         }
     }
 
@@ -67,6 +89,7 @@ impl GrabStartData {
         match self {
             Self::Touch(touch) => touch.location = location,
             Self::Pointer(pointer) => pointer.location = location,
+            Self::TabletTool { data, .. } => data.location = location,
         }
     }
 
@@ -75,6 +98,14 @@ impl GrabStartData {
         let new = cursor_location;
 
         ((new.x - old.x).powi(2) + (new.y - old.y).powi(2)).sqrt()
+    }
+
+    pub fn type_(&self) -> GrabType {
+        match self {
+            Self::Pointer(_) => GrabType::Pointer,
+            Self::Touch(_) => GrabType::Touch,
+            Self::TabletTool { .. } => GrabType::TabletTool,
+        }
     }
 }
 
@@ -203,10 +234,17 @@ impl From<ResizeForkGrab> for ResizeGrab {
 }
 
 impl ResizeGrab {
-    pub fn is_touch_grab(&self) -> bool {
+    pub fn grab_type(&self) -> GrabType {
         match self {
-            ResizeGrab::Floating(grab) => grab.is_touch_grab(),
-            ResizeGrab::Tiling(grab) => grab.is_touch_grab(),
+            ResizeGrab::Floating(grab) => grab.grab_type(),
+            ResizeGrab::Tiling(grab) => grab.grab_type(),
+        }
+    }
+
+    pub fn tool(&self) -> Option<&TabletToolDescriptor> {
+        match self {
+            ResizeGrab::Floating(grab) => grab.tool(),
+            ResizeGrab::Tiling(grab) => grab.tool(),
         }
     }
 }
@@ -250,11 +288,11 @@ impl PointerGrab<State> for ResizeGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        event: &ButtonEvent,
+        event: &PointerButtonEvent,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => grab.button(data, handle, event),
-            ResizeGrab::Tiling(grab) => grab.button(data, handle, event),
+            ResizeGrab::Floating(grab) => PointerGrab::button(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => PointerGrab::button(grab, data, handle, event),
         }
     }
 
@@ -262,11 +300,11 @@ impl PointerGrab<State> for ResizeGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        details: AxisFrame,
+        details: PointerAxisFrame,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => grab.axis(data, handle, details),
-            ResizeGrab::Tiling(grab) => grab.axis(data, handle, details),
+            ResizeGrab::Floating(grab) => PointerGrab::axis(grab, data, handle, details),
+            ResizeGrab::Tiling(grab) => PointerGrab::axis(grab, data, handle, details),
         }
     }
 
@@ -394,12 +432,11 @@ impl TouchGrab<State> for ResizeGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &DownEvent,
-        seq: Serial,
+        event: &TouchDownEvent,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::down(grab, data, handle, focus, event),
+            ResizeGrab::Tiling(grab) => TouchGrab::down(grab, data, handle, focus, event),
         }
     }
 
@@ -407,12 +444,11 @@ impl TouchGrab<State> for ResizeGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        event: &UpEvent,
-        seq: Serial,
+        event: &TouchUpEvent,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::up(grab, data, handle, event, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::up(grab, data, handle, event, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::up(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => TouchGrab::up(grab, data, handle, event),
         }
     }
 
@@ -422,25 +458,24 @@ impl TouchGrab<State> for ResizeGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &TouchMotionEvent,
-        seq: Serial,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::motion(grab, data, handle, focus, event),
+            ResizeGrab::Tiling(grab) => TouchGrab::motion(grab, data, handle, focus, event),
         }
     }
 
-    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::frame(grab, data, handle, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::frame(grab, data, handle, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::frame(grab, data, handle),
+            ResizeGrab::Tiling(grab) => TouchGrab::frame(grab, data, handle),
         }
     }
 
-    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::cancel(grab, data, handle, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::cancel(grab, data, handle, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::cancel(grab, data, handle),
+            ResizeGrab::Tiling(grab) => TouchGrab::cancel(grab, data, handle),
         }
     }
 
@@ -449,11 +484,10 @@ impl TouchGrab<State> for ResizeGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &ShapeEvent,
-        seq: Serial,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::shape(grab, data, handle, event, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::shape(grab, data, handle, event, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::shape(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => TouchGrab::shape(grab, data, handle, event),
         }
     }
 
@@ -462,11 +496,10 @@ impl TouchGrab<State> for ResizeGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &OrientationEvent,
-        seq: Serial,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::orientation(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => TouchGrab::orientation(grab, data, handle, event),
         }
     }
 
@@ -481,6 +514,107 @@ impl TouchGrab<State> for ResizeGrab {
         match self {
             ResizeGrab::Floating(grab) => TouchGrab::unset(grab, data),
             ResizeGrab::Tiling(grab) => TouchGrab::unset(grab, data),
+        }
+    }
+}
+
+impl TabletToolGrab<State> for ResizeGrab {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletDownEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TabletToolGrab::down(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => TabletToolGrab::down(grab, data, handle, event),
+        }
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletUpEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TabletToolGrab::up(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => TabletToolGrab::up(grab, data, handle, event),
+        }
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &TabletMotionEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TabletToolGrab::motion(grab, data, handle, focus, event),
+            ResizeGrab::Tiling(grab) => TabletToolGrab::motion(grab, data, handle, focus, event),
+        }
+    }
+
+    fn frame(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        serial: InputTime,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TabletToolGrab::frame(grab, data, handle, serial),
+            ResizeGrab::Tiling(grab) => TabletToolGrab::frame(grab, data, handle, serial),
+        }
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletButtonEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TabletToolGrab::button(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => TabletToolGrab::button(grab, data, handle, event),
+        }
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        details: TabletAxisFrame,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TabletToolGrab::axis(grab, data, handle, details),
+            ResizeGrab::Tiling(grab) => TabletToolGrab::axis(grab, data, handle, details),
+        }
+    }
+
+    fn proximity_out(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &ProximityOutEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TabletToolGrab::proximity_out(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => TabletToolGrab::proximity_out(grab, data, handle, event),
+        }
+    }
+
+    fn start_data(&self) -> &TabletGrabStartData<State> {
+        match self {
+            ResizeGrab::Floating(grab) => TabletToolGrab::start_data(grab),
+            ResizeGrab::Tiling(grab) => TabletToolGrab::start_data(grab),
+        }
+    }
+
+    fn unset(&mut self, data: &mut State) {
+        match self {
+            ResizeGrab::Floating(grab) => TabletToolGrab::unset(grab, data),
+            ResizeGrab::Tiling(grab) => TabletToolGrab::unset(grab, data),
         }
     }
 }
@@ -564,10 +698,17 @@ impl MoveGrab {
         }
     }
 
-    pub fn is_touch_grab(&self) -> bool {
+    pub fn grab_type(&self) -> GrabType {
         match self {
-            MoveGrab::Move(m) => m.is_touch_grab(),
-            MoveGrab::Delayed(d) => d.is_touch_grab(),
+            MoveGrab::Move(m) => m.grab_type(),
+            MoveGrab::Delayed(d) => d.grab_type(),
+        }
+    }
+
+    pub fn tool(&self) -> Option<&TabletToolDescriptor> {
+        match self {
+            MoveGrab::Move(m) => m.tool(),
+            MoveGrab::Delayed(d) => d.tool(),
         }
     }
 }
@@ -602,11 +743,11 @@ impl PointerGrab<State> for MoveGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        event: &ButtonEvent,
+        event: &PointerButtonEvent,
     ) {
         match self {
-            MoveGrab::Move(grab) => grab.button(data, handle, event),
-            MoveGrab::Delayed(grab) => grab.button(data, handle, event),
+            MoveGrab::Move(grab) => PointerGrab::button(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => PointerGrab::button(grab, data, handle, event),
         }
     }
 
@@ -614,11 +755,11 @@ impl PointerGrab<State> for MoveGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        details: AxisFrame,
+        details: PointerAxisFrame,
     ) {
         match self {
-            MoveGrab::Move(grab) => grab.axis(data, handle, details),
-            MoveGrab::Delayed(grab) => grab.axis(data, handle, details),
+            MoveGrab::Move(grab) => PointerGrab::axis(grab, data, handle, details),
+            MoveGrab::Delayed(grab) => PointerGrab::axis(grab, data, handle, details),
         }
     }
 
@@ -746,12 +887,11 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &DownEvent,
-        seq: Serial,
+        event: &TouchDownEvent,
     ) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
+            MoveGrab::Move(grab) => TouchGrab::down(grab, data, handle, focus, event),
+            MoveGrab::Delayed(grab) => TouchGrab::down(grab, data, handle, focus, event),
         }
     }
 
@@ -759,12 +899,11 @@ impl TouchGrab<State> for MoveGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        event: &UpEvent,
-        seq: Serial,
+        event: &TouchUpEvent,
     ) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::up(grab, data, handle, event, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::up(grab, data, handle, event, seq),
+            MoveGrab::Move(grab) => TouchGrab::up(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => TouchGrab::up(grab, data, handle, event),
         }
     }
 
@@ -774,25 +913,24 @@ impl TouchGrab<State> for MoveGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &TouchMotionEvent,
-        seq: Serial,
     ) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
+            MoveGrab::Move(grab) => TouchGrab::motion(grab, data, handle, focus, event),
+            MoveGrab::Delayed(grab) => TouchGrab::motion(grab, data, handle, focus, event),
         }
     }
 
-    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::frame(grab, data, handle, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::frame(grab, data, handle, seq),
+            MoveGrab::Move(grab) => TouchGrab::frame(grab, data, handle),
+            MoveGrab::Delayed(grab) => TouchGrab::frame(grab, data, handle),
         }
     }
 
-    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::cancel(grab, data, handle, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::cancel(grab, data, handle, seq),
+            MoveGrab::Move(grab) => TouchGrab::cancel(grab, data, handle),
+            MoveGrab::Delayed(grab) => TouchGrab::cancel(grab, data, handle),
         }
     }
 
@@ -801,11 +939,10 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &ShapeEvent,
-        seq: Serial,
     ) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::shape(grab, data, handle, event, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::shape(grab, data, handle, event, seq),
+            MoveGrab::Move(grab) => TouchGrab::shape(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => TouchGrab::shape(grab, data, handle, event),
         }
     }
 
@@ -814,11 +951,10 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &OrientationEvent,
-        seq: Serial,
     ) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
+            MoveGrab::Move(grab) => TouchGrab::orientation(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => TouchGrab::orientation(grab, data, handle, event),
         }
     }
 
@@ -833,6 +969,107 @@ impl TouchGrab<State> for MoveGrab {
         match self {
             MoveGrab::Move(grab) => TouchGrab::unset(grab, data),
             MoveGrab::Delayed(grab) => TouchGrab::unset(grab, data),
+        }
+    }
+}
+
+impl TabletToolGrab<State> for MoveGrab {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletDownEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TabletToolGrab::down(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => TabletToolGrab::down(grab, data, handle, event),
+        }
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletUpEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TabletToolGrab::up(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => TabletToolGrab::up(grab, data, handle, event),
+        }
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &TabletMotionEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TabletToolGrab::motion(grab, data, handle, focus, event),
+            MoveGrab::Delayed(grab) => TabletToolGrab::motion(grab, data, handle, focus, event),
+        }
+    }
+
+    fn frame(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        serial: InputTime,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TabletToolGrab::frame(grab, data, handle, serial),
+            MoveGrab::Delayed(grab) => TabletToolGrab::frame(grab, data, handle, serial),
+        }
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletButtonEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TabletToolGrab::button(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => TabletToolGrab::button(grab, data, handle, event),
+        }
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        details: TabletAxisFrame,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TabletToolGrab::axis(grab, data, handle, details),
+            MoveGrab::Delayed(grab) => TabletToolGrab::axis(grab, data, handle, details),
+        }
+    }
+
+    fn proximity_out(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &ProximityOutEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TabletToolGrab::proximity_out(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => TabletToolGrab::proximity_out(grab, data, handle, event),
+        }
+    }
+
+    fn start_data(&self) -> &TabletGrabStartData<State> {
+        match self {
+            MoveGrab::Move(grab) => TabletToolGrab::start_data(grab),
+            MoveGrab::Delayed(grab) => TabletToolGrab::start_data(grab),
+        }
+    }
+
+    fn unset(&mut self, data: &mut State) {
+        match self {
+            MoveGrab::Move(grab) => TabletToolGrab::unset(grab, data),
+            MoveGrab::Delayed(grab) => TabletToolGrab::unset(grab, data),
         }
     }
 }

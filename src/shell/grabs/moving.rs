@@ -6,11 +6,9 @@ use crate::{
     },
     shell::{
         CosmicMapped, CosmicSurface, Direction, ManagedLayer,
-        element::{
-            CosmicMappedRenderElement,
-            stack_hover::{StackHover, stack_hover},
-        },
+        element::{CosmicMappedRenderElement, stack_hover::StackHover},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
+        grabs::GrabType,
         layout::floating::TiledCorners,
     },
     utils::prelude::*,
@@ -18,28 +16,48 @@ use crate::{
 };
 
 use calloop::LoopHandle;
+<<<<<<< HEAD
+=======
+use cosmic::theme::CosmicTheme;
+use smallvec::SmallVec;
+>>>>>>> upstream/master
 use smithay::{
     backend::{
-        input::ButtonState,
+        drm::DrmNode,
+        input::{ButtonState, InputTime, TabletToolDescriptor},
         renderer::{
-            ImportAll, ImportMem, Renderer,
-            element::{AsRenderElements, RenderElement, utils::RescaleRenderElement},
+            ImportAll, ImportMem,
+            element::{RenderElement, utils::RescaleRenderElement},
         },
     },
     desktop::{WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::{
         Seat,
         pointer::{
-            AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent, CursorIcon,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
+            MotionEvent as PointerMotionEvent, PointerGrab, PointerInnerHandle,
             RelativeMotionEvent,
         },
-        touch::{self, GrabStartData as TouchGrabStartData, TouchGrab, TouchInnerHandle},
+        tablet::{
+            TabletSeatHandler,
+            tool::{
+                AxisFrame as TabletAxisFrame, ButtonEvent as TabletButtonEvent,
+                DownEvent as TabletDownEvent, GrabStartData as TabletGrabStartData,
+                MotionEvent as TabletMotionEvent, ProximityInEvent, ProximityOutEvent,
+                TabletToolGrab, TabletToolInnerHandle, UpEvent as TabletUpEvent,
+            },
+        },
+        touch::{
+            DownEvent as TouchDownEvent, GrabStartData as TouchGrabStartData,
+            MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchGrab,
+            TouchInnerHandle, UpEvent as TouchUpEvent,
+        },
     },
     output::Output,
-    utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Scale, Serial},
+    utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Scale},
 };
 use std::{
     collections::HashSet,
@@ -67,12 +85,23 @@ pub struct MoveGrabState {
 
 impl MoveGrabState {
     #[profiling::function]
+<<<<<<< HEAD
     pub fn render<I, R>(&self, renderer: &mut R, output: &Output, lt: &arlen_theme::ArlenTheme) -> Vec<I>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+=======
+    pub fn render<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        theme: &CosmicTheme,
+        scanout_node: Option<DrmNode>,
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
+        R: AsGlowRenderer + ImportAll + ImportMem,
+>>>>>>> upstream/master
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        I: From<CosmicMappedRenderElement<R>>,
     {
         let scale = if self.previous == ManagedLayer::Tiling {
             0.6 + ((1.0
@@ -97,7 +126,7 @@ impl MoveGrabState {
             .intersection(window_geo)
             .is_none()
         {
-            return Vec::new();
+            return;
         }
 
         let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
@@ -107,13 +136,37 @@ impl MoveGrabState {
             + self.window_offset
             - scaling_offset;
 
+<<<<<<< HEAD
         let hint_rgb = crate::theme::arlen_hint_rgb(lt);
+=======
+        for (indicator, location) in self.stacking_indicator.iter() {
+            indicator.push_render_elements(
+                renderer,
+                location.to_physical_precise_round(output_scale),
+                output_scale,
+                1.0,
+                &mut |elem| push(elem.into()),
+                None,
+            );
+        }
+
+        self.window.push_popup_render_elements::<R>(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            output_scale,
+            alpha,
+            scanout_node,
+            push,
+        );
+
+        let active_window_hint = crate::theme::active_window_hint(theme);
+>>>>>>> upstream/master
         let radius = self
             .element()
             .corner_radius(window_geo.size, self.indicator_thickness);
 
-        let focus_element = if self.indicator_thickness > 0 {
-            Some(CosmicMappedRenderElement::from(
+        if self.indicator_thickness > 0 {
+            push(
                 IndicatorShader::focus_element(
                     renderer,
                     Key::Window(Usage::MoveGrabIndicator, self.window.key()),
@@ -131,12 +184,69 @@ impl MoveGrabState {
                     radius,
                     alpha,
                     output_scale.x,
+<<<<<<< HEAD
                     hint_rgb,
                 ),
             ))
         } else {
             None
+=======
+                    [
+                        active_window_hint.red,
+                        active_window_hint.green,
+                        active_window_hint.blue,
+                    ],
+                )
+                .into(),
+            )
+        }
+
+        let map_window_element = |elem| match elem {
+            CosmicMappedRenderElement::Stack(stack) => {
+                CosmicMappedRenderElement::GrabbedStack(RescaleRenderElement::from_element(
+                    stack,
+                    render_location
+                        .to_physical_precise_round(output.current_scale().fractional_scale()),
+                    scale,
+                ))
+            }
+            CosmicMappedRenderElement::Window(window) => {
+                CosmicMappedRenderElement::GrabbedWindow(RescaleRenderElement::from_element(
+                    window,
+                    render_location
+                        .to_physical_precise_round(output.current_scale().fractional_scale()),
+                    scale,
+                ))
+            }
+            x => x,
+>>>>>>> upstream/master
         };
+
+        let mut lower_elements = SmallVec::<[CosmicMappedRenderElement<R>; 4]>::new_const();
+        self.window.push_render_elements(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            None,
+            output_scale,
+            alpha,
+            Some(false),
+            scanout_node,
+            &mut |elem| push(map_window_element(elem)),
+            &mut |elem| lower_elements.push(map_window_element(elem)),
+        );
+        if let Some(shadow_element) = self.window.shadow_render_element(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            None,
+            output_scale,
+            scale,
+            alpha,
+        ) {
+            push(shadow_element);
+        }
+        for elem in lower_elements.into_iter() {
+            push(elem);
+        }
 
         let non_exclusive_geometry = {
             let layers = layer_map_for_output(output);
@@ -147,6 +257,7 @@ impl MoveGrabState {
         let thickness = self.indicator_thickness.max(1);
         let lt_radius = lt.effective_window_corners().map(|r| r.round() as u8);
 
+<<<<<<< HEAD
         // Snap-zone visual is only meaningful for floating drags
         // (the screen-edge snap behaviour). For tiling drags, the
         // tile-swap path (see Drop impl below) renders its own
@@ -186,81 +297,48 @@ impl MoveGrabState {
             }
             _ => vec![],
         };
+=======
+        if let Some(t) = &self.snapping_zone
+            && &self.cursor_output == output
+        {
+            let base_color = theme.palette.neutral_9;
+            let overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
+>>>>>>> upstream/master
 
-        let w_elements = self
-            .window
-            .render_elements::<R, CosmicMappedRenderElement<R>>(
-                renderer,
-                (render_location - self.window.geometry().loc)
-                    .to_physical_precise_round(output_scale),
-                None,
-                output_scale,
-                alpha,
-                Some(false),
-            );
-        let p_elements = self
-            .window
-            .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
-                renderer,
-                (render_location - self.window.geometry().loc)
-                    .to_physical_precise_round(output_scale),
-                output_scale,
-                alpha,
-            );
-        let shadow_element = self.window.shadow_render_element(
-            renderer,
-            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
-            None,
-            output_scale,
-            scale,
-            alpha,
-        );
-
-        self.stacking_indicator
-            .iter()
-            .flat_map(|(indicator, location)| {
-                indicator.render_elements(
+            push(
+                IndicatorShader::element(
                     renderer,
-                    location.to_physical_precise_round(output_scale),
-                    output_scale,
+                    Key::Window(Usage::SnappingIndicator, self.window.key()),
+                    overlay_geometry,
+                    thickness,
+                    [
+                        theme.radius_s()[0] as u8,
+                        theme.radius_s()[1] as u8,
+                        theme.radius_s()[2] as u8,
+                        theme.radius_s()[3] as u8,
+                    ],
                     1.0,
+                    output_scale.x,
+                    [
+                        active_window_hint.red,
+                        active_window_hint.green,
+                        active_window_hint.blue,
+                    ],
                 )
-            })
-            .chain(p_elements)
-            .chain(focus_element)
-            .chain(
-                w_elements
-                    .into_iter()
-                    .chain(shadow_element)
-                    .map(|elem| match elem {
-                        CosmicMappedRenderElement::Stack(stack) => {
-                            CosmicMappedRenderElement::GrabbedStack(
-                                RescaleRenderElement::from_element(
-                                    stack,
-                                    render_location.to_physical_precise_round(
-                                        output.current_scale().fractional_scale(),
-                                    ),
-                                    scale,
-                                ),
-                            )
-                        }
-                        CosmicMappedRenderElement::Window(window) => {
-                            CosmicMappedRenderElement::GrabbedWindow(
-                                RescaleRenderElement::from_element(
-                                    window,
-                                    render_location.to_physical_precise_round(
-                                        output.current_scale().fractional_scale(),
-                                    ),
-                                    scale,
-                                ),
-                            )
-                        }
-                        x => x,
-                    }),
+                .into(),
+            );
+            push(
+                BackdropShader::element(
+                    renderer,
+                    Key::Window(Usage::SnappingIndicator, self.window.key()),
+                    t.overlay_geometry(non_exclusive_geometry, gaps),
+                    theme.radius_s()[0], // TODO: Fix once shaders support 4 corner radii customization
+                    0.4,
+                    [base_color.red, base_color.green, base_color.blue],
+                )
+                .into(),
             )
-            .chain(snapping_indicator)
-            .map(I::from)
-            .collect()
+        }
     }
 
     pub fn element(&self) -> CosmicMapped {
@@ -445,7 +523,7 @@ impl MoveGrab {
                         if let Some(indicator) =
                             grab_state.stacking_indicator.as_ref().map(|x| &x.0)
                         {
-                            indicator.output_enter(output, overlap);
+                            indicator.output_enter(output);
                         }
                     }
                 } else if self.window_outputs.remove(output) {
@@ -466,15 +544,18 @@ impl MoveGrab {
                     state.common.shell_overlay_state.send_indicator_hide(1);
                 }
                 grab_state.stacking_indicator = indicator_location.map(|geo| {
-                    let element = stack_hover(
+                    let size = geo.size.as_logical();
+                    let element = StackHover::new(
                         state.common.event_loop_handle.clone(),
+<<<<<<< HEAD
                         geo.size.as_logical(),
+=======
+                        size,
+                        state.common.theme.clone(),
+>>>>>>> upstream/master
                     );
                     for output in &self.window_outputs {
-                        element.output_enter(
-                            output,
-                            Rectangle::from_size(output.geometry().size.as_logical()),
-                        );
+                        element.output_enter(output);
                     }
                     (element, geo.loc.as_logical())
                 });
@@ -517,7 +598,7 @@ impl PointerGrab<State> for MoveGrab {
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &MotionEvent,
+        event: &PointerMotionEvent,
     ) {
         self.update_location(state, event.location);
 
@@ -554,7 +635,7 @@ impl PointerGrab<State> for MoveGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        event: &ButtonEvent,
+        event: &PointerButtonEvent,
     ) {
         handle.button(state, event);
         match self.release {
@@ -575,7 +656,7 @@ impl PointerGrab<State> for MoveGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        details: AxisFrame,
+        details: PointerAxisFrame,
     ) {
         handle.axis(state, details);
     }
@@ -682,24 +763,22 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &touch::DownEvent,
-        seq: Serial,
+        event: &TouchDownEvent,
     ) {
-        handle.down(data, None, event, seq)
+        handle.down(data, None, event)
     }
 
     fn up(
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        event: &touch::UpEvent,
-        seq: Serial,
+        event: &TouchUpEvent,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
             handle.unset_grab(self, data);
         }
 
-        handle.up(data, event, seq);
+        handle.up(data, event);
     }
 
     fn motion(
@@ -707,21 +786,20 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &touch::MotionEvent,
-        seq: Serial,
+        event: &TouchMotionEvent,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
             self.update_location(data, event.location);
         }
 
-        handle.motion(data, None, event, seq);
+        handle.motion(data, None, event);
     }
 
-    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
-        handle.frame(data, seq)
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        handle.frame(data)
     }
 
-    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         handle.unset_grab(self, data);
     }
 
@@ -729,20 +807,18 @@ impl TouchGrab<State> for MoveGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        event: &touch::ShapeEvent,
-        seq: Serial,
+        event: &ShapeEvent,
     ) {
-        handle.shape(data, event, seq)
+        handle.shape(data, event)
     }
 
     fn orientation(
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        event: &touch::OrientationEvent,
-        seq: Serial,
+        event: &OrientationEvent,
     ) {
-        handle.orientation(data, event, seq)
+        handle.orientation(data, event)
     }
 
     fn start_data(&self) -> &TouchGrabStartData<State> {
@@ -763,6 +839,98 @@ impl TouchGrab<State> for MoveGrab {
             data.common.shell_overlay_state.send_indicator_hide(1);
         }
     }
+}
+
+impl TabletToolGrab<State> for MoveGrab {
+    fn start_data(&self) -> &TabletGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::TabletTool { data, .. } => data,
+            _ => unreachable!(),
+        }
+    }
+
+    fn proximity_out(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &ProximityOutEvent,
+    ) {
+        handle.proximity_out(data, event);
+        handle.unset_grab(self, data, event.serial, event.time, false);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        _focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &TabletMotionEvent,
+    ) {
+        handle.motion(data, None, event);
+
+        self.update_location(data, event.location);
+        if !self.window.alive() {
+            handle.unset_grab(self, data, event.serial, event.time, true);
+        }
+    }
+
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletDownEvent,
+    ) {
+        handle.down(data, event)
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletUpEvent,
+    ) {
+        handle.up(data, event);
+        handle.unset_grab(self, data, event.serial, event.time, false);
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletButtonEvent,
+    ) {
+        handle.button(data, event)
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        frame: TabletAxisFrame,
+    ) {
+        handle.axis(data, frame)
+    }
+
+    fn frame(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        time: InputTime,
+    ) {
+        handle.frame(data, time)
+    }
+
+    fn proximity_in(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &ProximityInEvent,
+    ) {
+        handle.proximity_in(data, focus, event);
+    }
+
+    fn unset(&mut self, _data: &mut State) {}
 }
 
 impl MoveGrab {
@@ -836,10 +1004,15 @@ impl MoveGrab {
         self.previous == ManagedLayer::Tiling
     }
 
-    pub fn is_touch_grab(&self) -> bool {
-        match self.start_data {
-            GrabStartData::Touch(_) => true,
-            GrabStartData::Pointer(_) => false,
+    pub fn grab_type(&self) -> GrabType {
+        self.start_data.type_()
+    }
+
+    pub fn tool(&self) -> Option<&TabletToolDescriptor> {
+        if let GrabStartData::TabletTool { tool, .. } = &self.start_data {
+            Some(tool)
+        } else {
+            None
         }
     }
 
@@ -858,7 +1031,7 @@ impl Drop for MoveGrab {
         let seat = self.seat.clone();
         // false-positive: `Output`s hash is based on it's inner ptr
         #[allow(clippy::mutable_key_type)]
-        let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
+        let window_outputs = std::mem::take(&mut self.window_outputs);
         let previous = self.previous;
         let window = self.window.clone();
         let is_touch_grab = matches!(self.start_data, GrabStartData::Touch(_));
@@ -1061,10 +1234,10 @@ impl Drop for MoveGrab {
                                 position.as_logical().to_f64() - window.geometry().loc.to_f64()
                                     + offset,
                             )),
-                            &MotionEvent {
+                            &PointerMotionEvent {
                                 location: pointer.current_location(),
                                 serial,
-                                time: state.common.clock.now().as_millis(),
+                                time: InputTime::now(),
                             },
                         );
                     }

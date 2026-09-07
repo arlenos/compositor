@@ -1,5 +1,6 @@
 use std::{cell::RefCell, sync::Mutex};
 
+use cosmic_comp_config::DecorationPreference;
 use smithay::{
     desktop::Window,
     reexports::{
@@ -20,7 +21,7 @@ use smithay::{
 };
 use wayland_backend::protocol::WEnum;
 
-use crate::state::State;
+use crate::{shell::CosmicMapped, state::State};
 
 pub struct PreferredDecorationMode(RefCell<Option<XdgMode>>);
 
@@ -29,7 +30,7 @@ impl PreferredDecorationMode {
         window
             .user_data()
             .get::<PreferredDecorationMode>()
-            .is_none()
+            .is_none_or(|mode| mode.0.borrow().is_none())
     }
 
     pub fn mode(window: &Window) -> Option<XdgMode> {
@@ -53,6 +54,72 @@ impl PreferredDecorationMode {
     }
 }
 
+impl State {
+    pub fn default_decoration(&self) -> DecorationPreference {
+        self.common.config.cosmic_conf.decoration_preference
+    }
+
+    pub fn update_decorations(&self) {
+        let shell = self.common.shell.read();
+
+        let update = |mapped: &CosmicMapped| {
+            let mode = if mapped.is_stack() {
+                XdgMode::ServerSide
+            } else {
+                XdgMode::from_preference(self.default_decoration())
+            };
+            for (window, _) in mapped.windows() {
+                if PreferredDecorationMode::is_unset(&window.0)
+                    && let Some(toplevel) = window.0.toplevel()
+                    && toplevel.with_committed_state(|state| {
+                        state.is_some_and(|state| state.decoration_mode.is_some())
+                    })
+                {
+                    toplevel.with_pending_state(|state| {
+                        state.decoration_mode = Some(mode);
+                    });
+                    toplevel.send_configure();
+                }
+            }
+        };
+
+        for set in shell.workspaces.sets.values() {
+            set.sticky_layer.mapped().for_each(update);
+        }
+
+        for space in shell.workspaces.spaces() {
+            space.mapped().for_each(update);
+            space
+                .minimized_windows
+                .iter()
+                .filter_map(|m| m.mapped())
+                .for_each(update);
+        }
+    }
+}
+
+trait FromDecorationPreference {
+    fn from_preference(preference: DecorationPreference) -> Self;
+}
+
+impl FromDecorationPreference for XdgMode {
+    fn from_preference(preference: DecorationPreference) -> Self {
+        match preference {
+            DecorationPreference::ClientSide => XdgMode::ClientSide,
+            DecorationPreference::ServerSide => XdgMode::ServerSide,
+        }
+    }
+}
+
+impl FromDecorationPreference for KdeMode {
+    fn from_preference(preference: DecorationPreference) -> Self {
+        match preference {
+            DecorationPreference::ClientSide => KdeMode::Client,
+            DecorationPreference::ServerSide => KdeMode::Server,
+        }
+    }
+}
+
 pub type KdeDecorationData = Mutex<KdeDecorationSurfaceState>;
 #[derive(Debug, Default)]
 pub struct KdeDecorationSurfaceState {
@@ -62,6 +129,7 @@ pub struct KdeDecorationSurfaceState {
 
 impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+<<<<<<< HEAD
         // DECO-DEBUG: Log every xdg-decoration object creation.
         tracing::info!(
             "DECO-DEBUG xdg::new_decoration surface={:?}",
@@ -86,6 +154,31 @@ impl XdgDecorationHandler for State {
         // CSD as before). Terminals (Kitty/Foot/Alacritty) explicitly
         // call `set_mode(ServerSide)` → they get SSD → Arlen-
         // rendered header appears for them. Option B as specified.
+=======
+        let shell = self.common.shell.read();
+        if let Some(mapped) = shell.element_for_surface(toplevel.wl_surface()) {
+            let mode = if mapped.is_stack() {
+                XdgMode::ServerSide
+            } else {
+                XdgMode::from_preference(self.default_decoration())
+            };
+
+            if let Some((window, _)) = mapped
+                .windows()
+                .find(|(window, _)| window.wl_surface().as_deref() == Some(toplevel.wl_surface()))
+                && let Some(toplevel) = window.0.toplevel()
+            {
+                toplevel.with_pending_state(|state| {
+                    state.decoration_mode = Some(mode);
+                });
+                toplevel.send_configure();
+            }
+        } else {
+            toplevel.with_pending_state(|state| {
+                state.decoration_mode = Some(XdgMode::from_preference(self.default_decoration()))
+            })
+        }
+>>>>>>> upstream/master
     }
 
     fn request_mode(&mut self, toplevel: ToplevelSurface, mode: XdgMode) {
@@ -109,6 +202,13 @@ impl XdgDecorationHandler for State {
             }
         } else {
             toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
+            if let Some(pending) = shell
+                .pending_windows
+                .iter()
+                .find(|pending| pending.surface.0.toplevel().is_some_and(|t| t == &toplevel))
+            {
+                PreferredDecorationMode::update(&pending.surface.0, Some(mode));
+            }
         }
     }
 
@@ -125,11 +225,28 @@ impl XdgDecorationHandler for State {
                 .find(|(window, _)| window.wl_surface().as_deref() == Some(toplevel.wl_surface()))
             && let Some(toplevel) = window.0.toplevel()
         {
+            let mode = if mapped.is_stack() {
+                XdgMode::ServerSide
+            } else {
+                XdgMode::from_preference(self.default_decoration())
+            };
+
             PreferredDecorationMode::update(&window.0, None);
             toplevel.with_pending_state(|state| {
-                state.decoration_mode = None;
+                state.decoration_mode = Some(mode);
             });
             toplevel.send_configure();
+        } else {
+            toplevel.with_pending_state(|state| {
+                state.decoration_mode = Some(XdgMode::from_preference(self.default_decoration()))
+            });
+            if let Some(pending) = shell
+                .pending_windows
+                .iter()
+                .find(|pending| pending.surface.0.toplevel().is_some_and(|t| t == &toplevel))
+            {
+                PreferredDecorationMode::update(&pending.surface.0, None);
+            }
         }
     }
 }
@@ -140,10 +257,22 @@ impl KdeDecorationHandler for State {
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
+<<<<<<< HEAD
         tracing::info!(
             "DECO-DEBUG kde::new_decoration surface={:?}",
             surface
         );
+=======
+        let mode = if let Some(mapped) = self.common.shell.read().element_for_surface(surface) {
+            if mapped.is_stack() {
+                KdeMode::Server
+            } else {
+                KdeMode::from_preference(self.default_decoration())
+            }
+        } else {
+            KdeMode::from_preference(self.default_decoration())
+        };
+>>>>>>> upstream/master
 
         // Symmetric to the xdg-decoration path: neutral default.
         // We still stash the decoration object so `request_mode`
