@@ -1355,8 +1355,36 @@ impl Common {
         }
     }
 
+    /// Record that `output` submitted a frame while the session is locked.
+    ///
+    /// Called from the frame-callback path, which every backend reaches right
+    /// after it submits a buffer - the same definition of "reached the screen"
+    /// that `crate::presented` uses for windows. Once every output has been
+    /// through here the client is told the session is locked, and not before:
+    /// see `SessionLock::locker` for why the order is the whole point.
+    ///
+    /// This runs on every frame of every output, locked or not, so the common
+    /// case has to be cheap. It is a read lock and an `Option` check.
+    fn note_locked_frame(&self, output: &Output) {
+        if self
+            .shell
+            .read()
+            .session_lock
+            .as_ref()
+            .is_none_or(|lock| lock.locker.is_none())
+        {
+            return;
+        }
+
+        if let Some(session_lock) = self.shell.write().session_lock.as_mut() {
+            session_lock.stop_waiting_on(output);
+        }
+    }
+
     #[profiling::function]
     pub fn send_frames(&self, output: &Output, sequence: Option<usize>) {
+        self.note_locked_frame(output);
+
         let time = self.clock.now();
         let should_send = |surface: &WlSurface, states: &SurfaceData| {
             // Do the standard primary scanout output check. For pointer surfaces it deduplicates

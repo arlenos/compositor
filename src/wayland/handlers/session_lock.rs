@@ -31,11 +31,32 @@ impl SessionLockHandler for State {
         }
 
         let ext_session_lock = locker.ext_session_lock().clone();
-        locker.lock();
-        shell.session_lock = Some(SessionLock {
+
+        // Every output has to show a locked frame before the client is told the
+        // session is locked. A mirrored output is left out because it never gets
+        // frame callbacks of its own (the KMS surface thread skips them), so
+        // waiting for one would hold `locked` back forever; it shows whatever its
+        // source output shows, which is the locked frame.
+        let unpresented = shell
+            .outputs()
+            .filter(|output| output.mirroring().is_none())
+            .cloned()
+            .collect();
+        let mut session_lock = SessionLock {
             ext_session_lock,
             surfaces: HashMap::new(),
-        });
+            locker: Some(locker),
+            unpresented,
+        };
+
+        // With no output to wait for there is nothing that could still be
+        // showing unlocked content, so the event is already due.
+        if session_lock.unpresented.is_empty()
+            && let Some(locker) = session_lock.locker.take()
+        {
+            locker.lock();
+        }
+        shell.session_lock = Some(session_lock);
 
         for output in shell.outputs() {
             self.backend.schedule_render(output);

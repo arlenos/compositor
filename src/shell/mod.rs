@@ -4,7 +4,7 @@ use grabs::{MenuAlignment, SeatMoveGrabState};
 use indexmap::IndexMap;
 use layout::TilingExceptions;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Mutex, atomic::{AtomicBool, Ordering}},
     thread,
     time::{Duration, Instant},
@@ -51,7 +51,7 @@ use smithay::{
     wayland::{
         compositor::{SurfaceAttributes, get_parent, with_states},
         seat::WaylandFocus,
-        session_lock::LockSurface,
+        session_lock::{LockSurface, SessionLocker},
         shell::{
             wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
             xdg::{XDG_POPUP_ROLE, XdgPopupSurfaceData},
@@ -361,6 +361,35 @@ pub struct Shell {
 pub struct SessionLock {
     pub ext_session_lock: ExtSessionLockV1,
     pub surfaces: HashMap<Output, LockSurface>,
+    /// Held back until every output has shown a locked frame, then consumed to
+    /// send `locked`. `None` once that event has gone out.
+    ///
+    /// The protocol is explicit that `locked` "must not be sent until a new
+    /// 'locked' frame ... has been presented on all outputs", and the reason is
+    /// the one the idle daemon is about to rely on: a client that suspends the
+    /// machine on `locked` races the first locked frame, and if the suspend wins
+    /// the race the desktop is what is on the panel when the machine wakes.
+    pub locker: Option<SessionLocker>,
+    /// Outputs that have not shown a locked frame yet.
+    pub unpresented: HashSet<Output>,
+}
+
+impl SessionLock {
+    /// Stop waiting on `output`, and send `locked` if it was the last one.
+    ///
+    /// An output stops being waited on for two reasons - it presented a locked
+    /// frame, or it is gone - and both mean the same thing to the protocol:
+    /// that output can no longer be showing unlocked content.
+    pub fn stop_waiting_on(&mut self, output: &Output) {
+        if !self.unpresented.remove(output) {
+            return;
+        }
+        if self.unpresented.is_empty()
+            && let Some(locker) = self.locker.take()
+        {
+            locker.lock();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1609,6 +1638,14 @@ impl Common {
     pub fn remove_output(&mut self, output: &Output) {
         let mut shell = self.shell.write();
         let shell_ref = &mut *shell;
+
+        // An output that is gone will never present the locked frame the client
+        // is waiting on, and a monitor unplugged in that window would otherwise
+        // hold `locked` back for the rest of the session.
+        if let Some(session_lock) = shell_ref.session_lock.as_mut() {
+            session_lock.stop_waiting_on(output);
+        }
+
         shell_ref.workspaces.remove_output(
             output,
             shell_ref.seats.iter(),
