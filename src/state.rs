@@ -8,7 +8,7 @@ use crate::{
         x11::X11State,
     },
     config::{CompOutputConfig, Config, ScreenFilter},
-    dbus::a11y_keyboard_monitor::A11yKeyboardMonitorState,
+    dbus::DBusState,
     dbus::app_interface::AppRegistryState,
     dbus::input_manager::InputManagerState,
     input::binding_resolver::BindingResolver,
@@ -240,7 +240,6 @@ pub struct Common {
     pub display_handle: DisplayHandle,
     pub event_loop_handle: LoopHandle<'static, State>,
     pub event_loop_signal: LoopSignal,
-    pub async_executor: ThreadPool,
 
     pub popups: PopupManager,
     pub shell: Arc<parking_lot::RwLock<Shell>>,
@@ -319,7 +318,9 @@ pub struct Common {
     /// Populated by MenuGrab when a menu is sent to the shell.
     pub pending_menu_callbacks: HashMap<u32, Vec<crate::shell::grabs::menu::Item>>,
     pub a11y_state: A11yState,
-    pub a11y_keyboard_monitor_state: A11yKeyboardMonitorState,
+    /// Shared session and system bus connections, and the a11y keyboard
+    /// monitor upstream now keeps inside them.
+    pub dbus_state: DBusState,
     /// Registration table backing the `org.arlen.App1` D-Bus
     /// service. Shared with `input_manager_state` so focused-scope
     /// keybinding registrations can be validated against the
@@ -788,15 +789,17 @@ impl State {
         );
         let workspace_state = WorkspaceState::new(dh, client_not_sandboxed);
 
-        let async_executor = ThreadPool::builder().pool_size(1).create().unwrap();
-
-        if let Err(err) = crate::dbus::init(&handle, &async_executor) {
-            tracing::warn!(?err, "Failed to initialize dbus handlers");
-        }
-
         let a11y_state = A11yState::new::<State, _>(dh, client_not_sandboxed);
 
-        let a11y_keyboard_monitor_state = A11yKeyboardMonitorState::new(&async_executor);
+        let dbus_state = DBusState::init(&handle);
+
+        // Upstream moved its own D-Bus work onto a calloop scheduler owned by
+        // `DBusState` and dropped the shared `ThreadPool` with it. The two Arlen
+        // services still spawn onto one, so it is created here and kept alive by
+        // the clones they take, rather than by a field on `Common` that nothing
+        // else reads. Converging them onto the calloop scheduler is a separate
+        // change; a merge should not quietly rewrite how a service is driven.
+        let async_executor = ThreadPool::builder().pool_size(1).create().unwrap();
 
         // Start the org.arlen.InputManager1 D-Bus service and seed the
         // resolver with the bindings currently declared in TOML. The
@@ -838,7 +841,6 @@ impl State {
                 display_handle: dh.clone(),
                 event_loop_handle: handle,
                 event_loop_signal: signal,
-                async_executor,
 
                 popups: PopupManager::default(),
                 shell,
@@ -898,7 +900,6 @@ impl State {
                 xdg_foreign_state,
                 workspace_state,
                 a11y_state,
-                a11y_keyboard_monitor_state,
                 app_registry_state,
                 input_manager_state,
                 binding_resolver,
@@ -906,6 +907,7 @@ impl State {
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+                dbus_state,
 
                 #[cfg(feature = "systemd")]
                 inhibit_lid_fd: None,
@@ -948,7 +950,7 @@ impl State {
 
             if should_handle_lid {
                 if self.common.inhibit_lid_fd.is_none() {
-                    match crate::dbus::logind::inhibit_lid() {
+                    match crate::dbus::logind::inhibit_lid(&self.common) {
                         Ok(fd) => {
                             debug!("Inhibiting lid switch");
                             self.common.inhibit_lid_fd = Some(fd);
@@ -959,7 +961,8 @@ impl State {
                                 .iter()
                                 .find(|o| o.is_internal())
                                 .cloned();
-                            let closed = crate::dbus::logind::lid_closed().unwrap_or(false);
+                            let closed =
+                                crate::dbus::logind::lid_closed(&self.common).unwrap_or(false);
 
                             if closed {
                                 backend.disable_internal_output(

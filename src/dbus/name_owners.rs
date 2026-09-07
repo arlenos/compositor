@@ -2,12 +2,14 @@
 //!
 //! Compare to Mutter's `MetaDbusAccessChecker`
 
-use futures_executor::ThreadPool;
-use futures_util::stream::FusedStream;
-use futures_util::{StreamExt, stream::FuturesUnordered};
+use futures_util::{
+    StreamExt,
+    stream::{FusedStream, FuturesUnordered},
+};
 use std::{
     collections::{HashMap, HashSet},
     future::{Future, poll_fn},
+    pin::Pin,
     sync::{Arc, Mutex, Weak},
     task::{Context, Poll, Waker},
 };
@@ -94,7 +96,37 @@ fn update_task(inner: Weak<Mutex<Inner>>) -> impl Future<Output = ()> {
 pub struct NameOwners(Arc<Mutex<Inner>>);
 
 impl NameOwners {
-    pub async fn new(connection: &zbus::Connection, executor: &ThreadPool) -> zbus::Result<Self> {
+    pub async fn new(
+        connection: &zbus::Connection,
+        executor: &calloop::futures::Scheduler<()>,
+    ) -> zbus::Result<Self> {
+        Self::new_with(connection, |task| {
+            let _ = executor.schedule(task);
+        })
+        .await
+    }
+
+    /// The same, for a caller running on its own thread pool rather than on the
+    /// compositor's calloop scheduler.
+    ///
+    /// The Arlen D-Bus services (`org.arlen.App1`, `org.arlen.InputManager1`)
+    /// each drive their own connection from a `ThreadPool`, so they cannot hand
+    /// this a scheduler that belongs to the main loop. Splitting the spawn out
+    /// rather than changing the signature keeps upstream's own call site
+    /// byte-identical, which is worth more here than the saved function: this
+    /// file is upstream's, and every line of it we change is a line the next
+    /// merge has to reconcile.
+    pub async fn new_on_pool(
+        connection: &zbus::Connection,
+        executor: &futures_executor::ThreadPool,
+    ) -> zbus::Result<Self> {
+        Self::new_with(connection, |task| executor.spawn_ok(task)).await
+    }
+
+    async fn new_with(
+        connection: &zbus::Connection,
+        spawn: impl FnOnce(Pin<Box<dyn Future<Output = ()> + Send>>),
+    ) -> zbus::Result<Self> {
         let dbus = fdo::DBusProxy::new(connection).await?;
         let stream = dbus.receive_name_owner_changed().await?;
 
@@ -126,7 +158,7 @@ impl NameOwners {
         }));
 
         if enforce {
-            executor.spawn_ok(update_task(Arc::downgrade(&inner)));
+            spawn(Box::pin(update_task(Arc::downgrade(&inner))));
         }
 
         Ok(NameOwners(inner))

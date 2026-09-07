@@ -536,7 +536,7 @@ async fn serve(
     executor: &ThreadPool,
 ) -> zbus::Result<zbus::Connection> {
     let conn = zbus::Connection::session().await?;
-    let name_owners = NameOwners::new(&conn, executor).await?;
+    let name_owners = NameOwners::new_on_pool(&conn, executor).await?;
 
     let iface = InputManager {
         bindings,
