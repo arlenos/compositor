@@ -104,7 +104,13 @@ failures=0
 step() {
   local name="$1"; shift
   echo "=== $name ==="
-  if ! "$CP/target/debug/lock-probe" "$@" 2>&1 | sed "s/^/  /"; then
+  local rc=0
+  "$CP/target/debug/lock-probe" "$@" 2>&1 | sed "s/^/  /" || rc=$?
+  # Exit 1 is the probe's own verdict and counts. The `crash` mode ends in
+  # SIGABRT on purpose - dying without unlocking is the thing being tested - so
+  # its exit code says nothing; what answers for that step is the capture below
+  # and whether the compositor is still alive at the end.
+  if [ "$rc" -eq 1 ]; then
     failures=$((failures + 1))
   fi
   sleep 2
