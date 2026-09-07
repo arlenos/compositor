@@ -93,6 +93,7 @@ use smithay::{
         output::OutputManagerState,
         pointer_constraints::PointerConstraintsState,
         pointer_gestures::PointerGesturesState,
+        pointer_warp::PointerWarpManager,
         presentation::PresentationState,
         seat::WaylandFocus,
         security_context::{SecurityContext, SecurityContextState},
@@ -123,7 +124,7 @@ use smithay::{
 };
 use tracing::warn;
 
-#[cfg(feature = "systemd")]
+#[cfg(feature = "logind")]
 use std::os::fd::OwnedFd;
 
 use std::{
@@ -347,7 +348,7 @@ pub struct Common {
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
 
-    #[cfg(feature = "systemd")]
+    #[cfg(feature = "logind")]
     pub inhibit_lid_fd: Option<OwnedFd>,
 
     pub with_xwayland: bool,
@@ -735,6 +736,7 @@ impl State {
         XWaylandKeyboardGrabState::new::<Self>(dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
         PointerConstraintsState::new::<Self>(dh);
+        PointerWarpManager::new::<Self>(dh);
         PointerGesturesState::new::<Self>(dh);
         TabletManagerState::new::<Self>(dh);
         SecurityContextState::new::<Self, _>(dh, client_has_no_security_context);
@@ -909,7 +911,7 @@ impl State {
                 pointer_focus_state: None,
                 dbus_state,
 
-                #[cfg(feature = "systemd")]
+                #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
 
                 with_xwayland,
@@ -934,7 +936,7 @@ impl State {
     }
 
     fn update_inhibitor_locks(&mut self) {
-        #[cfg(feature = "systemd")]
+        #[cfg(feature = "logind")]
         {
             use smithay::backend::session::Session;
             use tracing::{debug, error, warn};

@@ -17,7 +17,7 @@ pub mod app_interface;
 pub mod input_manager;
 
 use a11y_keyboard_monitor::A11yKeyboardMonitorState;
-#[cfg(feature = "systemd")]
+#[cfg(feature = "logind")]
 pub mod logind;
 mod name_owners;
 mod power;

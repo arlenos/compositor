@@ -42,8 +42,8 @@ use smithay::{
             GestureSwipeUpdateEvent, MotionEvent, PointerTarget, RelativeMotionEvent,
         },
         touch::{
-            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
-            UpEvent,
+            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
+            TouchTarget, UpEvent,
         },
     },
     output::Output,
@@ -1607,39 +1607,32 @@ impl PointerTarget<State> for CosmicWindow {
 }
 
 impl TouchTarget<State> for CosmicWindow {
-    fn down(&self, _seat: &Seat<State>, _data: &mut State, event: &DownEvent, _seq: Serial) {
+    fn down(&self, _seat: &Seat<State>, _data: &mut State, event: &DownEvent) {
         let _adjusted_loc = {
             let p = self.p();
             event.location - p.window.geometry().loc.to_f64()
         };
     }
 
-    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &UpEvent, _seq: Serial) {
-    }
+    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &UpEvent) {}
 
-    fn motion(&self, _seat: &Seat<State>, _data: &mut State, event: &TouchMotionEvent, _seq: Serial) {
+    fn motion(&self, _seat: &Seat<State>, _data: &mut State, event: &TouchMotionEvent) {
         let _adjusted_loc = {
             let p = self.p();
             event.location - p.window.geometry().loc.to_f64()
         };
     }
 
-    fn frame(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {
-    }
+    fn frame(&self, _seat: &Seat<State>, _data: &mut State, _frame: FrameMarker) {}
 
-    fn cancel(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {
-    }
+    fn cancel(&self, _seat: &Seat<State>, _data: &mut State, _frame: FrameMarker) {}
 
-    fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent, _seq: Serial) {
-    }
+    fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent) {}
 
-    fn orientation(
-        &self,
-        _seat: &Seat<State>,
-        _data: &mut State,
-        _event: &OrientationEvent,
-        _seq: Serial,
-    ) {
+    fn orientation(&self, _seat: &Seat<State>, _data: &mut State, _event: &OrientationEvent) {}
+
+    fn last_frame(&self, _seat: &Seat<State>, _data: &mut State) -> Option<FrameMarker> {
+        None
     }
 }
 

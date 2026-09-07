@@ -1756,7 +1756,7 @@ impl State {
             }
             InputEvent::Special(_) => {}
             InputEvent::SwitchToggle { event } => {
-                #[cfg(feature = "systemd")]
+                #[cfg(feature = "logind")]
                 if event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
                     let backend = self.backend.lock();
                     let output = backend
@@ -2665,7 +2665,7 @@ impl State {
             });
 
             if let Some((output, geometry, surface_offset)) = found {
-                let mut pos_in_element = location + surface_offset.to_f64();
+                let pos_in_element = location + surface_offset.to_f64();
                 let window_size = geometry.size.to_f64();
 
                 let is_legal = |p: Point<f64, Logical>| {
@@ -2689,29 +2689,13 @@ impl State {
                 let workspace_origin = output.geometry().loc.to_f64();
                 let origin = geometry.loc.to_f64();
 
-                if !is_legal(pos_in_element) {
-                    let original_global = pointer.current_location();
-
-                    let original_pos_in_element = Point::new(
-                        original_global.x - workspace_origin.x - origin.x,
-                        original_global.y - workspace_origin.y - origin.y,
-                    );
-
-                    let y_only_pos = Point::new(original_pos_in_element.x, pos_in_element.y);
-                    let x_only_pos = Point::new(pos_in_element.x, original_pos_in_element.y);
-
-                    if is_legal(y_only_pos) {
-                        pos_in_element = y_only_pos;
-                    } else if is_legal(x_only_pos) {
-                        pos_in_element = x_only_pos;
-                    } else {
-                        pos_in_element = original_pos_in_element;
-                    }
+                if is_legal(pos_in_element) {
+                    let x = workspace_origin.x + origin.x + pos_in_element.x;
+                    let y = workspace_origin.y + origin.y + pos_in_element.y;
+                    Some((Point::new(x, y), output.clone()))
+                } else {
+                    None
                 }
-
-                let x = workspace_origin.x + origin.x + pos_in_element.x;
-                let y = workspace_origin.y + origin.y + pos_in_element.y;
-                Some((Point::new(x, y), output.clone()))
             } else {
                 None
             }

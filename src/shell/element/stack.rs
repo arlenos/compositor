@@ -49,8 +49,8 @@ use smithay::{
             PointerTarget, RelativeMotionEvent,
         },
         touch::{
-            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
-            UpEvent,
+            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
+            TouchTarget, UpEvent,
         },
     },
     output::Output,
@@ -123,6 +123,11 @@ pub struct CosmicStackInternal {
     pointer_entered: AtomicU8,
     reenter: AtomicBool,
     potential_drag: Mutex<Option<usize>>,
+    /// Serial of the touch-down that a later touch-motion turns into a drag.
+    ///
+    /// smithay stopped passing the serial to every `TouchTarget` method, so the
+    /// one `start_drag` needs has to be carried from `down` to `motion` by hand.
+    touch_serial: AtomicU32,
     override_alive: AtomicBool,
     geometry: Mutex<Option<Rectangle<i32, Global>>>,
     mask: Mutex<Option<tiny_skia::Mask>>,
@@ -206,6 +211,7 @@ impl CosmicStack {
                 activated: AtomicBool::new(false),
                 group_focused: AtomicBool::new(false),
                 previous_index: Mutex::new(None),
+                touch_serial: AtomicU32::new(0),
                 scroll_to_focus: AtomicBool::new(false),
                 previous_keyboard: AtomicUsize::new(0),
                 pointer_entered: AtomicU8::new(0),
@@ -291,6 +297,10 @@ impl CosmicStack {
                 window.set_tiled(false);
 
                 p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+                p.previous_index
+                    .lock()
+                    .unwrap()
+                    .take_if(|(_, idx)| *idx >= windows.len());
                 Some((p.stack_id, idx as u32))
             }
         };
@@ -322,6 +332,10 @@ impl CosmicStack {
                 window.set_tiled(false);
 
                 p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+                p.previous_index
+                    .lock()
+                    .unwrap()
+                    .take_if(|(_, idx)| *idx >= windows.len());
 
                 (Some(window), Some((p.stack_id, idx as u32)))
             }
@@ -1593,21 +1607,17 @@ impl PointerTarget<State> for CosmicStack {
 }
 
 impl TouchTarget<State> for CosmicStack {
-    fn down(&self, _seat: &Seat<State>, _data: &mut State, event: &DownEvent, _seq: Serial) {
-        let _event = event.clone();
-        let _active_window_geo = {
-            let p = self.p();
-            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
-        };
-        // Coordinate adjustment kept for future use; no IcedElement delegation.
+    fn down(&self, _seat: &Seat<State>, _data: &mut State, event: &DownEvent) {
+        self.p()
+            .touch_serial
+            .store(event.serial.into(), Ordering::Release);
     }
 
-    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &UpEvent, _seq: Serial) {
+    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &UpEvent) {
         // No-op.
     }
 
-    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent, seq: Serial) {
-        let event = event.clone();
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent) {
         let active_window_geo = {
             let p = self.p();
             p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
@@ -1619,29 +1629,27 @@ impl TouchTarget<State> for CosmicStack {
             || adjusted_location.x < 64.0
             || adjusted_location.x > (active_window_geo.size.w as f64 - 64.0)
         {
-            self.start_drag(data, seat, seq);
+            let serial = self.p().touch_serial.load(Ordering::Acquire).into();
+            self.start_drag(data, seat, serial);
         }
     }
 
-    fn frame(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {
+    fn frame(&self, _seat: &Seat<State>, _data: &mut State, _frame: FrameMarker) {
         // No-op.
     }
 
-    fn cancel(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {
+    fn cancel(&self, _seat: &Seat<State>, _data: &mut State, _frame: FrameMarker) {
         // No-op.
     }
 
-    fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent, _seq: Serial) {
+    fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent) {
         // No-op.
     }
 
-    fn orientation(
-        &self,
-        _seat: &Seat<State>,
-        _data: &mut State,
-        _event: &OrientationEvent,
-        _seq: Serial,
-    ) {
+    fn orientation(&self, _seat: &Seat<State>, _data: &mut State, _event: &OrientationEvent) {}
+
+    fn last_frame(&self, _seat: &Seat<State>, _data: &mut State) -> Option<FrameMarker> {
+        None
     }
 }
 
