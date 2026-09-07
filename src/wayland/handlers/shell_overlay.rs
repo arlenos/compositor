@@ -412,7 +412,7 @@ fn unset_overlay_grab(state: &mut State, menu_id: u32) {
 
     if let Some(seat) = matching_seat {
         if let Some(ptr) = seat.get_pointer() {
-            ptr.unset_grab(state, SERIAL_COUNTER.next_serial(), 0);
+            ptr.unset_grab(state, SERIAL_COUNTER.next_serial(), smithay::backend::input::InputTime::now());
             // Pointer focus re-evaluation happens in the commit handler
             // when the layer surface input region is updated by desktop-shell.
         }

@@ -5,7 +5,10 @@ use std::{
 };
 
 use smithay::{
-    backend::renderer::{ImportMem, Renderer, element::memory::MemoryRenderBufferRenderElement},
+    backend::{
+        input::InputTime,
+        renderer::{ImportMem, Renderer, element::memory::MemoryRenderBufferRenderElement},
+    },
     input::{
         Seat,
         pointer::{
@@ -153,7 +156,7 @@ impl PointerTarget<crate::state::State> for SwapIndicator {
     fn button(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &ButtonEvent) {}
     fn axis(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: AxisFrame) {}
     fn frame(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State) {}
-    fn leave(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _serial: Serial, _time: u32) {}
+    fn leave(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _serial: Serial, _time: InputTime) {}
     fn gesture_swipe_begin(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GestureSwipeBeginEvent) {}
     fn gesture_swipe_update(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GestureSwipeUpdateEvent) {}
     fn gesture_swipe_end(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GestureSwipeEndEvent) {}

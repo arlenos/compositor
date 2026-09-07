@@ -6,6 +6,7 @@ use crate::{
 };
 use indexmap::IndexSet;
 use smithay::{
+    backend::input::InputTime,
     desktop::{PopupUngrabStrategy, layer_map_for_output},
     input::{Seat, pointer::MotionEvent},
     output::Output,
@@ -488,7 +489,7 @@ fn update_focus_state(
                     &MotionEvent {
                         location: new_pos.as_logical(),
                         serial: SERIAL_COUNTER.next_serial(),
-                        time: 0,
+                        time: InputTime::now(),
                     },
                 );
             }
@@ -860,7 +861,7 @@ fn update_pointer_focus(state: &mut State, seat: &Seat<State>) {
                 &MotionEvent {
                     location: pointer.current_location(),
                     serial: SERIAL_COUNTER.next_serial(),
-                    time: state.common.clock.now().as_millis(),
+                    time: InputTime::now(),
                 },
             );
         }

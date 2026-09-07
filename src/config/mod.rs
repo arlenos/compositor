@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    input::InputBackendId,
     shell::Shell,
     state::{BackendData, State},
     utils::prelude::OutputExt,
@@ -14,8 +15,11 @@ use anyhow::Context;
 use cosmic_settings_config::window_rules::ApplicationException;
 use cosmic_settings_config::{Shortcuts, shortcuts, window_rules};
 use serde::{Deserialize, Serialize};
-use smithay::utils::{Clock, Monotonic};
 use smithay::wayland::xdg_activation::XdgActivationState;
+use smithay::{
+    backend::input::InputTime,
+    utils::{Clock, Monotonic},
+};
 pub use smithay::{
     backend::input::{self as smithay_input, KeyState},
     input::keyboard::{Keysym, ModifiersState, keysyms as KeySyms},
@@ -46,8 +50,8 @@ mod types;
 
 pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
-    ActivationPolicy, AppearanceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig,
-    XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
+    ActivationPolicy, AppearanceConfig, CosmicCompConfig, DecorationPreference, KeyboardConfig,
+    TileBehavior, XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
     input::{
         AccelConfig, DeviceState as InputDeviceState, InputConfig, ScrollConfig, TapConfig,
         TouchpadOverride,
@@ -2006,13 +2010,12 @@ pub fn change_modifier_state(
     const X11_KEYCODE_OFFSET: u32 = 8;
 
     let mut input = |key_state, scan_code| {
-        let time = state.common.clock.now().as_millis();
         let _ = keyboard.input(
             state,
             smithay_input::Keycode::new(scan_code + X11_KEYCODE_OFFSET),
             key_state,
             SERIAL_COUNTER.next_serial(),
-            time,
+            InputTime::now(),
             |_, _, _| smithay::input::keyboard::FilterResult::<()>::Forward,
         );
     };

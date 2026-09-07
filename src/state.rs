@@ -256,6 +256,28 @@ pub struct Common {
 
     pub gesture_state: Option<GestureState>,
 
+    /// Active libei sender seats, keyed by their `eis` connection. Tracked so their virtual
+    /// keyboards can be re-created when the keyboard configuration changes at runtime.
+    pub ei_seats: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        smithay::backend::libei::EiInputSeat,
+    >,
+
+    /// The shared-seat [`KeyboardSource`] assigned to each libei connection, so its
+    /// `ei_keyboard` key events feed the seat keyboard with independent per-source hold
+    /// tracking (and can be released together on disconnect). Keyed by connection.
+    pub ei_keyboard_source: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        smithay::input::keyboard::KeyboardSource,
+    >,
+
+    /// Pointer buttons currently held by each libei connection, so they can be released when the
+    /// connection drops
+    pub ei_pointer_buttons: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        std::collections::HashSet<u32>,
+    >,
+
     pub kiosk_child: Option<Child>,
     pub arlen_theme: arlen_theme::ArlenTheme,
 
@@ -863,6 +885,9 @@ impl State {
                 event_bus: crate::event_bus::spawn(),
                 kiosk_exit_code: None,
                 gesture_state: None,
+                ei_seats: std::collections::HashMap::new(),
+                ei_keyboard_source: std::collections::HashMap::new(),
+                ei_pointer_buttons: std::collections::HashMap::new(),
 
                 kiosk_child: None,
                 arlen_theme: crate::theme::arlen_theme(),
@@ -1455,8 +1480,12 @@ impl Common {
         const THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
         const SCREENCOPY_THROTTLE: Option<Duration> = Some(Duration::from_nanos(16_666_666));
 
-        fn throttle(session_holder: &impl SessionHolder) -> Option<Duration> {
-            if session_holder.sessions().is_empty() && session_holder.cursor_sessions().is_empty() {
+        fn throttle(session_holder: &impl SessionHolder, is_xwayland: bool) -> Option<Duration> {
+            if is_xwayland {
+                Some(Duration::ZERO)
+            } else if session_holder.sessions().is_empty()
+                && session_holder.cursor_sessions().is_empty()
+            {
                 THROTTLE
             } else {
                 SCREENCOPY_THROTTLE
@@ -1492,7 +1521,8 @@ impl Common {
                 && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
             {
                 for (window, _) in grab_state.element().windows() {
-                    window.send_frame(output, time, throttle(&window), should_send);
+                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
                 }
             }
 
@@ -1516,25 +1546,28 @@ impl Common {
             .mapped()
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.send_frame(output, time, throttle(&window), should_send);
+                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
                 }
             });
 
         if let Some(active) = shell.active_space(output) {
             if let Some(fs) = active.get_fullscreen(shell.seats.last_active()) {
-                fs.surface
-                    .send_frame(output, time, throttle(&fs.surface), should_send);
+                let throttle = throttle(&fs.surface, fs.surface.x11_surface().is_some());
+                fs.surface.send_frame(output, time, throttle, should_send);
             }
             active.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.send_frame(output, time, throttle(&window), should_send);
+                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
                 }
             });
 
             // other (throttled) windows
             active.minimized_windows.iter().for_each(|m| {
                 for window in m.windows() {
-                    window.send_frame(output, time, throttle(&window), |_, _| None);
+                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, |_, _| None);
                 }
             });
 
@@ -1544,18 +1577,25 @@ impl Common {
                 .filter(|w| w.handle != active.handle)
             {
                 if let Some(fs) = space.get_fullscreen(shell.seats.last_active()) {
-                    let throttle = min(throttle(space), throttle(&fs.surface));
+                    let throttle = min(
+                        throttle(space, false),
+                        throttle(&fs.surface, fs.surface.x11_surface().is_some()),
+                    );
                     fs.surface.send_frame(output, time, throttle, |_, _| None);
                 }
                 space.mapped().for_each(|mapped| {
                     for (window, _) in mapped.windows() {
-                        let throttle = min(throttle(space), throttle(&window));
+                        let throttle = min(
+                            throttle(space, false),
+                            throttle(&window, window.x11_surface().is_some()),
+                        );
                         window.send_frame(output, time, throttle, |_, _| None);
                     }
                 });
                 space.minimized_windows.iter().for_each(|m| {
                     for window in m.windows() {
-                        window.send_frame(output, time, throttle(&window), |_, _| None);
+                        let throttle = throttle(&window, window.x11_surface().is_some());
+                        window.send_frame(output, time, throttle, |_, _| None);
                     }
                 })
             }

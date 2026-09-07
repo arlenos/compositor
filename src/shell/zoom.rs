@@ -9,6 +9,7 @@ use smithay::{
 };
 
 use crate::{
+
     state::State,
     utils::{
         prelude::*,
@@ -278,4 +279,5 @@ impl ZoomState {
     ) -> Option<(super::focus::target::PointerFocusTarget, Point<f64, Global>)> {
         None
     }
+
 }

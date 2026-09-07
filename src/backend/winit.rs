@@ -318,7 +318,9 @@ impl State {
             WinitEvent::Focus(true) => {
                 for seat in self.common.shell.read().seats.iter() {
                     let devices = seat.user_data().get::<Devices>().unwrap();
-                    if devices.has_device(&WinitVirtualDevice) {
+                    if devices
+                        .has_device(&WinitVirtualDevice, &crate::input::InputBackendId::Normal)
+                    {
                         seat.set_active_output(&self.backend.winit().output);
                         break;
                     }
@@ -335,7 +337,7 @@ impl State {
                     // Release stuck keyboard modifiers.
                     if let Some(keyboard) = seat.get_keyboard() {
                         let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                        let time = self.common.clock.now().as_millis() as u32;
+                        let time = smithay::backend::input::InputTime::now();
                         // Send key release for all pressed keys. This clears
                         // the xkbcommon modifier state.
                         keyboard.with_pressed_keysyms(|syms| {
@@ -356,7 +358,7 @@ impl State {
                     if let Some(pointer) = seat.get_pointer() {
                         if pointer.is_grabbed() {
                             let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                            let time = self.common.clock.now().as_millis() as u32;
+                            let time = smithay::backend::input::InputTime::now();
                             pointer.unset_grab(self, serial, time);
                         }
                     }
@@ -401,7 +403,9 @@ impl State {
                 render_ping.ping();
             }
             WinitEvent::Redraw => render_ping.ping(),
-            WinitEvent::Input(event) => self.process_input_event(event),
+            WinitEvent::Input(event) => {
+                self.process_input_event(event, crate::input::InputBackendId::Normal)
+            }
             WinitEvent::CloseRequested => {
                 self.common.should_stop = true;
             }

@@ -65,6 +65,13 @@ impl Default for AppearanceConfig {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DecorationPreference {
+    #[default]
+    ClientSide,
+    ServerSide,
+}
+
 /// Compositor configuration. Loaded from `compositor.toml` via
 /// `toml::from_str` in the parent `cosmic-comp` crate; the
 /// previous cosmic-config inheritance was removed in #29 / CC4.
@@ -102,7 +109,10 @@ pub struct CosmicCompConfig {
     pub appearance_settings: AppearanceConfig,
     /// Hide the cursor after this many seconds of pointer inactivity (None disables)
     pub cursor_hide_timeout: Option<u32>,
+    /// Briefly magnify the cursor when the pointer is shaken, to help locate it
+    pub cursor_shake_to_find: bool,
     pub activation_policy: ActivationPolicy,
+    pub decoration_preference: DecorationPreference,
 }
 
 impl Default for CosmicCompConfig {
@@ -140,7 +150,9 @@ impl Default for CosmicCompConfig {
             accessibility_zoom: ZoomConfig::default(),
             appearance_settings: AppearanceConfig::default(),
             cursor_hide_timeout: None,
+            cursor_shake_to_find: true,
             activation_policy: ActivationPolicy::default(),
+            decoration_preference: DecorationPreference::default(),
         }
     }
 }
@@ -194,6 +206,10 @@ pub struct ZoomConfig {
     pub increment: u32,
     pub view_moves: ZoomMovement,
     pub enable_mouse_zoom_shortcuts: bool,
+}
+
+impl ZoomConfig {
+    pub const ZOOM_INCREMENT_PRESETS: &[u32] = &[10, 25, 50, 75, 100, 150, 200];
 }
 
 impl Default for ZoomConfig {

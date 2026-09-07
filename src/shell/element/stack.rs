@@ -10,7 +10,7 @@ use crate::{
     shell::{
         element::{CosmicMappedKey, CosmicMappedKeyInner},
         focus::target::PointerFocusTarget,
-        grabs::{ReleaseMode, ResizeEdge},
+        grabs::{GrabType, ReleaseMode, ResizeEdge},
         layout::tiling::NodeDesc,
     },
     state::State,
@@ -23,7 +23,7 @@ use shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     backend::{
         drm::DrmNode,
-        input::KeyState,
+        input::{InputTime, KeyState, TabletToolDescriptor},
         renderer::{
             ImportAll, ImportMem, Renderer,
             element::{
@@ -40,14 +40,23 @@ use smithay::{
         Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent, CursorImageStatus,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent as PointerMotionEvent,
             PointerTarget, RelativeMotionEvent,
         },
+        tablet::{
+            Tablet, TabletSeatTrait,
+            tool::{
+                AxisFrame as ToolAxisFrame, ButtonEvent as ToolButtonEvent,
+                DownEvent as ToolDownEvent, MotionEvent as ToolMotionEvent, TabletToolTarget,
+                UpEvent as ToolUpEvent,
+            },
+        },
         touch::{
-            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
-            TouchTarget, UpEvent,
+            DownEvent as TouchDownEvent, FrameMarker, MotionEvent as TouchMotionEvent,
+            OrientationEvent, ShapeEvent, TouchTarget, UpEvent as TouchUpEvent,
         },
     },
     output::Output,
@@ -118,13 +127,14 @@ pub struct CosmicStackInternal {
     scroll_to_focus: AtomicBool,
     previous_keyboard: AtomicUsize,
     pointer_entered: AtomicU8,
+    touch_serial: AtomicU32,
+    tablet_serial: AtomicU32,
     reenter: AtomicBool,
     potential_drag: Mutex<Option<usize>>,
     /// Serial of the touch-down that a later touch-motion turns into a drag.
     ///
     /// smithay stopped passing the serial to every `TouchTarget` method, so the
     /// one `start_drag` needs has to be carried from `down` to `motion` by hand.
-    touch_serial: AtomicU32,
     override_alive: AtomicBool,
     geometry: Mutex<Option<Rectangle<i32, Global>>>,
     mask: Mutex<Option<tiny_skia::Mask>>,
@@ -212,6 +222,7 @@ impl CosmicStack {
                 scroll_to_focus: AtomicBool::new(false),
                 previous_keyboard: AtomicUsize::new(0),
                 pointer_entered: AtomicU8::new(0),
+                tablet_serial: AtomicU32::new(0),
                 reenter: AtomicBool::new(false),
                 potential_drag: Mutex::new(None),
                 override_alive: AtomicBool::new(true),
@@ -915,12 +926,19 @@ impl CosmicStack {
                         false,
                     );
                     if let Some((grab, focus)) = res {
-                        if grab.is_touch_grab() {
-                            seat.get_touch().unwrap().set_grab(state, grab, serial);
-                        } else {
-                            seat.get_pointer()
+                        match grab.grab_type() {
+                            GrabType::Touch => {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial)
+                            }
+                            GrabType::Pointer => seat
+                                .get_pointer()
                                 .unwrap()
-                                .set_grab(state, grab, serial, focus);
+                                .set_grab(state, grab, serial, focus),
+                            GrabType::TabletTool => seat
+                                .tablet_seat()
+                                .get_tool(grab.tool().unwrap())
+                                .unwrap()
+                                .set_grab(state, grab, InputTime::now(), serial, focus),
                         }
                     }
                 });
@@ -1148,7 +1166,7 @@ impl KeyboardTarget<State> for CosmicStack {
         key: KeysymHandle<'_>,
         state: KeyState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         let active = self.keyboard_leave_if_previous(seat, data, serial);
         let p = self.p();
@@ -1186,7 +1204,7 @@ impl KeyboardTarget<State> for CosmicStack {
 }
 
 impl PointerTarget<State> for CosmicStack {
-    fn enter(&self, seat: &Seat<State>, _data: &mut State, event: &MotionEvent) {
+    fn enter(&self, seat: &Seat<State>, _data: &mut State, event: &PointerMotionEvent) {
         let p = self.p();
         let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
         let Some(next) = Focus::under(active_window, TAB_HEIGHT, event.location) else {
@@ -1204,7 +1222,7 @@ impl PointerTarget<State> for CosmicStack {
         seat.set_cursor_image_status(CursorImageStatus::default_named());
     }
 
-    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
         // Disarm any double-click baseline if the pointer has moved
         // far enough between the two clicks to look like an
         // intentional drag. See seats::DoubleClickTracker for the
@@ -1254,7 +1272,7 @@ impl PointerTarget<State> for CosmicStack {
     ) {
     }
 
-    fn button(&self, seat: &Seat<State>, _data: &mut State, event: &ButtonEvent) {
+    fn button(&self, seat: &Seat<State>, _data: &mut State, event: &PointerButtonEvent) {
         let current_focus = {
             let p = self.p();
             p.current_focus()
@@ -1343,14 +1361,14 @@ impl PointerTarget<State> for CosmicStack {
                             use smithay::reexports::wayland_server::Resource;
                             let target_id = surface.id().protocol_id() as u64;
                             let is_double = seat.double_click_tracker().observe_press(
-                                event.time,
+                                event.time.millis(),
                                 event.button,
                                 target_id,
                             );
                             tracing::info!(
                                 "DCLK-DEBUG CosmicStack header press time={} \
                                  button=0x{:x} target_id={} double={}",
-                                event.time, event.button, target_id, is_double
+                                event.time.millis(), event.button, target_id, is_double
                             );
                             if is_double {
                                 let seat = seat.clone();
@@ -1401,7 +1419,7 @@ impl PointerTarget<State> for CosmicStack {
                                             .shell_overlay_state
                                             .send_window_drag_start(sid);
                                     }
-                                    if grab.is_touch_grab() {
+                                    if matches!(grab.grab_type(), GrabType::Touch) {
                                         seat.get_touch().unwrap().set_grab(state, grab, serial);
                                     } else {
                                         seat.get_pointer()
@@ -1443,14 +1461,12 @@ impl PointerTarget<State> for CosmicStack {
                         state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
                     );
-                    if let Some((grab, focus)) = res {
-                        if grab.is_touch_grab() {
-                            seat.get_touch().unwrap().set_grab(state, grab, serial);
-                        } else {
-                            seat.get_pointer()
-                                .unwrap()
-                                .set_grab(state, grab, serial, focus);
-                        }
+                    if let Some((grab, focus)) = res
+                        && let GrabType::Pointer = grab.grab_type()
+                    {
+                        seat.get_pointer()
+                            .unwrap()
+                            .set_grab(state, grab, serial, focus);
                     }
                 });
             }
@@ -1458,7 +1474,7 @@ impl PointerTarget<State> for CosmicStack {
         }
     }
 
-    fn axis(&self, _seat: &Seat<State>, _data: &mut State, _frame: AxisFrame) {
+    fn axis(&self, _seat: &Seat<State>, _data: &mut State, _frame: PointerAxisFrame) {
         // No-op: tab bar scrolling was handled by IcedElement.
     }
 
@@ -1466,7 +1482,7 @@ impl PointerTarget<State> for CosmicStack {
         // No-op.
     }
 
-    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
+    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: InputTime) {
         // Pointer left the stack; clear the double-click tracker so
         // the next window's click doesn't inherit this stack's
         // timing baseline.
@@ -1508,14 +1524,12 @@ impl PointerTarget<State> for CosmicStack {
                         &state.common.event_loop_handle,
                         false,
                     );
-                    if let Some((grab, focus)) = res {
-                        if grab.is_touch_grab() {
-                            seat.get_touch().unwrap().set_grab(state, grab, serial);
-                        } else {
-                            seat.get_pointer()
-                                .unwrap()
-                                .set_grab(state, grab, serial, focus);
-                        }
+                    if let Some((grab, focus)) = res
+                        && let GrabType::Pointer = grab.grab_type()
+                    {
+                        seat.get_pointer()
+                            .unwrap()
+                            .set_grab(state, grab, serial, focus);
                     }
                 });
             }
@@ -1590,13 +1604,13 @@ impl PointerTarget<State> for CosmicStack {
 }
 
 impl TouchTarget<State> for CosmicStack {
-    fn down(&self, _seat: &Seat<State>, _data: &mut State, event: &DownEvent) {
+    fn down(&self, _seat: &Seat<State>, _data: &mut State, event: &TouchDownEvent) {
         self.p()
             .touch_serial
             .store(event.serial.into(), Ordering::Release);
     }
 
-    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &UpEvent) {
+    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &TouchUpEvent) {
         // No-op.
     }
 
@@ -1633,6 +1647,96 @@ impl TouchTarget<State> for CosmicStack {
 
     fn last_frame(&self, _seat: &Seat<State>, _data: &mut State) -> Option<FrameMarker> {
         None
+    }
+}
+
+impl TabletToolTarget<State> for CosmicStack {
+    // Upstream forwards each of these to the IcedElement that draws its tab bar.
+    // This fork has no such element - desktop-shell draws the tab bar over the
+    // shell overlay protocol - so the compositor has nothing to hand a tablet
+    // tool here. The stack still resizes and moves under a tool, because that
+    // goes through the window surface below, not through this target.
+    fn proximity_in(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _tablet: &Tablet,
+        _serial: Serial,
+    ) {
+    }
+
+    fn proximity_out(
+        &self,
+        seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+    ) {
+        let mut cursor_state = seat
+            .user_data()
+            .get::<CursorState>()
+            .unwrap()
+            .lock()
+            .unwrap();
+        cursor_state.unset_shape();
+        let _previous = self.p().swap_focus(None);
+    }
+
+    fn down(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        event: &ToolDownEvent,
+    ) {
+        self.p()
+            .tablet_serial
+            .store(event.serial.into(), Ordering::Release);
+    }
+
+    fn up(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &ToolUpEvent,
+    ) {
+    }
+
+    fn motion(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &ToolMotionEvent,
+    ) {
+    }
+
+    fn axis(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _frame: ToolAxisFrame,
+    ) {
+    }
+
+    fn button(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &ToolButtonEvent,
+    ) {
+    }
+
+    fn frame(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _time: InputTime,
+    ) {
     }
 }
 

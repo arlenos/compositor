@@ -6,17 +6,27 @@ use std::{
 use calloop::LoopHandle;
 use smithay::{
     backend::{
-        input::{ButtonState, TouchSlot},
+        input::{ButtonState, InputTime, TouchSlot},
         renderer::{ImportMem, Renderer, element::memory::MemoryRenderBufferRenderElement},
     },
     input::{
         Seat,
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            GrabStartData as PointerGrabStartData, MotionEvent as PointerMotionEvent, PointerGrab,
-            PointerInnerHandle, RelativeMotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
+            MotionEvent as PointerMotionEvent, PointerGrab, PointerInnerHandle,
+            RelativeMotionEvent,
+        },
+        tablet::{
+            TabletSeatHandler,
+            tool::{
+                AxisFrame as TabletAxisFrame, ButtonEvent as TabletButtonEvent,
+                DownEvent as TabletDownEvent, GrabStartData as TabletGrabStartData,
+                MotionEvent as TabletMotionEvent, ProximityInEvent, ProximityOutEvent,
+                TabletToolGrab, TabletToolInnerHandle, TabletToolTarget, UpEvent as TabletUpEvent,
+            },
         },
         touch::{
             GrabStartData as TouchGrabStartData,
@@ -34,7 +44,7 @@ use crate::{
     wayland::protocols::shell_overlay::WindowAction,
 };
 
-use super::{GrabStartData, ResizeEdge};
+use super::{GrabStartData, GrabType, ResizeEdge};
 
 mod default;
 pub use self::default::*;
@@ -254,7 +264,7 @@ impl PointerGrab<State> for MenuGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        event: &ButtonEvent,
+        event: &PointerButtonEvent,
     ) {
         // If no shell client is connected, the grab has no way to be released
         // via protocol (no activate/dismiss will arrive). Release immediately
@@ -272,7 +282,7 @@ impl PointerGrab<State> for MenuGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        details: AxisFrame,
+        details: PointerAxisFrame,
     ) {
         handle.axis(state, details);
     }
@@ -424,6 +434,94 @@ impl TouchGrab<State> for MenuGrab {
             GrabStartData::Touch(start_data) => start_data,
             _ => unreachable!(),
         }
+    }
+
+    fn unset(&mut self, _data: &mut State) {}
+}
+
+impl TabletToolGrab<State> for MenuGrab {
+    // Upstream routes the tool at its own Iced menu elements; this fork's menu
+    // is drawn by desktop-shell over the overlay protocol, so the grab only has
+    // to stay a grab and forward what it is given.
+    fn start_data(&self) -> &TabletGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::TabletTool { data, .. } => data,
+            _ => unreachable!(),
+        }
+    }
+
+    fn proximity_in(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        _focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &ProximityInEvent,
+    ) {
+        handle.proximity_in(data, None, event);
+    }
+
+    fn proximity_out(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &ProximityOutEvent,
+    ) {
+        handle.proximity_out(data, event);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        _focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &TabletMotionEvent,
+    ) {
+        handle.motion(data, None, event);
+    }
+
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletDownEvent,
+    ) {
+        handle.down(data, event);
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletUpEvent,
+    ) {
+        handle.up(data, event);
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletButtonEvent,
+    ) {
+        handle.button(data, event);
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        frame: TabletAxisFrame,
+    ) {
+        handle.axis(data, frame);
+    }
+
+    fn frame(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        time: InputTime,
+    ) {
+        handle.frame(data, time);
     }
 
     fn unset(&mut self, _data: &mut State) {}
@@ -631,11 +729,12 @@ impl MenuGrab {
         }
     }
 
-    /// Whether this grab was initiated by a touch event.
-    pub fn is_touch_grab(&self) -> bool {
+    /// Which input device started this grab.
+    pub fn grab_type(&self) -> GrabType {
         match self.start_data {
-            GrabStartData::Touch(_) => true,
-            GrabStartData::Pointer(_) => false,
+            GrabStartData::Touch(_) => GrabType::Touch,
+            GrabStartData::Pointer(_) => GrabType::Pointer,
+            GrabStartData::TabletTool { .. } => GrabType::TabletTool,
         }
     }
 }

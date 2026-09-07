@@ -3,9 +3,12 @@
 use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*};
 use calloop::Interest;
 use smithay::{
-    backend::renderer::{
-        element::{Kind, surface::KindEvaluation},
-        utils::{on_commit_buffer_handler, with_renderer_surface_state},
+    backend::{
+        input::InputTime,
+        renderer::{
+            element::{Kind, surface::KindEvaluation},
+            utils::{on_commit_buffer_handler, with_renderer_surface_state},
+        },
     },
     desktop::{LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
     reexports::wayland_server::{Client, Resource, protocol::wl_surface::WlSurface},
@@ -333,9 +336,11 @@ impl CompositorHandler for State {
                     }
                 } else {
                     std::mem::drop(shell);
-                    seat.get_pointer()
-                        .unwrap()
-                        .unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+                    seat.get_pointer().unwrap().unset_grab(
+                        self,
+                        SERIAL_COUNTER.next_serial(),
+                        InputTime::now(),
+                    );
                     return;
                 }
             }
@@ -454,7 +459,7 @@ impl CompositorHandler for State {
                             &smithay::input::pointer::MotionEvent {
                                 location: position,
                                 serial: smithay::utils::SERIAL_COUNTER.next_serial(),
-                                time: 0,
+                                time: smithay::backend::input::InputTime::now(),
                             },
                         );
                         ptr.frame(self);

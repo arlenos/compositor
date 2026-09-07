@@ -6,7 +6,7 @@ use crate::{
     shell::{
         element::{CosmicMappedKey, CosmicMappedKeyInner},
         focus::target::PointerFocusTarget,
-        grabs::{ReleaseMode, ResizeEdge},
+        grabs::{GrabType, ReleaseMode, ResizeEdge},
     },
     state::State,
     utils::prelude::*,
@@ -16,7 +16,7 @@ use cosmic_comp_config::AppearanceConfig;
 use smithay::{
     backend::{
         drm::DrmNode,
-        input::KeyState,
+        input::{InputTime, KeyState, TabletToolDescriptor},
         renderer::{
             ImportAll, ImportMem, Renderer,
             element::{
@@ -33,14 +33,23 @@ use smithay::{
         Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GestureHoldBeginEvent,
-            GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
-            GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
-            GestureSwipeUpdateEvent, MotionEvent, PointerTarget, RelativeMotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent, CursorIcon,
+            CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent as PointerMotionEvent,
+            PointerTarget, RelativeMotionEvent,
+        },
+        tablet::{
+            Tablet, TabletSeatTrait,
+            tool::{
+                AxisFrame as ToolAxisFrame, ButtonEvent as ToolButtonEvent,
+                DownEvent as ToolDownEvent, MotionEvent as ToolMotionEvent, TabletToolTarget,
+                UpEvent as ToolUpEvent,
+            },
         },
         touch::{
-            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
-            TouchTarget, UpEvent,
+            DownEvent as TouchDownEvent, FrameMarker, MotionEvent as TouchMotionEvent,
+            OrientationEvent, ShapeEvent, TouchTarget, UpEvent as TouchUpEvent,
         },
     },
     output::Output,
@@ -580,12 +589,12 @@ impl CosmicWindow {
             && !is_maximized;
         if has_ssd && !clip {
             // bottom corners
-            radii[0] = 0;
             radii[2] = 0;
+            radii[3] = 0;
             if is_tiled {
                 // top corners
+                radii[0] = 0;
                 radii[1] = 0;
-                radii[3] = 0;
             }
         }
 
@@ -1132,7 +1141,7 @@ impl KeyboardTarget<State> for CosmicWindow {
         key: KeysymHandle<'_>,
         state: KeyState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         let p = self.p();
         KeyboardTarget::key(&p.window, seat, data, key, state, serial, time)
@@ -1150,7 +1159,7 @@ impl KeyboardTarget<State> for CosmicWindow {
 }
 
 impl PointerTarget<State> for CosmicWindow {
-    fn enter(&self, seat: &Seat<State>, _data: &mut State, event: &MotionEvent) {
+    fn enter(&self, seat: &Seat<State>, _data: &mut State, event: &PointerMotionEvent) {
         let p = self.p();
         let has_ssd = p.has_ssd(false);
         if has_ssd || p.has_tiled_state() {
@@ -1171,7 +1180,7 @@ impl PointerTarget<State> for CosmicWindow {
         }
     }
 
-    fn motion(&self, seat: &Seat<State>, _data: &mut State, event: &MotionEvent) {
+    fn motion(&self, seat: &Seat<State>, _data: &mut State, event: &PointerMotionEvent) {
         // Disarm the double-click tracker if the pointer has moved
         // far enough to look like an intentional drag between clicks.
         // Cheap no-op when the tracker has no baseline.
@@ -1210,7 +1219,7 @@ impl PointerTarget<State> for CosmicWindow {
     ) {
     }
 
-    fn button(&self, seat: &Seat<State>, _data: &mut State, event: &ButtonEvent) {
+    fn button(&self, seat: &Seat<State>, _data: &mut State, event: &PointerButtonEvent) {
         let current_focus = self.p().current_focus();
         tracing::info!(
             "CosmicWindow::button focus={:?} button=0x{:x} state={:?}",
@@ -1309,14 +1318,14 @@ impl PointerTarget<State> for CosmicWindow {
                         use smithay::reexports::wayland_server::Resource;
                         let target_id = surface.id().protocol_id() as u64;
                         let is_double = seat.double_click_tracker().observe_press(
-                            event.time,
+                            event.time.millis(),
                             event.button,
                             target_id,
                         );
                         tracing::info!(
                             "DCLK-DEBUG CosmicWindow header press time={} \
                              button=0x{:x} target_id={} double={}",
-                            event.time, event.button, target_id, is_double
+                            event.time.millis(), event.button, target_id, is_double
                         );
                         if is_double {
                             let seat = seat.clone();
@@ -1375,7 +1384,7 @@ impl PointerTarget<State> for CosmicWindow {
                                             .shell_overlay_state
                                             .send_window_drag_start(sid);
                                     }
-                                    if grab.is_touch_grab() {
+                                    if matches!(grab.grab_type(), GrabType::Touch) {
                                         seat.get_touch().unwrap().set_grab(state, grab, serial);
                                     } else {
                                         seat.get_pointer().unwrap().set_grab(
@@ -1479,14 +1488,12 @@ impl PointerTarget<State> for CosmicWindow {
                         false,
                     );
 
-                    if let Some((grab, focus)) = res {
-                        if grab.is_touch_grab() {
-                            seat.get_touch().unwrap().set_grab(state, grab, serial);
-                        } else {
-                            seat.get_pointer()
-                                .unwrap()
-                                .set_grab(state, grab, serial, focus);
-                        }
+                    if let Some((grab, focus)) = res
+                        && let GrabType::Pointer = grab.grab_type()
+                    {
+                        seat.get_pointer()
+                            .unwrap()
+                            .set_grab(state, grab, serial, focus)
                     }
                 });
             }
@@ -1494,7 +1501,7 @@ impl PointerTarget<State> for CosmicWindow {
         }
     }
 
-    fn axis(&self, _seat: &Seat<State>, _data: &mut State, _frame: AxisFrame) {
+    fn axis(&self, _seat: &Seat<State>, _data: &mut State, _frame: PointerAxisFrame) {
         // No-op for header (Iced header scrolling removed).
     }
 
@@ -1502,7 +1509,7 @@ impl PointerTarget<State> for CosmicWindow {
         // No-op for header.
     }
 
-    fn leave(&self, seat: &Seat<State>, _data: &mut State, _serial: Serial, _time: u32) {
+    fn leave(&self, seat: &Seat<State>, _data: &mut State, _serial: Serial, _time: InputTime) {
         // Pointer left the window entirely; any armed double-click
         // baseline is moot. Clear it so the next window's first click
         // doesn't accidentally cash in on this one's timestamp.
@@ -1580,14 +1587,14 @@ impl PointerTarget<State> for CosmicWindow {
 }
 
 impl TouchTarget<State> for CosmicWindow {
-    fn down(&self, _seat: &Seat<State>, _data: &mut State, event: &DownEvent) {
+    fn down(&self, _seat: &Seat<State>, _data: &mut State, event: &TouchDownEvent) {
         let _adjusted_loc = {
             let p = self.p();
             event.location - p.window.geometry().loc.to_f64()
         };
     }
 
-    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &UpEvent) {}
+    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &TouchUpEvent) {}
 
     fn motion(&self, _seat: &Seat<State>, _data: &mut State, event: &TouchMotionEvent) {
         let _adjusted_loc = {
@@ -1606,6 +1613,84 @@ impl TouchTarget<State> for CosmicWindow {
 
     fn last_frame(&self, _seat: &Seat<State>, _data: &mut State) -> Option<FrameMarker> {
         None
+    }
+}
+
+impl TabletToolTarget<State> for CosmicWindow {
+    // As with `CosmicStack`: upstream hands these to the IcedElement drawing its
+    // header, and this fork has no such element - desktop-shell draws the header
+    // over the shell overlay protocol. The window itself still answers a tablet
+    // tool through its own surface.
+    fn proximity_in(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _tablet: &Tablet,
+        _serial: Serial,
+    ) {
+    }
+
+    fn proximity_out(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+    ) {
+    }
+
+    fn down(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &ToolDownEvent,
+    ) {
+    }
+
+    fn up(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &ToolUpEvent,
+    ) {
+    }
+
+    fn motion(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &ToolMotionEvent,
+    ) {
+    }
+
+    fn axis(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _frame: ToolAxisFrame,
+    ) {
+    }
+
+    fn button(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &ToolButtonEvent,
+    ) {
+    }
+
+    fn frame(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _time: InputTime,
+    ) {
     }
 }
 

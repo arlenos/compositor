@@ -10,7 +10,7 @@ use smithay::{
     backend::renderer::element::memory::MemoryRenderBufferRenderElement,
     backend::{
         drm::DrmNode,
-        input::KeyState,
+        input::{InputTime, KeyState},
         renderer::{
             element::{
                 Element, Kind, RenderElement, UnderlyingStorage,
@@ -1018,7 +1018,7 @@ impl KeyboardTarget<State> for CosmicMapped {
         key: KeysymHandle<'_>,
         state: KeyState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         match &self.element {
             CosmicMappedInternal::Stack(s) => {
