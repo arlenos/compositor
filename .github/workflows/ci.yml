@@ -102,3 +102,38 @@ jobs:
               env:
                   RUST_BACKTRACE: full
               run: cargo test --all-features
+    # Every job above compiles the compositor. None of them starts it, and a
+    # compositor that builds and does not come up is green on all of them - while
+    # taking the project's only visual channel with it. `dev/smoke.sh` boots it
+    # under Xvfb (the X11 backend fails on DRI3 and winit falls back to Mesa's
+    # software rasteriser, measured 8 Sep), connects the in-repo test client, and
+    # captures a frame. It fails on a timeout, never on a pixel: this job exists
+    # to catch "it does not start", not to review the picture.
+    smoke:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout sources
+              uses: actions/checkout@v6
+            - name: Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+            - name: Cargo cache
+              uses: actions/cache@v5
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                  key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+            - name: System dependencies
+              run: sudo apt-get update; sudo apt-get install -y libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev protobuf-compiler xvfb x11-utils grim
+            - name: Build the compositor and the test client
+              run: cargo build --bin cosmic-comp --bin test-client --features test-client
+            - name: Does it start
+              run: XDG_RUNTIME_DIR=$(mktemp -d) dev/smoke.sh smoke.png
+            - name: Keep the frame
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: smoke-frame
+                  path: smoke.png
+                  if-no-files-found: warn
+
