@@ -20,6 +20,9 @@ prost = "0.13"
 uuid = { version = "1", features = ["v7"] }
 anyhow = { version = "1.0.102", features = ["backtrace"] }
 arlen-theme = { git = "https://github.com/arlenos/arlen" }
+# The canonical identity resolver and permission profiles
+# (`AUTH-CANONICAL.md`). The compositor reads them; it never writes them.
+arlen-permissions = { git = "https://github.com/arlenos/arlen" }
 bitflags = "2.11.0"
 calloop = { version = "0.14.4", features = ["executor", "stream"] }
 toml = "0.8"

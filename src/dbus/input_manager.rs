@@ -28,7 +28,6 @@ use std::{
 use zbus::{message::Header, names::UniqueName, object_server::SignalEmitter, zvariant::Type};
 
 use super::app_interface::AppRegistry;
-use super::name_owners::NameOwners;
 
 const OBJECT_PATH: &str = "/org/arlen/InputManager1";
 const SERVICE_NAME: &str = "org.arlen.InputManager1";
@@ -232,13 +231,6 @@ impl InputManagerState {
 struct InputManager {
     bindings: Arc<Mutex<DynamicBindings>>,
     app_registry: Arc<Mutex<AppRegistry>>,
-    /// UNWIRED. `NameOwners` exists to check that a D-Bus caller owns the
-    /// well-known name it claims, and nothing here ever asks it. So
-    /// `org.arlen.InputManager1` does not enforce caller identity today. Kept
-    /// rather than deleted so the gap stays visible; raised in
-    /// compositor-reports.md (8 Sep).
-    #[allow(dead_code)]
-    name_owners: NameOwners,
     /// Background executor used by the cleanup task to run the
     /// NameOwnerChanged loop.
     executor: ThreadPool,
@@ -375,7 +367,18 @@ impl InputManager {
         if scope == "app_focused" {
             let reg = self.app_registry.lock().unwrap();
             match reg.by_owner(&owner) {
-                Some(info) if info.app_id == app_id => {}
+                Some(info) if info.app_id == app_id => {
+                    // The grant, not just the identity. An app whose profile
+                    // does not carry `register_focused_bindings` cannot take
+                    // one even for itself; before profiles were consulted this
+                    // was unreachable, because the only gate was the id match.
+                    if !info.can_register_focused_bindings() {
+                        return Err(zbus::fdo::Error::AccessDenied(format!(
+                            "app_focused scope needs the 'register_focused_bindings' \
+                             permission; {app_id:?} does not have it"
+                        )));
+                    }
+                }
                 Some(info) => {
                     return Err(zbus::fdo::Error::AccessDenied(format!(
                         "app_id mismatch: caller registered as {:?} but claimed {:?}",
@@ -534,12 +537,9 @@ async fn serve(
     executor: &ThreadPool,
 ) -> zbus::Result<zbus::Connection> {
     let conn = zbus::Connection::session().await?;
-    let name_owners = NameOwners::new_on_pool(&conn, executor).await?;
-
     let iface = InputManager {
         bindings,
         app_registry,
-        name_owners,
         executor: executor.clone(),
     };
     // Kick off cleanup before publishing the object so we never miss a

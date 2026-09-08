@@ -53,13 +53,15 @@ pub struct AppInfo {
     /// D-Bus unique name of the registering client (`":1.42"`).
     pub owner: String,
     pub declared_actions: Vec<DeclaredAction>,
-    /// Input-subsystem permissions the client declared at registration.
-    /// Known strings: `"register_focused_bindings"`,
-    /// `"register_global_bindings"`. Unknown strings are preserved so
-    /// forward-compat clients can declare future permissions without
-    /// the compositor rejecting them; the compositor only acts on the
-    /// strings it recognises.
-    pub permissions: Vec<String>,
+    /// Input-subsystem permissions, read from the app's permission profile
+    /// at `~/.config/permissions/{app_id}.toml`.
+    ///
+    /// NOT what the caller declared. `RegisterApp` takes a `permissions`
+    /// argument and it is advisory only: a client that asks for a grant its
+    /// profile does not carry is logged and ignored. The authority is the
+    /// profile on disk, which only a privileged service may write
+    /// (`AUTH-CANONICAL.md`).
+    pub input: arlen_permissions::InputPermissions,
 }
 
 impl AppInfo {
@@ -67,9 +69,12 @@ impl AppInfo {
     /// `RegisterApp` time. The InputManager gates `app_global`-scope
     /// binding registrations on this.
     pub fn can_register_global_bindings(&self) -> bool {
-        self.permissions
-            .iter()
-            .any(|p| p == "register_global_bindings")
+        self.input.register_global_bindings
+    }
+
+    /// May this app register bindings that fire only while it has focus?
+    pub fn can_register_focused_bindings(&self) -> bool {
+        self.input.register_focused_bindings
     }
 }
 
@@ -178,9 +183,29 @@ impl AppRegistryState {
 struct AppInterface {
     registry: Arc<Mutex<AppRegistry>>,
     executor: ThreadPool,
+    /// Set once the service is on the bus, so `caller_pid` can ask the bus who
+    /// a sender is. A `OnceLock` because the interface is built before the
+    /// connection it will be served on exists.
+    conn: Arc<OnceLock<zbus::Connection>>,
 }
 
 impl AppInterface {
+    /// The pid behind a unique bus name, asked of the bus itself.
+    ///
+    /// The bus is the only party that can answer this honestly - the client
+    /// cannot forge it and the compositor cannot infer it from the message -
+    /// which is what makes it usable as an identity anchor.
+    async fn caller_pid(&self, owner: &str) -> zbus::fdo::Result<u32> {
+        let conn = self
+            .conn
+            .get()
+            .ok_or_else(|| zbus::fdo::Error::Failed("bus connection not ready".into()))?;
+        let dbus = zbus::fdo::DBusProxy::new(conn).await?;
+        let name = zbus::names::BusName::try_from(owner.to_string())
+            .map_err(|err| zbus::fdo::Error::Failed(format!("bad sender name: {err}")))?;
+        dbus.get_connection_unix_process_id(name).await
+    }
+
     /// Background task that removes registrations for clients that
     /// disconnect from the bus. Distinct from the InputManager's own
     /// cleanup watcher so the two services can boot and crash
@@ -258,12 +283,74 @@ impl AppInterface {
             ));
         };
         let owner = sender.to_string();
+
+        // WHO THE CALLER IS, rather than who it says it is. Everything the
+        // input service enforces hangs off this registration: `app_focused`
+        // bindings are matched against the registered `app_id`, so a client
+        // that could register under another app's id would receive that app's
+        // shortcuts the moment it had focus. The id therefore comes from the
+        // canonical resolver over the caller's pid, never from the argument.
+        let pid = self.caller_pid(&owner).await?;
+        let resolved = arlen_permissions::identity::app_id_from_pid(pid).map_err(|err| {
+            // Logged, not just returned: a refusal a journal never sees is a
+            // rule nobody can check, and this path fires for confined callers
+            // and unreadable `/proc` entries as well as for genuine strangers.
+            tracing::warn!(
+                "app_interface: cannot resolve pid {pid} ({owner}) to an app_id: \
+                 {err}; refusing its claim to {app_id:?}"
+            );
+            zbus::fdo::Error::AccessDenied(format!(
+                "cannot resolve the caller's identity, so it cannot register: {err}"
+            ))
+        })?;
+        if resolved != app_id {
+            tracing::warn!(
+                "app_interface: {owner} (pid {pid}) resolves to {resolved:?} \
+                 but claimed {app_id:?}; refused"
+            );
+            return Err(zbus::fdo::Error::AccessDenied(format!(
+                "caller resolves to {resolved:?}, cannot register as {app_id:?}"
+            )));
+        }
+
+        // WHAT IT MAY DO comes from the profile on disk, which only a
+        // privileged service may write. A missing profile is not an error to
+        // register - it grants nothing, which is the fail-closed reading the
+        // schema rules ask for.
+        let input = match arlen_permissions::load_profile(&app_id) {
+            Ok(profile) => profile.input,
+            Err(err) => {
+                tracing::info!(
+                    "app_interface: no permission profile for {app_id:?} ({err}); \
+                     registering with no input grants"
+                );
+                arlen_permissions::InputPermissions::default()
+            }
+        };
+
+        // The `permissions` argument is advisory. Saying so out loud rather
+        // than dropping it silently: a client that believes it has a grant it
+        // does not have should be able to find out from the journal.
+        for claimed in &permissions {
+            let granted = match claimed.as_str() {
+                "register_focused_bindings" => input.register_focused_bindings,
+                "register_global_bindings" => input.register_global_bindings,
+                _ => false,
+            };
+            if !granted {
+                tracing::info!(
+                    "app_interface: {app_id:?} declared {claimed:?}, which its \
+                     profile does not grant; ignored"
+                );
+            }
+        }
+
         let info = AppInfo {
             app_id: app_id.clone(),
             name,
             owner: owner.clone(),
             declared_actions: actions,
-            permissions,
+            input,
         };
         self.registry.lock().unwrap().insert(info);
         tracing::debug!("app_interface: registered {app_id} for {owner}");
@@ -321,9 +408,12 @@ async fn serve(
     executor: &ThreadPool,
 ) -> zbus::Result<zbus::Connection> {
     let conn = zbus::Connection::session().await?;
+    let conn_cell: Arc<OnceLock<zbus::Connection>> = Arc::new(OnceLock::new());
+    let _ = conn_cell.set(conn.clone());
     let iface = AppInterface {
         registry,
         executor: executor.clone(),
+        conn: conn_cell,
     };
     iface.start_cleanup_task(&conn);
     conn.object_server().at(OBJECT_PATH, iface).await?;
@@ -345,17 +435,20 @@ mod tests {
             name: format!("Display name for {app_id}"),
             owner: owner.into(),
             declared_actions: vec![],
-            permissions: vec![],
+            input: arlen_permissions::InputPermissions::default(),
         }
     }
 
-    fn mk_with_perms(owner: &str, app_id: &str, permissions: Vec<&str>) -> AppInfo {
+    fn mk_with_input(owner: &str, app_id: &str, focused: bool, global: bool) -> AppInfo {
         AppInfo {
             app_id: app_id.into(),
             name: format!("Display name for {app_id}"),
             owner: owner.into(),
             declared_actions: vec![],
-            permissions: permissions.into_iter().map(String::from).collect(),
+            input: arlen_permissions::InputPermissions {
+                register_focused_bindings: focused,
+                register_global_bindings: global,
+            },
         }
     }
 
@@ -383,7 +476,7 @@ mod tests {
                 label: "Save".into(),
                 description: String::new(),
             }],
-            permissions: vec![],
+            input: arlen_permissions::InputPermissions::default(),
         });
         let info = r.by_owner(":1.10").unwrap();
         assert_eq!(info.name, "Editor v2");
@@ -392,23 +485,24 @@ mod tests {
 
     #[test]
     fn permissions_lookup() {
-        let a = mk_with_perms(":1.1", "org.a", vec!["register_global_bindings"]);
+        let a = mk_with_input(":1.1", "org.a", true, true);
         assert!(a.can_register_global_bindings());
+        assert!(a.can_register_focused_bindings());
 
-        let b = mk_with_perms(":1.2", "org.b", vec!["register_focused_bindings"]);
+        let b = mk_with_input(":1.2", "org.b", true, false);
         assert!(!b.can_register_global_bindings());
-
-        let c = mk(":1.3", "org.c");
-        assert!(!c.can_register_global_bindings());
+        assert!(b.can_register_focused_bindings());
     }
 
     #[test]
-    fn permissions_forward_compat_keeps_unknown() {
-        // The registry stores declared permissions verbatim; unknown
-        // strings must not be dropped so new compositor versions can
-        // consult them without clients needing to upgrade.
-        let info = mk_with_perms(":1.4", "org.d", vec!["future_permission"]);
-        assert_eq!(info.permissions, vec!["future_permission".to_string()]);
+    fn an_app_with_no_profile_gets_nothing() {
+        // The fail-closed half of the model: `register_app` builds this state
+        // when `load_profile` finds no file, and it must grant neither scope.
+        // Before this, permissions came from the caller's own argument, so an
+        // app with no profile could hand itself both.
+        let none = mk(":1.3", "org.c");
+        assert!(!none.can_register_global_bindings());
+        assert!(!none.can_register_focused_bindings());
     }
 
     #[test]
