@@ -4,8 +4,8 @@ use super::{
 };
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
-        shadow::ShadowShader, wayland::SurfaceRenderElement,
+        cursor::CursorState, element::AsGlowRenderer, shadow::ShadowShader,
+        wayland::SurfaceRenderElement,
     },
     shell::{
         element::{CosmicMappedKey, CosmicMappedKeyInner},
@@ -73,10 +73,9 @@ use std::{
     hash::Hash,
     sync::{
         Arc, Mutex, MutexGuard,
-        atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering},
     },
 };
-
 
 static NEXT_STACK_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -274,12 +273,21 @@ impl CosmicStack {
                 (new_idx, true)
             };
             p.scroll_to_focus.store(true, Ordering::SeqCst);
-            (p.stack_id, final_idx as u32, window.title(), window.app_id(), is_active)
+            (
+                p.stack_id,
+                final_idx as u32,
+                window.title(),
+                window.app_id(),
+                is_active,
+            )
         };
         // Notify shell about the new tab.
         let (stack_id, index, title, app_id, active) = tab_event;
         self.handle.insert_idle(move |state| {
-            state.common.shell_overlay_state.send_tab_added(stack_id, index, title, app_id, active);
+            state
+                .common
+                .shell_overlay_state
+                .send_tab_added(stack_id, index, title, app_id, active);
         });
     }
 
@@ -314,7 +322,10 @@ impl CosmicStack {
         };
         if let Some((stack_id, index)) = tab_event {
             self.handle.insert_idle(move |state| {
-                state.common.shell_overlay_state.send_tab_removed(stack_id, index);
+                state
+                    .common
+                    .shell_overlay_state
+                    .send_tab_removed(stack_id, index);
             });
         }
     }
@@ -350,7 +361,10 @@ impl CosmicStack {
         };
         if let Some((stack_id, index)) = tab_event {
             self.handle.insert_idle(move |state| {
-                state.common.shell_overlay_state.send_tab_removed(stack_id, index);
+                state
+                    .common
+                    .shell_overlay_state
+                    .send_tab_removed(stack_id, index);
             });
         }
         window
@@ -485,7 +499,8 @@ impl CosmicStack {
 
     pub fn handle_move(&self, direction: Direction) -> MoveResult {
         let loop_handle = self.handle.clone();
-        let result = {
+
+        {
             let p = self.p();
             let prev_idx = p.previous_index.lock().unwrap();
 
@@ -507,31 +522,27 @@ impl CosmicStack {
                     p.previous_keyboard.store(old, Ordering::SeqCst);
                     p.scroll_to_focus.store(true, Ordering::SeqCst);
                     MoveResult::Handled
+                } else if windows.len() == 1 {
+                    MoveResult::Default
                 } else {
-                    if windows.len() == 1 {
-                        MoveResult::Default
-                    } else {
-                        let window = windows.remove(active);
-                        if let Some(prev_idx) = prev_idx
-                            .map(|(_, idx)| idx)
-                            .filter(|idx| *idx < windows.len())
-                        {
-                            p.active.store(prev_idx, Ordering::SeqCst);
-                            p.scroll_to_focus.store(true, Ordering::SeqCst);
-                        } else if active == windows.len() {
-                            p.active.store(active - 1, Ordering::SeqCst);
-                            p.scroll_to_focus.store(true, Ordering::SeqCst);
-                        }
-                        window.try_force_undecorated(false);
-                        window.set_tiled(false);
-
-                        MoveResult::MoveOut(window, loop_handle)
+                    let window = windows.remove(active);
+                    if let Some(prev_idx) = prev_idx
+                        .map(|(_, idx)| idx)
+                        .filter(|idx| *idx < windows.len())
+                    {
+                        p.active.store(prev_idx, Ordering::SeqCst);
+                        p.scroll_to_focus.store(true, Ordering::SeqCst);
+                    } else if active == windows.len() {
+                        p.active.store(active - 1, Ordering::SeqCst);
+                        p.scroll_to_focus.store(true, Ordering::SeqCst);
                     }
+                    window.try_force_undecorated(false);
+                    window.set_tiled(false);
+
+                    MoveResult::MoveOut(window, loop_handle)
                 }
             }
-        };
-
-        result
+        }
     }
 
     pub fn active(&self) -> CosmicSurface {
@@ -569,7 +580,10 @@ impl CosmicStack {
         };
         if let Some((stack_id, index)) = tab_event {
             self.handle.insert_idle(move |state| {
-                state.common.shell_overlay_state.send_tab_activated(stack_id, index);
+                state
+                    .common
+                    .shell_overlay_state
+                    .send_tab_activated(stack_id, index);
             });
         }
     }
@@ -636,14 +650,14 @@ impl CosmicStack {
 
         let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
         stack_ui.or_else(|| {
-            active_window.focus_under(relative_pos, surface_type).map(
-                |(target, surface_offset)| {
+            active_window
+                .focus_under(relative_pos, surface_type)
+                .map(|(target, surface_offset)| {
                     (
                         target,
                         surface_offset.to_f64() + Point::from((0., TAB_HEIGHT as f64)),
                     )
-                },
-            )
+                })
         })
     }
 
@@ -795,8 +809,7 @@ impl CosmicStack {
         geo = geo.upscale(scale);
         geo.loc += location.to_f64().to_logical(output_scale);
 
-        let window_key =
-            CosmicMappedKey(CosmicMappedKeyInner::Stack(Arc::downgrade(&self.inner)));
+        let window_key = CosmicMappedKey(CosmicMappedKeyInner::Stack(Arc::downgrade(&self.inner)));
 
         Some(
             CosmicStackRenderElement::Shadow(ShadowShader::element(
@@ -816,7 +829,9 @@ impl CosmicStack {
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
-        max_size: Option<Size<i32, Logical>>,
+        // Unused here: it clamped the border geometry, and desktop-shell
+        // draws the chrome now. Kept so the signature matches upstream's.
+        _max_size: Option<Size<i32, Logical>>,
         scale: Scale<f64>,
         alpha: f32,
         scanout_override: Option<bool>,
@@ -859,14 +874,7 @@ impl CosmicStack {
                     .map(|x| x.round() as u8)
             });
 
-            let mut geo = SpaceElement::geometry(&windows[active]).to_f64();
-            geo.loc += location.to_f64().to_logical(scale);
-            geo.size.h += TAB_HEIGHT as f64;
-            if let Some(max_size) = max_size {
-                geo.size = geo.size.clamp(Size::default(), max_size.to_f64());
-            }
-
-            let window_key =
+            let _window_key =
                 CosmicMappedKey(CosmicMappedKeyInner::Stack(Arc::downgrade(&self.inner)));
 
             // No border: the window chrome is desktop-shell's job through the
@@ -904,12 +912,10 @@ impl CosmicStack {
         if let Some(dragged_out) = {
             let p = self.p();
             p.potential_drag.lock().unwrap().take()
-        }
-            && let Some(surface) = {
-                let p = self.p();
-                p.windows.lock().unwrap().get(dragged_out).cloned()
-            }
-        {
+        } && let Some(surface) = {
+            let p = self.p();
+            p.windows.lock().unwrap().get(dragged_out).cloned()
+        } {
             let seat = seat.clone();
             surface.try_force_undecorated(false);
             surface.send_configure();
@@ -1227,7 +1233,8 @@ impl PointerTarget<State> for CosmicStack {
         // far enough between the two clicks to look like an
         // intentional drag. See seats::DoubleClickTracker for the
         // distance threshold.
-        seat.double_click_tracker().invalidate_on_motion(event.location);
+        seat.double_click_tracker()
+            .invalidate_on_motion(event.location);
 
         let event = event.clone();
         {
@@ -1287,7 +1294,8 @@ impl PointerTarget<State> for CosmicStack {
                         let serial = event.serial;
                         let active_surface = {
                             let p = self.p();
-                            let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                            let window =
+                                &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
                             window.wl_surface().map(Cow::into_owned)
                         };
                         if let Some(surface) = active_surface {
@@ -1304,7 +1312,8 @@ impl PointerTarget<State> for CosmicStack {
                                             .loc
                                             .to_global(output)
                                     } else if let Some(workspace) = shell.space_for(&mapped) {
-                                        let Some(elem_geo) = workspace.element_geometry(&mapped) else {
+                                        let Some(elem_geo) = workspace.element_geometry(&mapped)
+                                        else {
                                             return;
                                         };
                                         elem_geo.loc.to_global(&workspace.output)
@@ -1368,7 +1377,10 @@ impl PointerTarget<State> for CosmicStack {
                             tracing::info!(
                                 "DCLK-DEBUG CosmicStack header press time={} \
                                  button=0x{:x} target_id={} double={}",
-                                event.time.millis(), event.button, target_id, is_double
+                                event.time.millis(),
+                                event.button,
+                                target_id,
+                                is_double
                             );
                             if is_double {
                                 let seat = seat.clone();
@@ -1503,12 +1515,10 @@ impl PointerTarget<State> for CosmicStack {
         if let Some(dragged_out) = {
             let p = self.p();
             p.potential_drag.lock().unwrap().take()
-        }
-            && let Some(surface) = {
-                let p = self.p();
-                p.windows.lock().unwrap().get(dragged_out).cloned()
-            }
-        {
+        } && let Some(surface) = {
+            let p = self.p();
+            p.windows.lock().unwrap().get(dragged_out).cloned()
+        } {
             let seat = seat.clone();
             surface.try_force_undecorated(false);
             surface.send_configure();

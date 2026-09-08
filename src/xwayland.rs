@@ -883,8 +883,13 @@ impl XwmHandler for State {
                     tracing::info!(
                         "X11-DEBUG HEADER show surface_id={} app_id={:?} title={:?} \
                          x={} y={} w={} h={}",
-                        payload.surface_id, app_id, payload.title,
-                        payload.x, payload.y, payload.width, payload.height,
+                        payload.surface_id,
+                        app_id,
+                        payload.title,
+                        payload.x,
+                        payload.y,
+                        payload.width,
+                        payload.height,
                     );
                     // Snapshot first (borrows `payload`), then the
                     // send_* call which moves `payload.title`.
@@ -892,11 +897,14 @@ impl XwmHandler for State {
                     let surface_id = payload.surface_id;
                     self.common.shell_overlay_state.send_window_header_show(
                         payload.surface_id,
-                        payload.x, payload.y,
-                        payload.width, payload.height,
+                        payload.x,
+                        payload.y,
+                        payload.width,
+                        payload.height,
                         payload.title,
                         payload.activated,
-                        true, true,
+                        true,
+                        true,
                         payload.stack_id,
                     );
                     // Keep the refresh-diff cache consistent so the

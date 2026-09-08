@@ -1,7 +1,7 @@
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
-        shadow::ShadowShader, wayland::SurfaceRenderElement,
+        cursor::CursorState, element::AsGlowRenderer, shadow::ShadowShader,
+        wayland::SurfaceRenderElement,
     },
     shell::{
         element::{CosmicMappedKey, CosmicMappedKeyInner},
@@ -40,7 +40,7 @@ use smithay::{
             PointerTarget, RelativeMotionEvent,
         },
         tablet::{
-            Tablet, TabletSeatTrait,
+            Tablet,
             tool::{
                 AxisFrame as ToolAxisFrame, ButtonEvent as ToolButtonEvent,
                 DownEvent as ToolDownEvent, MotionEvent as ToolMotionEvent, TabletToolTarget,
@@ -212,6 +212,11 @@ impl Focus {
         }
     }
 
+    /// # Safety
+    ///
+    /// `value` must be a discriminant this enum actually has: it is
+    /// transmuted, not checked. Zero is the one value handled here, because it
+    /// is the "no focus" sentinel the atomic starts at.
     pub unsafe fn from_u8(value: u8) -> Option<Focus> {
         match value {
             0 => None,
@@ -259,9 +264,7 @@ impl CosmicWindowInternal {
         // `clip_floating_windows` is enabled (rectangular clipping
         // intent), which would otherwise incorrectly suppress the
         // SSD reservation on floating SSD apps when the toggle is off.
-        if self.is_tiled()
-            && !crate::shell::tiled_headers_enabled_global()
-        {
+        if self.is_tiled() && !crate::shell::tiled_headers_enabled_global() {
             return false;
         }
         true
@@ -535,8 +538,7 @@ impl CosmicWindow {
         let _appearance = appearance;
         drop(_appearance);
 
-        let window_key =
-            CosmicMappedKey(CosmicMappedKeyInner::Window(Arc::downgrade(&self.inner)));
+        let window_key = CosmicMappedKey(CosmicMappedKeyInner::Window(Arc::downgrade(&self.inner)));
 
         Some(
             CosmicWindowRenderElement::Shadow(ShadowShader::element(
@@ -557,7 +559,9 @@ impl CosmicWindow {
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
-        max_size: Option<Size<i32, Logical>>,
+        // Unused here: it clamped the border geometry, and desktop-shell
+        // draws the chrome now. Kept so the signature matches upstream's.
+        _max_size: Option<Size<i32, Logical>>,
         scale: Scale<f64>,
         alpha: f32,
         scanout_override: Option<bool>,
@@ -603,18 +607,6 @@ impl CosmicWindow {
         } else {
             location
         };
-
-        let mut geo = {
-            let p = self.p();
-            SpaceElement::geometry(&p.window).to_f64()
-        };
-        geo.loc += location.to_f64().to_logical(scale);
-        if has_ssd {
-            geo.size.h += SSD_HEIGHT as f64;
-        }
-        if let Some(max_size) = max_size {
-            geo.size = geo.size.clamp(Size::default(), max_size.to_f64());
-        }
 
         // No border: desktop-shell owns the window chrome over the shell
         // overlay protocol. The SSD radii adjustment is not chrome, so it stays.
@@ -680,7 +672,9 @@ impl CosmicWindow {
         &self,
         location: Point<f64, Logical>,
     ) -> Option<crate::backend::render::window_header::HeaderButton> {
-        use crate::backend::render::window_header::{ButtonVisibility, HeaderVisualState, layout_buttons};
+        use crate::backend::render::window_header::{
+            ButtonVisibility, HeaderVisualState, layout_buttons,
+        };
         let width = {
             let p = self.p();
             if !p.has_ssd(false) {
@@ -704,7 +698,10 @@ impl CosmicWindow {
             width,
             activated: false,
             title: String::new(),
-            buttons: ButtonVisibility { has_minimize: true, has_maximize: true },
+            buttons: ButtonVisibility {
+                has_minimize: true,
+                has_maximize: true,
+            },
             interaction: crate::backend::render::window_header::ButtonInteraction::Idle,
             scale: 1.0,
             focused_button: None,
@@ -727,10 +724,7 @@ impl CosmicWindow {
     /// Press-tracking is handled separately in `button` — this
     /// function only touches the Idle ↔ Hover transition, never
     /// stomps a Pressed state.
-    pub(crate) fn update_header_button_interaction(
-        &self,
-        location: Point<f64, Logical>,
-    ) {
+    pub(crate) fn update_header_button_interaction(&self, location: Point<f64, Logical>) {
         use crate::backend::render::window_header::ButtonInteraction;
         let current_focus = self.p().current_focus();
         if !matches!(current_focus, Some(Focus::Header)) {
@@ -768,7 +762,8 @@ impl CosmicWindow {
         if *guard != prev {
             tracing::debug!(
                 "HEADER-BTN-DEBUG hover transition: {:?} -> {:?}",
-                prev, *guard
+                prev,
+                *guard
             );
         }
     }
@@ -848,9 +843,7 @@ impl CosmicWindow {
         _renderer: &mut R,
         physical_location: Point<i32, Physical>,
         output_scale: Scale<f64>,
-    ) -> Option<
-        smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement<R>,
-    >
+    ) -> Option<smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement<R>>
     where
         R: AsGlowRenderer + smithay::backend::renderer::ImportMem,
         R::TextureId: Send + Clone + 'static,
@@ -879,7 +872,10 @@ impl CosmicWindow {
             // future refinement can gate these on
             // xdg_toplevel.wm_capabilities but the shell already
             // treats them as always-on so stay consistent.
-            let buttons = ButtonVisibility { has_minimize: true, has_maximize: true };
+            let buttons = ButtonVisibility {
+                has_minimize: true,
+                has_maximize: true,
+            };
             (title, activated, width, interaction, buttons)
         };
         if width_logical <= 0 {
@@ -932,20 +928,18 @@ impl CosmicWindow {
         // and leaving it short of the strip. An explicit logical size
         // renders the buffer to exactly the strip, scale-correct at any
         // fractional scale.
-        let logical_size =
-            Size::<i32, Logical>::from((width_logical, SSD_HEIGHT));
-        let element =
-            smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement::from_buffer(
-                _renderer,
-                (phys.x, phys.y),
-                &buffer,
-                None,
-                None,
-                Some(logical_size),
-                smithay::backend::renderer::element::Kind::Unspecified,
-            )
-            .ok();
-        element
+        let logical_size = Size::<i32, Logical>::from((width_logical, SSD_HEIGHT));
+
+        smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement::from_buffer(
+            _renderer,
+            (phys.x, phys.y),
+            &buffer,
+            None,
+            None,
+            Some(logical_size),
+            smithay::backend::renderer::element::Kind::Unspecified,
+        )
+        .ok()
     }
 
     /// Returns the minimum size of the window including SSD header.
@@ -1005,8 +999,7 @@ impl CosmicWindow {
         let clip = ((!is_tiled && appearance.clip_floating_windows)
             || (is_tiled && appearance.clip_tiled_windows))
             && !p.window.is_maximized(false);
-        let round =
-            (!is_tiled || appearance.clip_tiled_windows) && !p.window.is_maximized(false);
+        let round = (!is_tiled || appearance.clip_tiled_windows) && !p.window.is_maximized(false);
         let radii = if round {
             {
                 crate::theme::arlen_theme()
@@ -1184,7 +1177,8 @@ impl PointerTarget<State> for CosmicWindow {
         // Disarm the double-click tracker if the pointer has moved
         // far enough to look like an intentional drag between clicks.
         // Cheap no-op when the tracker has no baseline.
-        seat.double_click_tracker().invalidate_on_motion(event.location);
+        seat.double_click_tracker()
+            .invalidate_on_motion(event.location);
 
         // Feature 4-C: update the window-control button interaction
         // state so the next frame's header rasterisation picks the
@@ -1223,7 +1217,9 @@ impl PointerTarget<State> for CosmicWindow {
         let current_focus = self.p().current_focus();
         tracing::info!(
             "CosmicWindow::button focus={:?} button=0x{:x} state={:?}",
-            current_focus, event.button, event.state,
+            current_focus,
+            event.button,
+            event.state,
         );
         match current_focus {
             Some(Focus::Header) => {
@@ -1233,53 +1229,55 @@ impl PointerTarget<State> for CosmicWindow {
                 // Release of the right or middle button is ignored.
                 if event.state == smithay::backend::input::ButtonState::Released
                     && event.button == 0x110
+                    && let Some(button) = self.finalize_header_button_release()
                 {
-                    if let Some(button) = self.finalize_header_button_release() {
-                        use crate::backend::render::window_header::HeaderButton;
-                        tracing::info!(
-                            "HEADER-BTN-DEBUG release fired={:?} (compositor-rendered)",
-                            button
-                        );
-                        let seat = seat.clone();
-                        let surface_opt = {
-                            let p = self.p();
-                            p.window.wl_surface().map(Cow::into_owned)
-                        };
-                        if let Some(surface) = surface_opt {
-                            self.handle.insert_idle(move |state| {
-                                let mapped = {
-                                    let shell_r = state.common.shell.read();
-                                    shell_r.element_for_surface(&surface).cloned()
-                                };
-                                let Some(mapped) = mapped else { return };
-                                match button {
-                                    HeaderButton::Minimize => {
-                                        let info = state
-                                            .common
-                                            .shell
-                                            .write()
-                                            .minimize_request(&mapped.active_window());
-                                        if let Some(info) = info {
-                                            state.common.event_bus.emit_window_minimized(
-                                                &info.window_id, &info.app_id,
-                                                &info.title, &info.workspace_id,
-                                            );
-                                        }
-                                    }
-                                    HeaderButton::Maximize => {
-                                        state.common.shell.write().maximize_toggle(
-                                            &mapped, &seat,
-                                            &state.common.event_loop_handle,
+                    use crate::backend::render::window_header::HeaderButton;
+                    tracing::info!(
+                        "HEADER-BTN-DEBUG release fired={:?} (compositor-rendered)",
+                        button
+                    );
+                    let seat = seat.clone();
+                    let surface_opt = {
+                        let p = self.p();
+                        p.window.wl_surface().map(Cow::into_owned)
+                    };
+                    if let Some(surface) = surface_opt {
+                        self.handle.insert_idle(move |state| {
+                            let mapped = {
+                                let shell_r = state.common.shell.read();
+                                shell_r.element_for_surface(&surface).cloned()
+                            };
+                            let Some(mapped) = mapped else { return };
+                            match button {
+                                HeaderButton::Minimize => {
+                                    let info = state
+                                        .common
+                                        .shell
+                                        .write()
+                                        .minimize_request(&mapped.active_window());
+                                    if let Some(info) = info {
+                                        state.common.event_bus.emit_window_minimized(
+                                            &info.window_id,
+                                            &info.app_id,
+                                            &info.title,
+                                            &info.workspace_id,
                                         );
                                     }
-                                    HeaderButton::Close => {
-                                        mapped.active_window().close();
-                                    }
                                 }
-                            });
-                        }
-                        return;
+                                HeaderButton::Maximize => {
+                                    state.common.shell.write().maximize_toggle(
+                                        &mapped,
+                                        &seat,
+                                        &state.common.event_loop_handle,
+                                    );
+                                }
+                                HeaderButton::Close => {
+                                    mapped.active_window().close();
+                                }
+                            }
+                        });
                     }
+                    return;
                 }
 
                 // Left press: drag start OR, if this is the second
@@ -1325,7 +1323,10 @@ impl PointerTarget<State> for CosmicWindow {
                         tracing::info!(
                             "DCLK-DEBUG CosmicWindow header press time={} \
                              button=0x{:x} target_id={} double={}",
-                            event.time.millis(), event.button, target_id, is_double
+                            event.time.millis(),
+                            event.button,
+                            target_id,
+                            is_double
                         );
                         if is_double {
                             let seat = seat.clone();
@@ -1387,9 +1388,9 @@ impl PointerTarget<State> for CosmicWindow {
                                     if matches!(grab.grab_type(), GrabType::Touch) {
                                         seat.get_touch().unwrap().set_grab(state, grab, serial);
                                     } else {
-                                        seat.get_pointer().unwrap().set_grab(
-                                            state, grab, serial, focus,
-                                        );
+                                        seat.get_pointer()
+                                            .unwrap()
+                                            .set_grab(state, grab, serial, focus);
                                     }
                                 }
                             });

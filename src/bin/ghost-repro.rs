@@ -99,9 +99,16 @@ impl Dispatch<WlRegistry, ()> for App {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        if let wl_registry::Event::Global { name, interface, version } = event {
+        if let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        {
             match interface.as_str() {
-                "wl_compositor" => state.compositor = Some(registry.bind(name, version.min(4), qh, ())),
+                "wl_compositor" => {
+                    state.compositor = Some(registry.bind(name, version.min(4), qh, ()))
+                }
                 "wl_shm" => state.shm = Some(registry.bind(name, version.min(1), qh, ())),
                 "xdg_wm_base" => state.wm_base = Some(registry.bind(name, version.min(2), qh, ())),
                 "zwlr_layer_shell_v1" => {
@@ -293,8 +300,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
 
-    let mut state =
-        App { compositor: None, shm: None, wm_base: None, layer_shell: None, configured: false };
+    let mut state = App {
+        compositor: None,
+        shm: None,
+        wm_base: None,
+        layer_shell: None,
+        configured: false,
+    };
     let _registry = conn.display().get_registry(&qh, ());
     queue.roundtrip(&mut state)?;
 

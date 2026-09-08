@@ -81,7 +81,11 @@ impl StaticBinding {
 
     /// Try to convert an opaque accelerator string (`"Super+Shift+H"`)
     /// into a [`StaticBinding`]. Returns `None` for unparseable input.
-    pub fn from_accelerator(accelerator: &str, action: String, scope: BindingScope) -> Option<Self> {
+    pub fn from_accelerator(
+        accelerator: &str,
+        action: String,
+        scope: BindingScope,
+    ) -> Option<Self> {
         let (modifiers, key) = parse_keybinding(accelerator)?;
         Some(Self {
             modifiers,
@@ -152,11 +156,7 @@ impl BindingResolver {
 
     /// Look up `(modifiers, key)` against all sources and return the
     /// highest-precedence match.
-    pub fn resolve(
-        &self,
-        modifiers: &KeyBindingModifiers,
-        key: &str,
-    ) -> Option<ResolvedBinding> {
+    pub fn resolve(&self, modifiers: &KeyBindingModifiers, key: &str) -> Option<ResolvedBinding> {
         // 1. Static (already sorted by scope).
         {
             let statics = self.static_bindings.read().unwrap();
@@ -178,22 +178,21 @@ impl BindingResolver {
             if entry.scope != "app_global" {
                 continue;
             }
-            if let Some(parsed) = parse_keybinding(&entry.binding) {
-                if parsed.0 == *modifiers && parsed.1.eq_ignore_ascii_case(key) {
-                    return Some(ResolvedBinding {
-                        action: entry.action.clone(),
-                        scope: BindingScope::AppGlobal,
-                        owner: Some(entry.owner.clone()),
-                    });
-                }
+            if let Some(parsed) = parse_keybinding(&entry.binding)
+                && parsed.0 == *modifiers
+                && parsed.1.eq_ignore_ascii_case(key)
+            {
+                return Some(ResolvedBinding {
+                    action: entry.action.clone(),
+                    scope: BindingScope::AppGlobal,
+                    owner: Some(entry.owner.clone()),
+                });
             }
         }
 
         // 3. Dynamic: AppFocused — only fires when the focused app
         //    matches the registration's declared app_id.
-        let Some(focused_app) = focused else {
-            return None;
-        };
+        let focused_app = focused?;
         for entry in dynamic.by_owner.values().flatten() {
             if entry.scope != "app_focused" {
                 continue;
@@ -201,14 +200,15 @@ impl BindingResolver {
             if entry.app_id != focused_app {
                 continue;
             }
-            if let Some(parsed) = parse_keybinding(&entry.binding) {
-                if parsed.0 == *modifiers && parsed.1.eq_ignore_ascii_case(key) {
-                    return Some(ResolvedBinding {
-                        action: entry.action.clone(),
-                        scope: BindingScope::AppFocused,
-                        owner: Some(entry.owner.clone()),
-                    });
-                }
+            if let Some(parsed) = parse_keybinding(&entry.binding)
+                && parsed.0 == *modifiers
+                && parsed.1.eq_ignore_ascii_case(key)
+            {
+                return Some(ResolvedBinding {
+                    action: entry.action.clone(),
+                    scope: BindingScope::AppFocused,
+                    owner: Some(entry.owner.clone()),
+                });
             }
         }
 
@@ -240,18 +240,19 @@ impl BindingResolver {
 
         let dynamic = self.dynamic.lock().unwrap();
         for entry in dynamic.by_owner.values().flatten() {
-            if let Some(parsed) = parse_keybinding(&entry.binding) {
-                if parsed.0 == *modifiers && parsed.1.eq_ignore_ascii_case(key) {
-                    let scope = match entry.scope.as_str() {
-                        "app_global" => BindingScope::AppGlobal,
-                        _ => BindingScope::AppFocused,
-                    };
-                    out.push(ResolvedBinding {
-                        action: entry.action.clone(),
-                        scope,
-                        owner: Some(entry.owner.clone()),
-                    });
-                }
+            if let Some(parsed) = parse_keybinding(&entry.binding)
+                && parsed.0 == *modifiers
+                && parsed.1.eq_ignore_ascii_case(key)
+            {
+                let scope = match entry.scope.as_str() {
+                    "app_global" => BindingScope::AppGlobal,
+                    _ => BindingScope::AppFocused,
+                };
+                out.push(ResolvedBinding {
+                    action: entry.action.clone(),
+                    scope,
+                    owner: Some(entry.owner.clone()),
+                });
             }
         }
         out
@@ -468,12 +469,9 @@ mod tests {
         // parse_keybinding treats any trailing token as the key name,
         // so a single-word input yields no modifiers + the word as key.
         // Exercise that explicit contract rather than asserting `None`.
-        let bare = StaticBinding::from_accelerator(
-            "Minus",
-            "scratchpad".into(),
-            BindingScope::User,
-        )
-        .unwrap();
+        let bare =
+            StaticBinding::from_accelerator("Minus", "scratchpad".into(), BindingScope::User)
+                .unwrap();
         assert_eq!(bare.modifiers, mods(false, false, false, false));
         assert_eq!(bare.key, "Minus");
     }

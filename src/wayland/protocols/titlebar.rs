@@ -4,15 +4,14 @@
 /// compositor decides rendering based on window mode.
 ///
 /// See `docs/architecture/titlebar-protocol.md`.
-
 use std::collections::HashMap;
 
 use smithay::reexports::wayland_server::{
-    backend::GlobalId, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, backend::GlobalId,
 };
 
-pub use generated::arlen_titlebar_v1;
 pub use generated::arlen_titlebar_manager_v1;
+pub use generated::arlen_titlebar_v1;
 
 // ---------------------------------------------------------------------------
 // Scanner bindings
@@ -25,16 +24,12 @@ mod generated {
     pub mod __interfaces {
         use smithay::reexports::wayland_server::protocol::__interfaces::*;
         use wayland_backend;
-        wayland_scanner::generate_interfaces!(
-            "resources/protocols/arlen-titlebar-v1.xml"
-        );
+        wayland_scanner::generate_interfaces!("resources/protocols/arlen-titlebar-v1.xml");
     }
 
     use self::__interfaces::*;
 
-    wayland_scanner::generate_server_code!(
-        "resources/protocols/arlen-titlebar-v1.xml"
-    );
+    wayland_scanner::generate_server_code!("resources/protocols/arlen-titlebar-v1.xml");
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +89,9 @@ pub struct ButtonInfo {
 /// Global state for the titlebar protocol.
 #[derive(Debug)]
 pub struct TitlebarManagerState {
-    global: GlobalId,
+    /// Held to keep the global registered - dropping it removes the
+    /// protocol from the registry. Never read, by design.
+    _global: GlobalId,
     /// Per-surface titlebar state.
     pub surfaces: HashMap<u64, TitlebarState>,
     /// Per-surface protocol resources for sending events back to the client.
@@ -112,7 +109,7 @@ impl TitlebarManagerState {
     {
         let global = display.create_global::<crate::state::State, generated::arlen_titlebar_manager_v1::ArlenTitlebarManagerV1, ()>(1, ());
         Self {
-            global,
+            _global: global,
             surfaces: HashMap::new(),
             resources: HashMap::new(),
         }
@@ -253,10 +250,11 @@ where
                 // Ensure state entry exists.
                 mgr.get_or_create(surface_id);
                 let resource = data_init.init(id, surface_id);
-                state.titlebar_manager_state().register_resource(surface_id, resource);
+                state
+                    .titlebar_manager_state()
+                    .register_resource(surface_id, resource);
             }
             generated::arlen_titlebar_manager_v1::Request::Destroy => {}
-            _ => {}
         }
     }
 }
@@ -265,12 +263,9 @@ where
 // Dispatch: arlen_titlebar_v1 (per-surface requests)
 // ---------------------------------------------------------------------------
 
-impl<D> Dispatch<generated::arlen_titlebar_v1::ArlenTitlebarV1, u64, D>
-    for TitlebarManagerState
+impl<D> Dispatch<generated::arlen_titlebar_v1::ArlenTitlebarV1, u64, D> for TitlebarManagerState
 where
-    D: Dispatch<generated::arlen_titlebar_v1::ArlenTitlebarV1, u64>
-        + TitlebarHandler
-        + 'static,
+    D: Dispatch<generated::arlen_titlebar_v1::ArlenTitlebarV1, u64> + TitlebarHandler + 'static,
 {
     fn request(
         state: &mut D,
@@ -337,9 +332,6 @@ where
                     tb.search_mode = enabled != 0;
                 }
                 generated::arlen_titlebar_v1::Request::Destroy => {
-                    changed = false;
-                }
-                _ => {
                     changed = false;
                 }
             }

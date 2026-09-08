@@ -9,12 +9,8 @@ use smithay::{
 };
 
 use crate::{
-
     state::State,
-    utils::{
-        prelude::*,
-        tween::EasePoint,
-    },
+    utils::{prelude::*, tween::EasePoint},
 };
 
 use super::ANIMATION_DURATION;
@@ -139,7 +135,7 @@ impl OutputZoomState {
         self.level == 1. && self.previous_level.is_none()
     }
 
-    pub fn update(&mut self, level: f64, animate: bool, movement: ZoomMovement, _increment: u32) {
+    pub fn update(&mut self, level: f64, animate: bool, _movement: ZoomMovement, _increment: u32) {
         self.previous_level = animate.then_some((self.animating_level(), Instant::now()));
         self.level = level;
     }
@@ -279,5 +275,4 @@ impl ZoomState {
     ) -> Option<(super::focus::target::PointerFocusTarget, Point<f64, Global>)> {
         None
     }
-
 }

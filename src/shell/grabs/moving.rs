@@ -227,8 +227,8 @@ impl MoveGrabState {
         };
 
         let gaps = (lt.wm.gaps_inner as i32, lt.wm.gaps_outer as i32);
-        let thickness = self.indicator_thickness.max(1);
-        let lt_radius = lt.effective_window_corners().map(|r| r.round() as u8);
+        let _thickness = self.indicator_thickness.max(1);
+        let _lt_radius = lt.effective_window_corners().map(|r| r.round() as u8);
 
         if let (Some(t), ManagedLayer::Floating) = (&self.snapping_zone, self.previous)
             && &self.cursor_output == output
@@ -237,8 +237,8 @@ impl MoveGrabState {
             // alpha mirrors the shell's `Skeleton` primitive, so the compositor
             // and the in-shell visual language agree. The outline keeps the
             // accent-tinted hint colour for the rim.
-            let base_color = lt.color.fg_primary;
-            let overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
+            let _base_color = lt.color.fg_primary;
+            let _overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
         };
 
         let mut lower_elements = SmallVec::<[CosmicMappedRenderElement<R>; 4]>::new_const();
@@ -515,17 +515,18 @@ impl MoveGrab {
             if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                 if indicator_location.is_some() {
                     state.common.shell_overlay_state.send_indicator_show(
-                        1, 0, 0, String::new(), String::new(),
+                        1,
+                        0,
+                        0,
+                        String::new(),
+                        String::new(),
                     );
                 } else {
                     state.common.shell_overlay_state.send_indicator_hide(1);
                 }
                 grab_state.stacking_indicator = indicator_location.map(|geo| {
                     let size = geo.size.as_logical();
-                    let element = StackHover::new(
-                        state.common.event_loop_handle.clone(),
-                        size,
-                    );
+                    let element = StackHover::new(state.common.event_loop_handle.clone(), size);
                     for output in &self.window_outputs {
                         element.output_enter(output);
                     }
@@ -721,7 +722,12 @@ impl PointerGrab<State> for MoveGrab {
             .seat
             .user_data()
             .get::<SeatMoveGrabState>()
-            .and_then(|s| s.lock().unwrap().as_ref().map(|g| g.stacking_indicator.is_some()))
+            .and_then(|s| {
+                s.lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|g| g.stacking_indicator.is_some())
+            })
             .unwrap_or(false);
         if has_indicator {
             data.common.shell_overlay_state.send_indicator_hide(1);
@@ -805,7 +811,12 @@ impl TouchGrab<State> for MoveGrab {
             .seat
             .user_data()
             .get::<SeatMoveGrabState>()
-            .and_then(|s| s.lock().unwrap().as_ref().map(|g| g.stacking_indicator.is_some()))
+            .and_then(|s| {
+                s.lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|g| g.stacking_indicator.is_some())
+            })
             .unwrap_or(false);
         if has_indicator {
             data.common.shell_overlay_state.send_indicator_hide(1);
@@ -1016,10 +1027,7 @@ impl Drop for MoveGrab {
         // header back to the low-frequency update path.
         if let Some(sid) = drag_surface_id {
             let _ = self.evlh.0.insert_idle(move |state| {
-                tracing::info!(
-                    "ATTACH-DEBUG drag_end surface_id={}",
-                    sid
-                );
+                tracing::info!("ATTACH-DEBUG drag_end surface_id={}", sid);
                 state.common.shell_overlay_state.send_window_drag_end(sid);
             });
         }
@@ -1080,9 +1088,7 @@ impl Drop for MoveGrab {
                                 .tiling_layer
                                 .toplevel_element_under(cursor_local, &seat)
                                 .and_then(|focus| match focus {
-                                    KeyboardFocusTarget::Element(m)
-                                        if m != grab_state.window =>
-                                    {
+                                    KeyboardFocusTarget::Element(m) if m != grab_state.window => {
                                         Some(m)
                                     }
                                     _ => None,

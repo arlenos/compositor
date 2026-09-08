@@ -8,12 +8,12 @@ use std::time::Duration;
 use wayland_client::{
     Connection, Dispatch, QueueHandle,
     protocol::{
+        wl_buffer::WlBuffer,
         wl_compositor::WlCompositor,
         wl_registry::{self, WlRegistry},
         wl_shm::{self, WlShm},
         wl_shm_pool::WlShmPool,
         wl_surface::WlSurface,
-        wl_buffer::WlBuffer,
     },
 };
 use wayland_protocols::xdg::shell::client::{
@@ -57,7 +57,12 @@ impl Dispatch<WlRegistry, ()> for AppState {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        if let wl_registry::Event::Global { name, interface, version } = event {
+        if let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        {
             match interface.as_str() {
                 "wl_compositor" => {
                     state.compositor = Some(registry.bind(name, version.min(4), qh, ()));
@@ -75,23 +80,63 @@ impl Dispatch<WlRegistry, ()> for AppState {
 }
 
 impl Dispatch<WlCompositor, ()> for AppState {
-    fn event(_: &mut Self, _: &WlCompositor, _: wayland_client::protocol::wl_compositor::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &WlCompositor,
+        _: wayland_client::protocol::wl_compositor::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 
 impl Dispatch<WlShm, ()> for AppState {
-    fn event(_: &mut Self, _: &WlShm, _: wl_shm::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &WlShm,
+        _: wl_shm::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 
 impl Dispatch<WlShmPool, ()> for AppState {
-    fn event(_: &mut Self, _: &WlShmPool, _: wayland_client::protocol::wl_shm_pool::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &WlShmPool,
+        _: wayland_client::protocol::wl_shm_pool::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 
 impl Dispatch<WlBuffer, ()> for AppState {
-    fn event(_: &mut Self, _: &WlBuffer, _: wayland_client::protocol::wl_buffer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &WlBuffer,
+        _: wayland_client::protocol::wl_buffer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 
 impl Dispatch<WlSurface, ()> for AppState {
-    fn event(_: &mut Self, _: &WlSurface, _: wayland_client::protocol::wl_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &WlSurface,
+        _: wayland_client::protocol::wl_surface::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 
 impl Dispatch<XdgWmBase, ()> for AppState {
@@ -152,9 +197,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initial roundtrip to receive globals
     event_queue.roundtrip(&mut state)?;
 
-    let compositor = state.compositor.as_ref().expect("wl_compositor not available").clone();
+    let compositor = state
+        .compositor
+        .as_ref()
+        .expect("wl_compositor not available")
+        .clone();
     let shm = state.shm.as_ref().expect("wl_shm not available").clone();
-    let xdg_wm_base = state.xdg_wm_base.as_ref().expect("xdg_wm_base not available").clone();
+    let xdg_wm_base = state
+        .xdg_wm_base
+        .as_ref()
+        .expect("xdg_wm_base not available")
+        .clone();
 
     // Create surface and xdg_toplevel
     let surface = compositor.create_surface(&qh, ());
@@ -181,12 +234,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let tmp = tempfile::tempfile()?;
     tmp.set_len(size as u64)?;
-    let pool = shm.create_pool(
-        std::os::unix::io::AsFd::as_fd(&tmp),
-        size as i32,
-        &qh,
-        (),
-    );
+    let pool = shm.create_pool(std::os::unix::io::AsFd::as_fd(&tmp), size as i32, &qh, ());
     let buffer = pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, &qh, ());
 
     surface.attach(Some(&buffer), 0, 0);

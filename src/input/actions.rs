@@ -23,9 +23,9 @@ use smithay::{
 };
 #[cfg(not(feature = "debug"))]
 use tracing::info;
-use tracing::{error, warn};
+use tracing::warn;
 
-use std::{os::unix::process::CommandExt, thread};
+use std::os::unix::process::CommandExt;
 
 use super::gestures;
 
@@ -195,7 +195,10 @@ impl State {
             .filter(|s| !s.is_empty())
             .collect();
         if layouts.len() < 2 {
-            warn!("keyboard_layout switch ignored: only {} layout(s) loaded", layouts.len());
+            warn!(
+                "keyboard_layout switch ignored: only {} layout(s) loaded",
+                layouts.len()
+            );
             return;
         }
         let mut variants: Vec<String> = self
@@ -246,8 +249,7 @@ impl State {
 
         let value = self.common.config.cosmic_conf.xkb_config.clone();
         if let Some(keyboard) = seat.get_keyboard() {
-            if let Err(err) =
-                keyboard.set_xkb_config(self, crate::config::xkb_config_to_wl(&value))
+            if let Err(err) = keyboard.set_xkb_config(self, crate::config::xkb_config_to_wl(&value))
             {
                 warn!(?err, "failed to apply rotated xkb layout");
             } else {
@@ -1178,11 +1180,7 @@ impl State {
                     // override — the field-level precedence in
                     // `apply_runtime_state_overrides` will then
                     // replace any TOML default on the next load.
-                    self.common
-                        .config
-                        .dynamic_conf
-                        .runtime_state_mut()
-                        .autotile = Some(autotile);
+                    self.common.config.dynamic_conf.runtime_state_mut().autotile = Some(autotile);
                     // Notify shell of mode change.
                     let mode = if autotile {
                         crate::shell::LayoutMode::Tiling
@@ -1213,7 +1211,7 @@ impl State {
                     // don't touch state.toml — saves a write per
                     // unpinned-workspace toggle.
                     if was_pinned {
-                        let mut shell = self.common.shell.write();
+                        let shell = self.common.shell.write();
                         shell.workspaces.persist(&mut self.common.config);
                     }
                     self.common

@@ -1,6 +1,8 @@
 use cosmic_settings_config::shortcuts::State as KeyState;
+use cosmic_settings_config::shortcuts::action::{
+    Direction, FocusDirection, ResizeDirection, ResizeEdge,
+};
 use cosmic_settings_config::shortcuts::{self, Modifiers};
-use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection, ResizeEdge};
 use smithay::input::keyboard::ModifiersState;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -15,11 +17,7 @@ pub enum Action {
 // Behaviors which are internally defined and emitted.
 pub enum PrivateAction {
     Escape,
-    Resizing(
-        ResizeDirection,
-        ResizeEdge,
-        shortcuts::State,
-    ),
+    Resizing(ResizeDirection, ResizeEdge, shortcuts::State),
     /// Toggle the scratchpad (show/hide/cycle). Handler in Phase 3.
     ScratchpadToggle,
     /// Move focused window to scratchpad. Handler in Phase 3.
@@ -84,9 +82,8 @@ pub fn action_from_str(s: &str) -> Option<Action> {
     if let Some(rest) = s.strip_prefix("module:") {
         // Expect `module_id:action_id`. `splitn(2)` tolerates colons
         // inside action ids (unlikely but cheap to allow).
-        let mut parts = rest.splitn(2, ':');
-        let module_id = parts.next()?;
-        let action_id = parts.next()?;
+        let (module_id, action_id) = rest.split_once(':')?;
+
         if module_id.is_empty() || action_id.is_empty() {
             return None;
         }
@@ -121,10 +118,26 @@ pub fn action_from_str(s: &str) -> Option<Action> {
         "move_down" => Action::Shortcut(shortcuts::Action::Move(Direction::Down)),
 
         // Resize (handled via PrivateAction::Resizing)
-        "resize_shrink_width" => Action::Private(PrivateAction::Resizing(ResizeDirection::Inwards, ResizeEdge::Right, shortcuts::State::Pressed)),
-        "resize_grow_width" => Action::Private(PrivateAction::Resizing(ResizeDirection::Outwards, ResizeEdge::Right, shortcuts::State::Pressed)),
-        "resize_shrink_height" => Action::Private(PrivateAction::Resizing(ResizeDirection::Inwards, ResizeEdge::Bottom, shortcuts::State::Pressed)),
-        "resize_grow_height" => Action::Private(PrivateAction::Resizing(ResizeDirection::Outwards, ResizeEdge::Bottom, shortcuts::State::Pressed)),
+        "resize_shrink_width" => Action::Private(PrivateAction::Resizing(
+            ResizeDirection::Inwards,
+            ResizeEdge::Right,
+            shortcuts::State::Pressed,
+        )),
+        "resize_grow_width" => Action::Private(PrivateAction::Resizing(
+            ResizeDirection::Outwards,
+            ResizeEdge::Right,
+            shortcuts::State::Pressed,
+        )),
+        "resize_shrink_height" => Action::Private(PrivateAction::Resizing(
+            ResizeDirection::Inwards,
+            ResizeEdge::Bottom,
+            shortcuts::State::Pressed,
+        )),
+        "resize_grow_height" => Action::Private(PrivateAction::Resizing(
+            ResizeDirection::Outwards,
+            ResizeEdge::Bottom,
+            shortcuts::State::Pressed,
+        )),
 
         // Fullscreen
         "fullscreen" | "toggle_fullscreen" => Action::Shortcut(shortcuts::Action::Fullscreen),
@@ -275,7 +288,9 @@ mod tests {
         ));
         assert!(matches!(
             action_from_str("focus_left"),
-            Some(Action::Shortcut(shortcuts::Action::Focus(FocusDirection::Left)))
+            Some(Action::Shortcut(shortcuts::Action::Focus(
+                FocusDirection::Left
+            )))
         ));
         assert!(matches!(
             action_from_str("scratchpad_toggle"),

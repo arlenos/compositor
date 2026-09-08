@@ -6,7 +6,7 @@ use std::{
 use calloop::LoopHandle;
 use smithay::{
     backend::{
-        input::{ButtonState, InputTime, TouchSlot},
+        input::InputTime,
         renderer::{ImportMem, Renderer, element::memory::MemoryRenderBufferRenderElement},
     },
     input::{
@@ -25,22 +25,17 @@ use smithay::{
                 AxisFrame as TabletAxisFrame, ButtonEvent as TabletButtonEvent,
                 DownEvent as TabletDownEvent, GrabStartData as TabletGrabStartData,
                 MotionEvent as TabletMotionEvent, ProximityInEvent, ProximityOutEvent,
-                TabletToolGrab, TabletToolInnerHandle, TabletToolTarget, UpEvent as TabletUpEvent,
+                TabletToolGrab, TabletToolInnerHandle, UpEvent as TabletUpEvent,
             },
         },
-        touch::{
-            GrabStartData as TouchGrabStartData,
-            TouchGrab, TouchInnerHandle,
-        },
+        touch::{GrabStartData as TouchGrabStartData, TouchGrab, TouchInnerHandle},
     },
     output::Output,
     utils::{Logical, Point, Size},
 };
 
 use crate::{
-    shell::focus::target::PointerFocusTarget,
-    state::State,
-    utils::prelude::*,
+    shell::focus::target::PointerFocusTarget, state::State, utils::prelude::*,
     wayland::protocols::shell_overlay::WindowAction,
 };
 
@@ -72,7 +67,6 @@ impl MenuGrabState {
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
-
     }
 
     /// Whether the menu is positioned in screen space.
@@ -149,7 +143,9 @@ pub fn flatten_callbacks(items: &[Item]) -> Vec<Item> {
 fn flatten_callbacks_into(items: &[Item], out: &mut Vec<Item>) {
     for item in items {
         match item {
-            Item::Submenu { items: children, .. } => {
+            Item::Submenu {
+                items: children, ..
+            } => {
                 out.push(item.clone());
                 flatten_callbacks_into(children, out);
             }
@@ -772,10 +768,11 @@ mod tests {
                 *counter += 1;
                 match item {
                     Item::Separator => out.push((my_index, "Separator".into())),
-                    Item::Entry { title, .. } => {
-                        out.push((my_index, format!("Entry:{title}")))
-                    }
-                    Item::Submenu { title, items: children } => {
+                    Item::Entry { title, .. } => out.push((my_index, format!("Entry:{title}"))),
+                    Item::Submenu {
+                        title,
+                        items: children,
+                    } => {
                         out.push((my_index, format!("Submenu:{title}")));
                         recurse(children, counter, out);
                     }

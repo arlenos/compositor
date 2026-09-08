@@ -236,7 +236,9 @@ impl Shell {
                 let app_id = surface.app_id();
                 tracing::info!(
                     "set_focus: {} -> {} update_cursor={}",
-                    old_app_id, app_id, update_cursor,
+                    old_app_id,
+                    app_id,
+                    update_cursor,
                 );
                 state
                     .common
@@ -256,7 +258,9 @@ impl Shell {
                 };
                 tracing::info!(
                     "set_focus: {} -> [{}] update_cursor={}",
-                    old_app_id, kind, update_cursor,
+                    old_app_id,
+                    kind,
+                    update_cursor,
                 );
                 state.common.event_bus.emit_window_focus_left(kind);
             }

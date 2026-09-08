@@ -131,13 +131,22 @@ screen_capture = false
 
     #[test]
     fn a_stated_value_is_read_as_stated() {
-        assert_eq!(read_key("screen_capture = false", "screen_capture"), Reading::Off);
-        assert_eq!(read_key("screen_capture = true", "screen_capture"), Reading::On);
+        assert_eq!(
+            read_key("screen_capture = false", "screen_capture"),
+            Reading::Off
+        );
+        assert_eq!(
+            read_key("screen_capture = true", "screen_capture"),
+            Reading::On
+        );
     }
 
     #[test]
     fn a_file_about_other_switches_leaves_this_one_unconfigured() {
-        assert_eq!(read_key("microphone = false", "screen_capture"), Reading::NotStated);
+        assert_eq!(
+            read_key("microphone = false", "screen_capture"),
+            Reading::NotStated
+        );
     }
 
     #[test]
@@ -145,25 +154,37 @@ screen_capture = false
         // The failure the enum exists for: each of these was "not off" under a
         // boolean reader, so a truncated write resumed capture without saying so.
         assert_eq!(read_key("", "screen_capture"), Reading::Unreadable);
-        assert_eq!(read_key("screen_captu", "screen_capture"), Reading::Unreadable);
-        assert_eq!(read_key("screen_capture = fal", "screen_capture"), Reading::Unreadable);
-        assert_eq!(read_key("# screen_capture = false", "screen_capture"), Reading::Unreadable);
+        assert_eq!(
+            read_key("screen_captu", "screen_capture"),
+            Reading::Unreadable
+        );
+        assert_eq!(
+            read_key("screen_capture = fal", "screen_capture"),
+            Reading::Unreadable
+        );
+        assert_eq!(
+            read_key("# screen_capture = false", "screen_capture"),
+            Reading::Unreadable
+        );
     }
 
     #[test]
     fn a_trailing_comment_does_not_hide_the_setting() {
         assert_eq!(
-            read_key("screen_capture = false # off for the meeting", "screen_capture"),
+            read_key(
+                "screen_capture = false # off for the meeting",
+                "screen_capture"
+            ),
             Reading::Off
         );
     }
 }
 
-/// Where the shared vector table lives, relative to this crate.
-const VECTOR_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/dev/fixtures/sensing-vectors");
-
 #[cfg(test)]
 mod vector_tests {
+    /// Where the shared vector table lives, relative to this crate.
+    const VECTOR_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/dev/fixtures/sensing-vectors");
+
     use super::*;
 
     /// The same table Settings and the xdg portal answer, copied into this
@@ -180,7 +201,11 @@ mod vector_tests {
             .flatten()
             .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
             .collect();
-        assert!(entries.len() >= 12, "the table lost cases: {} left", entries.len());
+        assert!(
+            entries.len() >= 12,
+            "the table lost cases: {} left",
+            entries.len()
+        );
 
         for entry in entries {
             let path = entry.path();

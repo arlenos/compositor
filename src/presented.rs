@@ -27,9 +27,9 @@
 use std::cell::Cell;
 
 use smithay::{
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
+    reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     wayland::{
-        compositor::{with_states, SurfaceData},
+        compositor::{SurfaceData, with_states},
         shell::xdg::XdgToplevelSurfaceData,
     },
 };

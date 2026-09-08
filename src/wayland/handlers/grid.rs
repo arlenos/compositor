@@ -10,7 +10,6 @@
 /// `handlers/titlebar.rs`.
 ///
 /// See `docs/architecture/terminal.md` §2.2.
-
 use crate::{
     delegate_grid,
     state::State,
@@ -156,15 +155,31 @@ mod tests {
     fn set_cell_size_clamps_negative() {
         let mut s = empty();
         set_cell_size(&mut s, -8, 18);
-        assert_eq!(s.cell, Some(CellSize { width: 0, height: 18 }));
+        assert_eq!(
+            s.cell,
+            Some(CellSize {
+                width: 0,
+                height: 18
+            })
+        );
     }
 
     #[test]
     fn dom_holes_parse_round_trips() {
         let mut s = empty();
         let json = serde_json::to_string(&vec![
-            GridRect { x: 0, y: 0, width: 100, height: 40 },
-            GridRect { x: 0, y: 200, width: 300, height: 80 },
+            GridRect {
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 40,
+            },
+            GridRect {
+                x: 0,
+                y: 200,
+                width: 300,
+                height: 80,
+            },
         ])
         .unwrap();
         set_dom_holes(&mut s, &json);
@@ -175,7 +190,12 @@ mod tests {
     #[test]
     fn dom_holes_empty_array_clears() {
         let mut s = empty();
-        s.dom_holes = vec![GridRect { x: 1, y: 2, width: 3, height: 4 }];
+        s.dom_holes = vec![GridRect {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        }];
         set_dom_holes(&mut s, "[]");
         assert!(s.dom_holes.is_empty());
     }
@@ -183,7 +203,12 @@ mod tests {
     #[test]
     fn dom_holes_invalid_json_fails_closed_to_empty() {
         let mut s = empty();
-        s.dom_holes = vec![GridRect { x: 1, y: 2, width: 3, height: 4 }];
+        s.dom_holes = vec![GridRect {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        }];
         set_dom_holes(&mut s, "not json {{{");
         assert!(s.dom_holes.is_empty());
     }
@@ -191,10 +216,7 @@ mod tests {
     #[test]
     fn dom_holes_clamp_negative_extent() {
         let mut s = empty();
-        set_dom_holes(
-            &mut s,
-            r#"[{"x":5,"y":5,"width":-10,"height":-2}]"#,
-        );
+        set_dom_holes(&mut s, r#"[{"x":5,"y":5,"width":-10,"height":-2}]"#);
         assert_eq!((s.dom_holes[0].width, s.dom_holes[0].height), (0, 0));
     }
 
@@ -216,16 +238,32 @@ mod tests {
 
     #[test]
     fn cell_aligned_size_snaps_down_to_whole_cells() {
-        let region = GridRect { x: 0, y: 0, width: 805, height: 607 };
-        let cell = CellSize { width: 8, height: 18 };
+        let region = GridRect {
+            x: 0,
+            y: 0,
+            width: 805,
+            height: 607,
+        };
+        let cell = CellSize {
+            width: 8,
+            height: 18,
+        };
         // 805 / 8 = 100 cells -> 800; 607 / 18 = 33 cells -> 594.
         assert_eq!(cell_aligned_size(region, cell), (800, 594));
     }
 
     #[test]
     fn cell_aligned_size_zero_cell_leaves_axis_unchanged() {
-        let region = GridRect { x: 0, y: 0, width: 805, height: 607 };
-        let cell = CellSize { width: 0, height: 18 };
+        let region = GridRect {
+            x: 0,
+            y: 0,
+            width: 805,
+            height: 607,
+        };
+        let cell = CellSize {
+            width: 0,
+            height: 18,
+        };
         assert_eq!(cell_aligned_size(region, cell), (805, 594));
     }
 
@@ -244,7 +282,12 @@ mod tests {
         set_cell_size(&mut s, 8, 18);
         assert_eq!(
             composited_rect(&s),
-            Some(GridRect { x: 0, y: 36, width: 800, height: 594 })
+            Some(GridRect {
+                x: 0,
+                y: 36,
+                width: 800,
+                height: 594
+            })
         );
     }
 
@@ -254,7 +297,12 @@ mod tests {
         set_region(&mut s, 0, 0, 805, 607);
         assert_eq!(
             composited_rect(&s),
-            Some(GridRect { x: 0, y: 0, width: 805, height: 607 })
+            Some(GridRect {
+                x: 0,
+                y: 0,
+                width: 805,
+                height: 607
+            })
         );
     }
 }

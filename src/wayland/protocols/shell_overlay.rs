@@ -8,7 +8,7 @@
 //! user actions.
 
 use smithay::reexports::wayland_server::{
-    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New,
 };
 use wayland_backend::server::GlobalId;
 
@@ -17,21 +17,17 @@ use generated::arlen_shell_overlay_v1::{ArlenShellOverlayV1, Request as OverlayR
 
 #[allow(non_snake_case, non_upper_case_globals, non_camel_case_types)]
 mod generated {
-    use smithay::reexports::wayland_server::{self, protocol::*};
+    use smithay::reexports::wayland_server::{self};
 
     pub mod __interfaces {
-        use smithay::reexports::wayland_server::protocol::__interfaces::*;
+
         use wayland_backend;
-        wayland_scanner::generate_interfaces!(
-            "resources/protocols/arlen-shell-overlay.xml"
-        );
+        wayland_scanner::generate_interfaces!("resources/protocols/arlen-shell-overlay.xml");
     }
 
     use self::__interfaces::*;
 
-    wayland_scanner::generate_server_code!(
-        "resources/protocols/arlen-shell-overlay.xml"
-    );
+    wayland_scanner::generate_server_code!("resources/protocols/arlen-shell-overlay.xml");
 }
 
 // ===== Global data =====
@@ -105,12 +101,7 @@ impl ShellOverlayState {
     ///
     /// Returns the `menu_id` assigned to this menu, or `None` if no shell
     /// client is currently connected.
-    pub fn send_context_menu(
-        &mut self,
-        x: i32,
-        y: i32,
-        items: &[ContextMenuItem],
-    ) -> Option<u32> {
+    pub fn send_context_menu(&mut self, x: i32, y: i32, items: &[ContextMenuItem]) -> Option<u32> {
         if self.instances.is_empty() {
             return None;
         }
@@ -227,7 +218,13 @@ impl ShellOverlayState {
         active: bool,
     ) {
         for instance in &self.instances {
-            instance.tab_added(stack_id, index, title.clone(), app_id.clone(), active as u32);
+            instance.tab_added(
+                stack_id,
+                index,
+                title.clone(),
+                app_id.clone(),
+                active as u32,
+            );
         }
     }
 
@@ -268,7 +265,13 @@ impl ShellOverlayState {
         let kind_enum = arlen_shell_overlay_v1::IndicatorKind::try_from(kind);
         let Ok(kind_enum) = kind_enum else { return };
         for instance in &self.instances {
-            instance.indicator_show(kind_enum, edges, direction, shortcut1.clone(), shortcut2.clone());
+            instance.indicator_show(
+                kind_enum,
+                edges,
+                direction,
+                shortcut1.clone(),
+                shortcut2.clone(),
+            );
         }
     }
 
@@ -288,7 +291,9 @@ impl ShellOverlayState {
     /// Notify connected shells to show the zoom toolbar.
     pub fn send_zoom_toolbar_show(&self, level: f64, increment: u32, movement: u32) {
         let movement_enum = arlen_shell_overlay_v1::ZoomMovement::try_from(movement);
-        let Ok(movement_enum) = movement_enum else { return };
+        let Ok(movement_enum) = movement_enum else {
+            return;
+        };
         for instance in &self.instances {
             instance.zoom_toolbar_show(level, increment, movement_enum);
         }
@@ -334,7 +339,10 @@ impl ShellOverlayState {
         for instance in &self.instances {
             instance.window_header_show(
                 surface_id,
-                x, y, width, height,
+                x,
+                y,
+                width,
+                height,
                 title.clone(),
                 activated as u32,
                 has_minimize as u32,
@@ -361,7 +369,10 @@ impl ShellOverlayState {
         for instance in &self.instances {
             instance.window_header_update(
                 surface_id,
-                x, y, width, height,
+                x,
+                y,
+                width,
+                height,
                 title.clone(),
                 activated as u32,
                 stack_id,
@@ -629,8 +640,7 @@ pub trait ShellOverlayHandler {
 
 // ===== GlobalDispatch =====
 
-impl<D> GlobalDispatch<ArlenShellOverlayV1, ShellOverlayGlobalData, D>
-    for ShellOverlayState
+impl<D> GlobalDispatch<ArlenShellOverlayV1, ShellOverlayGlobalData, D> for ShellOverlayState
 where
     D: GlobalDispatch<ArlenShellOverlayV1, ShellOverlayGlobalData>
         + Dispatch<ArlenShellOverlayV1, ()>

@@ -31,10 +31,10 @@ use smithay::reexports::wayland_server::{
 use wayland_backend::server::GlobalId;
 
 pub use generated::arlen_window_attach_manager_v1;
-pub use generated::arlen_window_attachment_v1;
 use generated::arlen_window_attach_manager_v1::{
     ArlenWindowAttachManagerV1, Request as ManagerRequest,
 };
+pub use generated::arlen_window_attachment_v1;
 use generated::arlen_window_attachment_v1::{
     ArlenWindowAttachmentV1, Request as AttachmentRequest,
 };
@@ -46,16 +46,12 @@ mod generated {
     pub mod __interfaces {
         use smithay::reexports::wayland_server::protocol::__interfaces::*;
         use wayland_backend;
-        wayland_scanner::generate_interfaces!(
-            "resources/protocols/arlen-window-attach-v1.xml"
-        );
+        wayland_scanner::generate_interfaces!("resources/protocols/arlen-window-attach-v1.xml");
     }
 
     use self::__interfaces::*;
 
-    wayland_scanner::generate_server_code!(
-        "resources/protocols/arlen-window-attach-v1.xml"
-    );
+    wayland_scanner::generate_server_code!("resources/protocols/arlen-window-attach-v1.xml");
 }
 
 // ===== Global data =====
@@ -103,7 +99,9 @@ impl AttachmentUserData {
 #[derive(Debug, Default)]
 pub struct WindowAttachState {
     managers: Vec<ArlenWindowAttachManagerV1>,
-    global: Option<GlobalId>,
+    /// Held to keep the global registered - dropping it removes the protocol
+    /// from the registry. Never read, by design.
+    _global: Option<GlobalId>,
     /// Reverse lookup: window_id → attachments bound to it. Useful
     /// for the phase-2 renderer and for emitting `unbound` when a
     /// window disappears.
@@ -129,7 +127,7 @@ impl WindowAttachState {
         tracing::info!("ATTACH-DEBUG WindowAttachState initialized, global registered");
         Self {
             managers: Vec::new(),
-            global: Some(global),
+            _global: Some(global),
             bindings: HashMap::new(),
         }
     }
@@ -229,9 +227,7 @@ where
         data_init: &mut DataInit<'_, D>,
     ) {
         let manager = data_init.init(resource, ());
-        tracing::info!(
-            "ATTACH-DEBUG manager bound (client bound arlen_window_attach_manager_v1)"
-        );
+        tracing::info!("ATTACH-DEBUG manager bound (client bound arlen_window_attach_manager_v1)");
         state.window_attach_state().managers.push(manager);
     }
 
@@ -299,9 +295,7 @@ where
 
 impl<D> Dispatch<ArlenWindowAttachmentV1, AttachmentUserData, D> for WindowAttachState
 where
-    D: Dispatch<ArlenWindowAttachmentV1, AttachmentUserData>
-        + WindowAttachHandler
-        + 'static,
+    D: Dispatch<ArlenWindowAttachmentV1, AttachmentUserData> + WindowAttachHandler + 'static,
 {
     fn request(
         state: &mut D,
@@ -337,7 +331,11 @@ where
                 tracing::info!(
                     "ATTACH-DEBUG attachment::attach_to_window window_id={} \
                      offset=({},{}) size={}x{}",
-                    window_id, offset_x, offset_y, width, height
+                    window_id,
+                    offset_x,
+                    offset_y,
+                    width,
+                    height
                 );
                 // Rebind: drop from previous window's list.
                 let old_window_id = {
@@ -351,14 +349,13 @@ where
                     prev
                 };
                 let bindings = &mut state.window_attach_state().bindings;
-                if let Some(prev) = old_window_id {
-                    if prev != window_id
-                        && let Some(list) = bindings.get_mut(&prev)
-                    {
-                        list.retain(|a| a != resource);
-                        if list.is_empty() {
-                            bindings.remove(&prev);
-                        }
+                if let Some(prev) = old_window_id
+                    && prev != window_id
+                    && let Some(list) = bindings.get_mut(&prev)
+                {
+                    list.retain(|a| a != resource);
+                    if list.is_empty() {
+                        bindings.remove(&prev);
                     }
                 }
                 bindings
@@ -374,7 +371,10 @@ where
             } => {
                 tracing::debug!(
                     "ATTACH-DEBUG attachment::update_geometry offset=({},{}) size={}x{}",
-                    offset_x, offset_y, width, height
+                    offset_x,
+                    offset_y,
+                    width,
+                    height
                 );
                 let mut inner = data.lock();
                 if inner.window_id.is_none() {

@@ -180,11 +180,9 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     // first-launch users with `theme.active = "light"` (or any
     // user-overlay) saw a frame-1 dark flash. (Codex post-Sprint
     // review HIGH-1 fix.)
-    config::appearance::set_appearance(
-        config::appearance::AppearanceConfig::load_from(
-            &config::appearance::default_path(),
-        ),
-    );
+    config::appearance::set_appearance(config::appearance::AppearanceConfig::load_from(
+        &config::appearance::default_path(),
+    ));
     theme::replace_arlen_theme(theme::recompose_effective_theme());
 
     // init state — `arlen_theme()` now returns the freshly

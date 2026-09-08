@@ -377,31 +377,31 @@ impl CompositorHandler for State {
             .cloned();
 
         // Detect title changes for stacked windows and emit protocol events.
-        if let Some(element) = shell.element_for_surface(surface).cloned() {
-            if let Some(stack) = element.stack_ref() {
-                for (i, s) in stack.surfaces().enumerate() {
-                    if s.wl_surface().as_deref() == Some(surface) {
-                        let current_title = s.title();
-                        let cached = s.user_data().get::<CachedTitle>();
-                        let changed = cached
-                            .map(|c| c.0.lock().unwrap().as_str() != current_title)
-                            .unwrap_or(true);
-                        if changed {
-                            let stack_id = stack.stack_id();
-                            let title = current_title.clone();
-                            s.user_data().insert_if_missing(|| CachedTitle::new(""));
-                            *s.user_data()
-                                .get::<CachedTitle>()
-                                .unwrap()
-                                .0
-                                .lock()
-                                .unwrap() = current_title;
-                            self.common
-                                .shell_overlay_state
-                                .send_tab_title_changed(stack_id, i as u32, title);
-                        }
-                        break;
+        if let Some(element) = shell.element_for_surface(surface).cloned()
+            && let Some(stack) = element.stack_ref()
+        {
+            for (i, s) in stack.surfaces().enumerate() {
+                if s.wl_surface().as_deref() == Some(surface) {
+                    let current_title = s.title();
+                    let cached = s.user_data().get::<CachedTitle>();
+                    let changed = cached
+                        .map(|c| c.0.lock().unwrap().as_str() != current_title)
+                        .unwrap_or(true);
+                    if changed {
+                        let stack_id = stack.stack_id();
+                        let title = current_title.clone();
+                        s.user_data().insert_if_missing(|| CachedTitle::new(""));
+                        *s.user_data()
+                            .get::<CachedTitle>()
+                            .unwrap()
+                            .0
+                            .lock()
+                            .unwrap() = current_title;
+                        self.common
+                            .shell_overlay_state
+                            .send_tab_title_changed(stack_id, i as u32, title);
                     }
+                    break;
                 }
             }
         }
@@ -445,25 +445,25 @@ impl CompositorHandler for State {
             let seats: Vec<_> = shell.seats.iter().cloned().collect();
             std::mem::drop(shell);
             for seat in &seats {
-                if let Some(ptr) = seat.get_pointer() {
-                    if !ptr.is_grabbed() {
-                        let position = ptr.current_location();
-                        let shell = self.common.shell.read();
-                        let fresh_under =
-                            crate::state::State::surface_under(position.as_global(), &output, &shell)
-                                .map(|(target, pos)| (target, pos.as_logical()));
-                        std::mem::drop(shell);
-                        ptr.motion(
-                            self,
-                            fresh_under,
-                            &smithay::input::pointer::MotionEvent {
-                                location: position,
-                                serial: smithay::utils::SERIAL_COUNTER.next_serial(),
-                                time: smithay::backend::input::InputTime::now(),
-                            },
-                        );
-                        ptr.frame(self);
-                    }
+                if let Some(ptr) = seat.get_pointer()
+                    && !ptr.is_grabbed()
+                {
+                    let position = ptr.current_location();
+                    let shell = self.common.shell.read();
+                    let fresh_under =
+                        crate::state::State::surface_under(position.as_global(), &output, &shell)
+                            .map(|(target, pos)| (target, pos.as_logical()));
+                    std::mem::drop(shell);
+                    ptr.motion(
+                        self,
+                        fresh_under,
+                        &smithay::input::pointer::MotionEvent {
+                            location: position,
+                            serial: smithay::utils::SERIAL_COUNTER.next_serial(),
+                            time: smithay::backend::input::InputTime::now(),
+                        },
+                    );
+                    ptr.frame(self);
                 }
             }
         }
@@ -514,22 +514,32 @@ impl State {
                     // events for stacks; single windows get their
                     // Arlen header compositor-rendered via
                     // `CosmicWindow::header_render_element`.
-                    if let Some(mapped) = shell.element_for_surface(window.wl_surface().as_deref().unwrap()).cloned()
+                    if let Some(mapped) = shell
+                        .element_for_surface(window.wl_surface().as_deref().unwrap())
+                        .cloned()
                         && crate::shell::should_emit_shell_header_events(&mapped)
                         && let Some(payload) = crate::shell::window_header_payload(&shell, &mapped)
                     {
                         tracing::info!(
                             "HEADER show surface_id={} x={} y={} w={} h={} title={:?} active={} (stack)",
-                            payload.surface_id, payload.x, payload.y,
-                            payload.width, payload.height, payload.title, payload.activated,
+                            payload.surface_id,
+                            payload.x,
+                            payload.y,
+                            payload.width,
+                            payload.height,
+                            payload.title,
+                            payload.activated,
                         );
                         self.common.shell_overlay_state.send_window_header_show(
                             payload.surface_id,
-                            payload.x, payload.y,
-                            payload.width, payload.height,
+                            payload.x,
+                            payload.y,
+                            payload.width,
+                            payload.height,
                             payload.title,
                             payload.activated,
-                            true, true, // has_minimize, has_maximize
+                            true,
+                            true, // has_minimize, has_maximize
                             payload.stack_id,
                         );
                     }

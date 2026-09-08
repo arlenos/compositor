@@ -7,11 +7,10 @@
 /// compositor decides HOW.
 ///
 /// See `docs/architecture/terminal.md` §2.2.
-
 use std::collections::HashMap;
 
 use smithay::reexports::wayland_server::{
-    backend::GlobalId, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, backend::GlobalId,
 };
 
 pub use generated::arlen_grid_manager_v1;
@@ -250,7 +249,6 @@ where
                     .register_resource(surface_id, resource);
             }
             generated::arlen_grid_manager_v1::Request::Destroy => {}
-            _ => {}
         }
     }
 }
@@ -304,9 +302,6 @@ where
                     changed = false;
                 }
                 generated::arlen_grid_v1::Request::Destroy => {
-                    changed = false;
-                }
-                _ => {
                     changed = false;
                 }
             }

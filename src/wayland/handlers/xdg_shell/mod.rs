@@ -306,7 +306,9 @@ impl XdgShellHandler for State {
                     surface.wl_surface().id().protocol_id()
                 };
                 std::mem::drop(shell);
-                self.common.shell_overlay_state.send_window_header_hide(header_id);
+                self.common
+                    .shell_overlay_state
+                    .send_window_header_hide(header_id);
                 Shell::set_focus(self, Some(&target), &seat, None, true);
                 // Notify the Event Bus so the notification daemon can
                 // queue incoming notifications while fullscreen is active.
@@ -347,18 +349,29 @@ impl XdgShellHandler for State {
                 shell
                     .element_for_surface(cosmic_surface.wl_surface().as_deref().unwrap())
                     .cloned()
-                    .filter(|m| crate::shell::should_emit_shell_header_events(m))
+                    .filter(crate::shell::should_emit_shell_header_events)
                     .and_then(|m| crate::shell::window_header_payload(&shell, &m))
             };
             std::mem::drop(shell);
             if let Some(p) = header_payload {
                 tracing::info!(
                     "HEADER show (post-fullscreen) surface_id={} x={} y={} w={} h={}",
-                    p.surface_id, p.x, p.y, p.width, p.height,
+                    p.surface_id,
+                    p.x,
+                    p.y,
+                    p.width,
+                    p.height,
                 );
                 self.common.shell_overlay_state.send_window_header_show(
-                    p.surface_id, p.x, p.y, p.width, p.height,
-                    p.title, p.activated, true, true,
+                    p.surface_id,
+                    p.x,
+                    p.y,
+                    p.width,
+                    p.height,
+                    p.title,
+                    p.activated,
+                    true,
+                    true,
                     p.stack_id,
                 );
             }
@@ -391,7 +404,9 @@ impl XdgShellHandler for State {
             surface.wl_surface().id().protocol_id()
         };
         tracing::info!("HEADER hide surface_id={}", header_id);
-        self.common.shell_overlay_state.send_window_header_hide(header_id);
+        self.common
+            .shell_overlay_state
+            .send_window_header_hide(header_id);
 
         for (popup, _) in smithay::desktop::PopupManager::popups_for_surface(surface.wl_surface()) {
             if let smithay::desktop::PopupKind::Xdg(ref xdg_popup) = popup {

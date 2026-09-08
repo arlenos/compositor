@@ -66,16 +66,24 @@ pub const ACCENT_FOREGROUND_SENTINEL: &str = "$foreground";
 /// Foreground hex per theme mode. Kept in sync with
 /// `desktop-shell/src-tauri/themes/{dark,light}.toml [colors.foreground].primary`
 /// and `app-settings/src/lib/stores/theme.ts` MONO_DARK/MONO_LIGHT.
-const MONO_DARK: [f32; 3] = [0xfa as f32 / 255.0, 0xfa as f32 / 255.0, 0xfa as f32 / 255.0];
-const MONO_LIGHT: [f32; 3] = [0x17 as f32 / 255.0, 0x17 as f32 / 255.0, 0x17 as f32 / 255.0];
+const MONO_DARK: [f32; 3] = [
+    0xfa as f32 / 255.0,
+    0xfa as f32 / 255.0,
+    0xfa as f32 / 255.0,
+];
+const MONO_LIGHT: [f32; 3] = [
+    0x17 as f32 / 255.0,
+    0x17 as f32 / 255.0,
+    0x17 as f32 / 255.0,
+];
 
 /// Default appearance.toml path (`$XDG_CONFIG_HOME/arlen/appearance.toml`),
 /// falling back to `$HOME/.config/arlen/appearance.toml`.
 pub fn default_path() -> PathBuf {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            return PathBuf::from(xdg).join("arlen").join("appearance.toml");
-        }
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+        && !xdg.is_empty()
+    {
+        return PathBuf::from(xdg).join("arlen").join("appearance.toml");
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
@@ -298,7 +306,6 @@ fn monochrome_for_mode(theme: &ThemeSection) -> [f32; 3] {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Colour resolution
 // ---------------------------------------------------------------------------
@@ -456,14 +463,20 @@ fn handle_reload(path: &Path, state: &mut State) {
          font_sans={:?}",
         cfg.theme.mode.as_deref().or(cfg.theme.active.as_deref()),
         theme.meta.variant,
-        theme.color.bg_shell, theme.color.bg_card,
-        theme.color.fg_primary, theme.color.accent,
-        theme.color.border_default, theme.color.error,
+        theme.color.bg_shell,
+        theme.color.bg_card,
+        theme.color.fg_primary,
+        theme.color.accent,
+        theme.color.border_default,
+        theme.color.error,
         theme.radius.intensity,
-        theme.effective_chip(), theme.effective_button(),
-        theme.effective_card(), theme.effective_modal(),
+        theme.effective_chip(),
+        theme.effective_button(),
+        theme.effective_card(),
+        theme.effective_modal(),
         theme.effective_window_corners(),
-        theme.wm.active_hint, theme.wm.window_hint,
+        theme.wm.active_hint,
+        theme.wm.window_hint,
         theme.typography.font_sans,
     );
 
@@ -523,7 +536,10 @@ mod tests {
     #[test]
     fn test_hex_parse_rrggbbaa_ignores_alpha() {
         let rgb = parse_hex_rgb("#6366f180").unwrap();
-        assert!((rgb[0] - 99.0 / 255.0).abs() < 0.01, "r same as without alpha");
+        assert!(
+            (rgb[0] - 99.0 / 255.0).abs() < 0.01,
+            "r same as without alpha"
+        );
     }
 
     #[test]
@@ -546,19 +562,16 @@ mod tests {
 
     #[test]
     fn test_parse_radius_intensity() {
-        let cfg: AppearanceConfig = toml::from_str(
-            "[overrides]\nradius_intensity = 1.5\n",
-        )
-        .unwrap();
+        let cfg: AppearanceConfig =
+            toml::from_str("[overrides]\nradius_intensity = 1.5\n").unwrap();
         assert_eq!(cfg.overrides.radius_intensity, Some(1.5));
     }
 
     #[test]
     fn test_parse_border_sentinels() {
-        let cfg: AppearanceConfig = toml::from_str(
-            "[window.border]\nfocused = \"$accent\"\nunfocused = \"$border\"\n",
-        )
-        .unwrap();
+        let cfg: AppearanceConfig =
+            toml::from_str("[window.border]\nfocused = \"$accent\"\nunfocused = \"$border\"\n")
+                .unwrap();
         assert_eq!(cfg.window.border.focused.as_deref(), Some("$accent"));
         assert_eq!(cfg.window.border.unfocused.as_deref(), Some("$border"));
     }
@@ -609,10 +622,10 @@ variant = "dark"
         let cfg: AppearanceConfig =
             toml::from_str("[overrides]\nradius_intensity = 0.0\n").unwrap();
         apply_to_theme(&mut theme, &cfg);
-        assert_eq!(theme.effective_chip(),   0.0);
+        assert_eq!(theme.effective_chip(), 0.0);
         assert_eq!(theme.effective_button(), 0.0);
-        assert_eq!(theme.effective_card(),   0.0);
-        assert_eq!(theme.effective_modal(),  0.0);
+        assert_eq!(theme.effective_card(), 0.0);
+        assert_eq!(theme.effective_modal(), 0.0);
         // Full + window_corners NEVER scaled.
         assert_eq!(theme.effective_full(), 9999.0);
     }
@@ -641,34 +654,37 @@ variant = "dark"
 
     #[test]
     fn test_effective_accent_foreground_dark() {
-        let cfg: AppearanceConfig = toml::from_str(
-            "[theme]\nmode = \"dark\"\n\n[overrides]\naccent = \"$foreground\"\n",
-        )
-        .unwrap();
+        let cfg: AppearanceConfig =
+            toml::from_str("[theme]\nmode = \"dark\"\n\n[overrides]\naccent = \"$foreground\"\n")
+                .unwrap();
         let theme = test_theme();
         let rgb = effective_accent(&cfg, &theme);
         // MONO_DARK = #fafafa → ~0.98
-        assert!(rgb[0] > 0.95, "dark monochrome should be near-white: {}", rgb[0]);
+        assert!(
+            rgb[0] > 0.95,
+            "dark monochrome should be near-white: {}",
+            rgb[0]
+        );
     }
 
     #[test]
     fn test_effective_accent_foreground_light() {
-        let cfg: AppearanceConfig = toml::from_str(
-            "[theme]\nmode = \"light\"\n\n[overrides]\naccent = \"$foreground\"\n",
-        )
-        .unwrap();
+        let cfg: AppearanceConfig =
+            toml::from_str("[theme]\nmode = \"light\"\n\n[overrides]\naccent = \"$foreground\"\n")
+                .unwrap();
         let theme = test_theme();
         let rgb = effective_accent(&cfg, &theme);
         // MONO_LIGHT = #171717 → ~0.09
-        assert!(rgb[0] < 0.15, "light monochrome should be near-black: {}", rgb[0]);
+        assert!(
+            rgb[0] < 0.15,
+            "light monochrome should be near-black: {}",
+            rgb[0]
+        );
     }
 
     #[test]
     fn test_effective_accent_hex_override() {
-        let cfg: AppearanceConfig = toml::from_str(
-            "[overrides]\naccent = \"#ff0000\"\n",
-        )
-        .unwrap();
+        let cfg: AppearanceConfig = toml::from_str("[overrides]\naccent = \"#ff0000\"\n").unwrap();
         let theme = test_theme();
         let rgb = effective_accent(&cfg, &theme);
         assert!((rgb[0] - 1.0).abs() < 0.01, "red channel");

@@ -161,7 +161,11 @@ pub fn init_backend(
     output.add_mode(mode);
     output.set_preferred(mode);
     let scale_factor = backend.scale_factor();
-    tracing::info!("winit: output scale_factor={scale_factor} size={}x{}", size.w, size.h);
+    tracing::info!(
+        "winit: output scale_factor={scale_factor} size={}x{}",
+        size.w,
+        size.h
+    );
     let scale = if (scale_factor - scale_factor.round()).abs() < f64::EPSILON && scale_factor >= 1.0
     {
         Scale::Integer(scale_factor as i32)
@@ -340,27 +344,30 @@ impl State {
                         let time = smithay::backend::input::InputTime::now();
                         // Send key release for all pressed keys. This clears
                         // the xkbcommon modifier state.
-                        keyboard.with_pressed_keysyms(|syms| {
-                            let codes: Vec<_> = syms.iter().map(|k| k.raw_code()).collect();
-                            codes
-                        }).into_iter().for_each(|code| {
-                            keyboard.input::<(), _>(
-                                self,
-                                code,
-                                smithay::backend::input::KeyState::Released,
-                                serial,
-                                time,
-                                |_, _, _| smithay::input::keyboard::FilterResult::Forward,
-                            );
-                        });
+                        keyboard
+                            .with_pressed_keysyms(|syms| {
+                                let codes: Vec<_> = syms.iter().map(|k| k.raw_code()).collect();
+                                codes
+                            })
+                            .into_iter()
+                            .for_each(|code| {
+                                keyboard.input::<(), _>(
+                                    self,
+                                    code,
+                                    smithay::backend::input::KeyState::Released,
+                                    serial,
+                                    time,
+                                    |_, _, _| smithay::input::keyboard::FilterResult::Forward,
+                                );
+                            });
                     }
                     // Release stuck pointer buttons.
-                    if let Some(pointer) = seat.get_pointer() {
-                        if pointer.is_grabbed() {
-                            let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                            let time = smithay::backend::input::InputTime::now();
-                            pointer.unset_grab(self, serial, time);
-                        }
+                    if let Some(pointer) = seat.get_pointer()
+                        && pointer.is_grabbed()
+                    {
+                        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+                        let time = smithay::backend::input::InputTime::now();
+                        pointer.unset_grab(self, serial, time);
                     }
                     // Clear suppressed buttons so they don't block future clicks.
                     seat.supressed_buttons().clear();
@@ -368,10 +375,7 @@ impl State {
                 self.common.super_tap_pending = false;
                 tracing::debug!("winit: focus lost, released all keys and buttons");
             }
-            WinitEvent::Resized {
-                size,
-                scale_factor,
-            } => {
+            WinitEvent::Resized { size, scale_factor } => {
                 let winit_state = self.backend.winit();
                 let output = &winit_state.output;
                 let mode = Mode {
@@ -409,7 +413,6 @@ impl State {
             WinitEvent::CloseRequested => {
                 self.common.should_stop = true;
             }
-            _ => {}
         };
     }
 }

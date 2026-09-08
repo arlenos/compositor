@@ -1904,9 +1904,7 @@ fn postprocess_elements<'a>(
                 ),
                 Uniform::new(
                     "night_light_tint",
-                    screen_filter
-                        .night_light_tint
-                        .unwrap_or([1.0, 1.0, 1.0]),
+                    screen_filter.night_light_tint.unwrap_or([1.0, 1.0, 1.0]),
                 ),
             ],
         ));
@@ -1944,9 +1942,7 @@ fn postprocess_elements<'a>(
             ),
             Uniform::new(
                 "night_light_tint",
-                screen_filter
-                    .night_light_tint
-                    .unwrap_or([1.0, 1.0, 1.0]),
+                screen_filter.night_light_tint.unwrap_or([1.0, 1.0, 1.0]),
             ),
         ],
     ));

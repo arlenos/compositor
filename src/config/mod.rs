@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    input::InputBackendId,
     shell::Shell,
     state::{BackendData, State},
     utils::prelude::OutputExt,
@@ -13,7 +12,7 @@ use anyhow::Context;
 // cosmic_config is still needed for Shortcuts, WindowRules,
 // and the legacy cosmic_helper write-back used by zoom.rs.
 use cosmic_settings_config::window_rules::ApplicationException;
-use cosmic_settings_config::{Shortcuts, shortcuts, window_rules};
+use cosmic_settings_config::{Shortcuts, shortcuts};
 use serde::{Deserialize, Serialize};
 use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::{
@@ -50,13 +49,12 @@ mod types;
 
 pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
-    ActivationPolicy, AppearanceConfig, CosmicCompConfig, DecorationPreference, KeyboardConfig,
-    TileBehavior, XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
+    CosmicCompConfig, XkbConfig,
     input::{
         AccelConfig, DeviceState as InputDeviceState, InputConfig, ScrollConfig, TapConfig,
         TouchpadOverride,
     },
-    output::comp::{OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef, load_outputs},
+    output::comp::{OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef},
 };
 pub use key_bindings::{Action, PrivateAction, action_from_str, keysym_from_str};
 use types::WlXkbConfig;
@@ -143,8 +141,7 @@ pub struct ArlenRuntimeState {
     /// The shape is the cosmic-comp `PinnedWorkspace` type from the
     /// local `cosmic-comp-config` crate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pinned_workspaces:
-        Option<Vec<cosmic_comp_config::workspace::PinnedWorkspace>>,
+    pub pinned_workspaces: Option<Vec<cosmic_comp_config::workspace::PinnedWorkspace>>,
 }
 
 pub struct CompOutputConfig<'a>(pub Ref<'a, OutputConfig>);
@@ -301,20 +298,21 @@ pub enum WindowAction {
 impl WindowMatch {
     /// Check whether a window matches this rule.
     pub fn matches(&self, app_id: &str, title: &str, is_dialog: bool) -> bool {
-        if let Some(ref wt) = self.window_type {
-            if wt == "dialog" && !is_dialog {
-                return false;
-            }
+        if let Some(ref wt) = self.window_type
+            && wt == "dialog"
+            && !is_dialog
+        {
+            return false;
         }
-        if let Some(ref re) = self.app_id {
-            if !re.is_match(app_id) {
-                return false;
-            }
+        if let Some(ref re) = self.app_id
+            && !re.is_match(app_id)
+        {
+            return false;
         }
-        if let Some(ref re) = self.title {
-            if !re.is_match(title) {
-                return false;
-            }
+        if let Some(ref re) = self.title
+            && !re.is_match(title)
+        {
+            return false;
         }
         true
     }
@@ -415,10 +413,7 @@ pub fn load_keybinding_fragments(dir: &std::path::Path) -> Vec<FragmentEntry> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(err) => {
-            tracing::warn!(
-                "keybinding fragments: cannot read {}: {err}",
-                dir.display()
-            );
+            tracing::warn!("keybinding fragments: cannot read {}: {err}", dir.display());
             return Vec::new();
         }
     };
@@ -436,14 +431,20 @@ pub fn load_keybinding_fragments(dir: &std::path::Path) -> Vec<FragmentEntry> {
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(err) => {
-                tracing::warn!("keybinding fragments: read {} failed: {err}", path.display());
+                tracing::warn!(
+                    "keybinding fragments: read {} failed: {err}",
+                    path.display()
+                );
                 continue;
             }
         };
         let table: toml::Table = match toml::from_str(&content) {
             Ok(t) => t,
             Err(err) => {
-                tracing::warn!("keybinding fragments: parse {} failed: {err}", path.display());
+                tracing::warn!(
+                    "keybinding fragments: parse {} failed: {err}",
+                    path.display()
+                );
                 continue;
             }
         };
@@ -451,7 +452,9 @@ pub fn load_keybinding_fragments(dir: &std::path::Path) -> Vec<FragmentEntry> {
             continue;
         };
         for (binding, action) in kb_table {
-            let Some(action_str) = action.as_str() else { continue };
+            let Some(action_str) = action.as_str() else {
+                continue;
+            };
             out.push(FragmentEntry {
                 module_id: module_id.clone(),
                 binding: binding.clone(),
@@ -495,10 +498,7 @@ fn load_toml_config(path: &std::path::Path) -> TomlConfig {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => {
-            tracing::info!(
-                "no compositor.toml at {}, using defaults",
-                path.display()
-            );
+            tracing::info!("no compositor.toml at {}, using defaults", path.display());
             return default();
         }
     };
@@ -550,10 +550,10 @@ fn load_toml_config(path: &std::path::Path) -> TomlConfig {
         } else if let Some(s) = xkb.get("variant").and_then(|v| v.as_str()) {
             config.xkb_config.variant = s.to_string();
         }
-        if let Some(s) = xkb.get("options").and_then(|v| v.as_str()) {
-            if !s.is_empty() {
-                config.xkb_config.options = Some(s.to_string());
-            }
+        if let Some(s) = xkb.get("options").and_then(|v| v.as_str())
+            && !s.is_empty()
+        {
+            config.xkb_config.options = Some(s.to_string());
         }
         if let Some(n) = xkb.get("repeat_rate").and_then(|v| v.as_integer()) {
             config.xkb_config.repeat_rate = n as u32;
@@ -564,13 +564,13 @@ fn load_toml_config(path: &std::path::Path) -> TomlConfig {
     }
 
     // Apply workspace overrides.
-    if let Some(ws) = table.get("workspaces").and_then(|v| v.as_table()) {
-        if let Some(s) = ws.get("workspace_layout").and_then(|v| v.as_str()) {
-            config.workspaces.workspace_layout = match s {
-                "Vertical" | "vertical" => cosmic_comp_config::workspace::WorkspaceLayout::Vertical,
-                _ => cosmic_comp_config::workspace::WorkspaceLayout::Horizontal,
-            };
-        }
+    if let Some(ws) = table.get("workspaces").and_then(|v| v.as_table())
+        && let Some(s) = ws.get("workspace_layout").and_then(|v| v.as_str())
+    {
+        config.workspaces.workspace_layout = match s {
+            "Vertical" | "vertical" => cosmic_comp_config::workspace::WorkspaceLayout::Vertical,
+            _ => cosmic_comp_config::workspace::WorkspaceLayout::Horizontal,
+        };
     }
 
     // Apply mouse overrides (maps to cosmic_conf.input_default).
@@ -619,9 +619,7 @@ fn load_toml_config(path: &std::path::Path) -> TomlConfig {
 /// Unknown keys are warned-and-skipped so a typo can't poison
 /// startup. The defaults table from `default_system_actions()` is
 /// always present; the user overrides win on conflict.
-fn parse_system_actions(
-    table: &toml::Table,
-) -> BTreeMap<shortcuts::action::System, String> {
+fn parse_system_actions(table: &toml::Table) -> BTreeMap<shortcuts::action::System, String> {
     let Some(user_table) = table.get("system_actions").and_then(|v| v.as_table()) else {
         return BTreeMap::new();
     };
@@ -637,9 +635,7 @@ fn parse_system_actions(
         // Round-trip the key string through serde to map it onto the
         // System enum. Unknown variants come back as a deserialise
         // error, which we log as a warning and skip.
-        match toml::Value::String(key.clone())
-            .try_into::<shortcuts::action::System>()
-        {
+        match toml::Value::String(key.clone()).try_into::<shortcuts::action::System>() {
             Ok(action) => {
                 out.insert(action, command.to_string());
             }
@@ -722,9 +718,7 @@ fn build_cosmic_shortcuts(toml_keybindings: &[KeyBinding]) -> Shortcuts {
 /// which is invoked from the menu but not user-bindable yet) fall
 /// through with `None` — the menu code handles `None` by hiding
 /// the shortcut label.
-fn cosmic_action_to_action_string(
-    action: &shortcuts::Action,
-) -> Option<&'static str> {
+fn cosmic_action_to_action_string(action: &shortcuts::Action) -> Option<&'static str> {
     use cosmic_settings_config::shortcuts::Action as A;
     Some(match action {
         A::Close => "close_window",
@@ -797,24 +791,18 @@ pub fn default_system_actions() -> BTreeMap<shortcuts::action::System, String> {
     m.insert(System::PlayPause, "spawn:playerctl play-pause".into());
     m.insert(System::PlayNext, "spawn:playerctl next".into());
     m.insert(System::PlayPrev, "spawn:playerctl previous".into());
-    m.insert(
-        System::LockScreen,
-        "spawn:loginctl lock-session".into(),
-    );
+    m.insert(System::LockScreen, "spawn:loginctl lock-session".into());
     m.insert(System::Suspend, "spawn:systemctl suspend".into());
+    m.insert(System::PowerOff, "spawn:systemctl poweroff".into());
     m.insert(
-        System::PowerOff,
-        "spawn:systemctl poweroff".into(),
+        System::LogOut,
+        "spawn:loginctl terminate-session $XDG_SESSION_ID".into(),
     );
-    m.insert(System::LogOut, "spawn:loginctl terminate-session $XDG_SESSION_ID".into());
     m.insert(System::HomeFolder, "spawn:xdg-open ~".into());
     m.insert(System::WebBrowser, "spawn:xdg-open https:".into());
     m.insert(System::Launcher, "shell:waypointer_open".into());
     m.insert(System::AppLibrary, "shell:waypointer_open".into());
-    m.insert(
-        System::WindowSwitcher,
-        "shell:workspace_map_open".into(),
-    );
+    m.insert(System::WindowSwitcher, "shell:workspace_map_open".into());
     m.insert(System::Screenshot, "spawn:grim".into());
     m
 }
@@ -843,7 +831,9 @@ fn parse_layout_config(table: &toml::Table) -> LayoutConfig {
     // Parse [[layout.window_rules]] array.
     if let Some(rules) = section.get("window_rules").and_then(|v| v.as_array()) {
         for rule_val in rules {
-            let Some(rule_table) = rule_val.as_table() else { continue };
+            let Some(rule_table) = rule_val.as_table() else {
+                continue;
+            };
             let action = match rule_table.get("action").and_then(|v| v.as_str()) {
                 Some("float") => WindowAction::Float,
                 Some("tile") => WindowAction::Tile,
@@ -981,7 +971,10 @@ fn parse_touchpad_config(table: &toml::Table, input: &mut InputConfig) {
         };
         input.scroll_config = Some(scroll);
     }
-    if let Some(b) = section.get("disable_while_typing").and_then(|v| v.as_bool()) {
+    if let Some(b) = section
+        .get("disable_while_typing")
+        .and_then(|v| v.as_bool())
+    {
         input.disable_while_typing = Some(b);
     }
     if let Some(f) = section.get("acceleration").and_then(|v| v.as_float()) {
@@ -1108,7 +1101,9 @@ fn parse_keybindings_config(table: &toml::Table) -> Vec<KeyBinding> {
 
     let mut bindings = Vec::new();
     for (key_str, action_val) in section {
-        let Some(action) = action_val.as_str() else { continue };
+        let Some(action) = action_val.as_str() else {
+            continue;
+        };
         if let Some((modifiers, key)) = parse_keybinding(key_str) {
             bindings.push(KeyBinding {
                 modifiers,
@@ -1123,7 +1118,9 @@ fn parse_keybindings_config(table: &toml::Table) -> Vec<KeyBinding> {
         for kb in &bindings {
             tracing::info!(
                 "  keybinding: {:?}+{:?} -> {:?}",
-                kb.modifiers, kb.key, kb.action,
+                kb.modifiers,
+                kb.key,
+                kb.action,
             );
         }
     } else {
@@ -1189,10 +1186,9 @@ impl Config {
                 let fragment_dir = keybinding_fragment_dir(&watch_path);
                 if fragment_dir.exists() {
                     use notify::Watcher;
-                    if let Err(err) = watcher.watch(
-                        &fragment_dir,
-                        notify::RecursiveMode::NonRecursive,
-                    ) {
+                    if let Err(err) =
+                        watcher.watch(&fragment_dir, notify::RecursiveMode::NonRecursive)
+                    {
                         tracing::warn!(
                             "could not watch keybinding fragment dir {}: {err}",
                             fragment_dir.display()
@@ -1260,10 +1256,7 @@ impl Config {
         // intact.
         let dynamic_conf = Self::load_dynamic(&xdg);
         let mut cosmic_comp_config = cosmic_comp_config;
-        apply_runtime_state_overrides(
-            &mut cosmic_comp_config,
-            dynamic_conf.runtime_state(),
-        );
+        apply_runtime_state_overrides(&mut cosmic_comp_config, dynamic_conf.runtime_state());
 
         Config {
             dynamic_conf,
@@ -1287,13 +1280,10 @@ impl Config {
         // `a11y_screen_filter` because those are dev-time state with
         // no settings UI yet.
         let displays_path = displays_toml_path();
-        if let Some(toml_path) = displays_path.as_ref() {
-            if let Ok(legacy_ron) = xdg.place_state_file("cosmic-comp/outputs.ron") {
-                cosmic_comp_config::output::displays_toml::migrate_from_ron(
-                    &legacy_ron,
-                    toml_path,
-                );
-            }
+        if let Some(toml_path) = displays_path.as_ref()
+            && let Ok(legacy_ron) = xdg.place_state_file("cosmic-comp/outputs.ron")
+        {
+            cosmic_comp_config::output::displays_toml::migrate_from_ron(&legacy_ron, toml_path);
         }
         let outputs = displays_path
             .as_deref()
@@ -1310,9 +1300,7 @@ impl Config {
             .ok();
         let filter = Self::load_filter_state(&filter_path);
 
-        let runtime_state_path = xdg
-            .place_state_file("arlen/compositor/state.toml")
-            .ok();
+        let runtime_state_path = xdg.place_state_file("arlen/compositor/state.toml").ok();
         let runtime_state = Self::load_runtime_state(&runtime_state_path);
 
         DynamicConfig {
@@ -1615,32 +1603,31 @@ impl Config {
         let mut cfg = self.cosmic_conf.xkb_config.clone();
         // If the layout is empty (no cosmic-config or TOML config set it),
         // fall back to environment variables, then /etc/vconsole.conf.
-        if cfg.layout.is_empty() {
-            if let Ok(layout) = std::env::var("XKB_DEFAULT_LAYOUT") {
-                cfg.layout = layout;
-            }
+        if cfg.layout.is_empty()
+            && let Ok(layout) = std::env::var("XKB_DEFAULT_LAYOUT")
+        {
+            cfg.layout = layout;
         }
-        if cfg.variant.is_empty() {
-            if let Ok(variant) = std::env::var("XKB_DEFAULT_VARIANT") {
-                cfg.variant = variant;
-            }
+        if cfg.variant.is_empty()
+            && let Ok(variant) = std::env::var("XKB_DEFAULT_VARIANT")
+        {
+            cfg.variant = variant;
         }
-        if cfg.model.is_empty() {
-            if let Ok(model) = std::env::var("XKB_DEFAULT_MODEL") {
-                cfg.model = model;
-            }
+        if cfg.model.is_empty()
+            && let Ok(model) = std::env::var("XKB_DEFAULT_MODEL")
+        {
+            cfg.model = model;
         }
-        if cfg.rules.is_empty() {
-            if let Ok(rules) = std::env::var("XKB_DEFAULT_RULES") {
-                cfg.rules = rules;
-            }
+        if cfg.rules.is_empty()
+            && let Ok(rules) = std::env::var("XKB_DEFAULT_RULES")
+        {
+            cfg.rules = rules;
         }
-        if cfg.options.is_none() {
-            if let Ok(options) = std::env::var("XKB_DEFAULT_OPTIONS") {
-                if !options.is_empty() {
-                    cfg.options = Some(options);
-                }
-            }
+        if cfg.options.is_none()
+            && let Ok(options) = std::env::var("XKB_DEFAULT_OPTIONS")
+            && !options.is_empty()
+        {
+            cfg.options = Some(options);
         }
         // If still empty, try localectl (systemd) which reads the full X11 config.
         if cfg.layout.is_empty() {
@@ -1659,10 +1646,10 @@ impl Config {
             }
         }
         // Last resort: /etc/vconsole.conf KEYMAP field.
-        if cfg.layout.is_empty() {
-            if let Some(vconsole) = parse_vconsole_keymap() {
-                cfg.layout = vconsole;
-            }
+        if cfg.layout.is_empty()
+            && let Some(vconsole) = parse_vconsole_keymap()
+        {
+            cfg.layout = vconsole;
         }
         // If even the last-resort chain didn't find anything, the user
         // really has no resolvable XKB layout — warn once per process
@@ -1682,7 +1669,9 @@ impl Config {
         } else {
             tracing::debug!(
                 "xkb layout resolved: layout={:?} variant={:?} options={:?}",
-                cfg.layout, cfg.variant, cfg.options
+                cfg.layout,
+                cfg.variant,
+                cfg.options
             );
         }
         cfg
@@ -1782,7 +1771,10 @@ impl<T: Serialize> Drop for PersistenceGuard<'_, T> {
             // outputs path lives under `~/.config/arlen/compositor.d/`
             // which has no other guaranteed creator.
             let Some(parent) = path.parent() else {
-                warn!("PersistenceGuard target path has no parent: {}", path.display());
+                warn!(
+                    "PersistenceGuard target path has no parent: {}",
+                    path.display()
+                );
                 return;
             };
             if let Err(err) = std::fs::create_dir_all(parent) {
@@ -1956,7 +1948,10 @@ fn read_system_xkb_layout() -> SystemXkb {
     if !result.layout.is_empty() {
         tracing::info!(
             "read_system_xkb_layout: layout={} variant={} model={} options={}",
-            result.layout, result.variant, result.model, result.options,
+            result.layout,
+            result.variant,
+            result.model,
+            result.options,
         );
     }
 
@@ -2035,10 +2030,7 @@ fn toml_config_changed(toml_path: &std::path::Path, state: &mut State) {
     // unrelated TOML edit doesn't revert the user's in-session
     // toggle (autotile, pinned_workspaces). Same precedence rule
     // as initial load — fixes compositor #29 review MEDIUM.
-    apply_runtime_state_overrides(
-        &mut new,
-        state.common.config.dynamic_conf.runtime_state(),
-    );
+    apply_runtime_state_overrides(&mut new, state.common.config.dynamic_conf.runtime_state());
 
     // Capture old toggle state before we replace the layout so we can
     // detect a tiled_headers flip and trigger a reconfigure storm only
@@ -2051,8 +2043,7 @@ fn toml_config_changed(toml_path: &std::path::Path, state: &mut State) {
     // Rebuild the cosmic-shape Shortcuts table off the new
     // toml_keybindings so the dispatch loops in input/mod.rs see
     // the live update.
-    state.common.config.shortcuts =
-        build_cosmic_shortcuts(&state.common.config.toml_keybindings);
+    state.common.config.shortcuts = build_cosmic_shortcuts(&state.common.config.toml_keybindings);
 
     // Rebuild system-actions from defaults + user overrides.
     // The cosmic-settings-daemon source is gone (CC3); the user's
@@ -2080,11 +2071,9 @@ fn toml_config_changed(toml_path: &std::path::Path, state: &mut State) {
             .collect();
         let fragment_dir = keybinding_fragment_dir(toml_path);
         for entry in load_keybinding_fragments(&fragment_dir) {
-            if let Some(b) = StaticBinding::from_accelerator(
-                &entry.binding,
-                entry.action,
-                BindingScope::Module,
-            ) {
+            if let Some(b) =
+                StaticBinding::from_accelerator(&entry.binding, entry.action, BindingScope::Module)
+            {
                 statics.push(b);
             }
         }
@@ -2103,11 +2092,9 @@ fn toml_config_changed(toml_path: &std::path::Path, state: &mut State) {
         );
         let mut shell = state.common.shell.write();
         for workspace in shell.workspaces.spaces_mut() {
-            workspace.tiling_layer.set_gaps(
-                layout.inner_gap,
-                layout.outer_gap,
-                layout.smart_gaps,
-            );
+            workspace
+                .tiling_layer
+                .set_gaps(layout.inner_gap, layout.outer_gap, layout.smart_gaps);
             // Re-layout immediately so gap changes are visible without
             // waiting for the next window event.
             workspace.tiling_layer.recalculate();
@@ -2148,7 +2135,10 @@ fn toml_config_changed(toml_path: &std::path::Path, state: &mut State) {
                 );
                 tracing::info!(
                     "xkb_config update: layout={:?} variant={:?} model={:?} options={:?}",
-                    value.layout, value.variant, value.model, value.options,
+                    value.layout,
+                    value.variant,
+                    value.model,
+                    value.options,
                 );
                 if let Err(err) = keyboard.set_xkb_config(state, xkb_config_to_wl(value)) {
                     error!(?err, "Failed to load provided xkb config");
@@ -2363,7 +2353,14 @@ action = "float"
         assert!(!tc.layout.smart_gaps);
         assert_eq!(tc.layout.window_rules.len(), 2);
         assert_eq!(tc.layout.window_rules[0].action, WindowAction::Float);
-        assert!(tc.layout.window_rules[0].matcher.app_id.as_ref().unwrap().is_match("pavucontrol"));
+        assert!(
+            tc.layout.window_rules[0]
+                .matcher
+                .app_id
+                .as_ref()
+                .unwrap()
+                .is_match("pavucontrol")
+        );
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
@@ -2388,12 +2385,20 @@ action = "float"
         let tc = load_toml_config(&path);
         assert_eq!(tc.keybindings.len(), 3);
 
-        let toggle = tc.keybindings.iter().find(|k| k.action == "toggle_tiling").unwrap();
+        let toggle = tc
+            .keybindings
+            .iter()
+            .find(|k| k.action == "toggle_tiling")
+            .unwrap();
         assert!(toggle.modifiers.super_key);
         assert!(!toggle.modifiers.shift);
         assert_eq!(toggle.key, "T");
 
-        let move_left = tc.keybindings.iter().find(|k| k.action == "move_left").unwrap();
+        let move_left = tc
+            .keybindings
+            .iter()
+            .find(|k| k.action == "move_left")
+            .unwrap();
         assert!(move_left.modifiers.super_key);
         assert!(move_left.modifiers.shift);
         assert_eq!(move_left.key, "H");
@@ -2404,7 +2409,11 @@ action = "float"
 
     #[test]
     fn test_window_match() {
-        let match_all = WindowMatch { app_id: None, title: None, window_type: None };
+        let match_all = WindowMatch {
+            app_id: None,
+            title: None,
+            window_type: None,
+        };
         assert!(match_all.matches("any", "any", false));
 
         let match_app = WindowMatch {
@@ -2468,14 +2477,18 @@ action = "float"
         let mut fragments = load_keybinding_fragments(dir.path());
         fragments.sort_by(|a, b| a.binding.cmp(&b.binding));
         assert_eq!(fragments.len(), 3);
-        assert!(fragments
-            .iter()
-            .any(|e| e.binding == "Super+A" && e.module_id == "com.example.a"));
-        assert!(fragments
-            .iter()
-            .filter(|e| e.module_id == "com.example.b")
-            .count()
-            == 2);
+        assert!(
+            fragments
+                .iter()
+                .any(|e| e.binding == "Super+A" && e.module_id == "com.example.a")
+        );
+        assert!(
+            fragments
+                .iter()
+                .filter(|e| e.module_id == "com.example.b")
+                .count()
+                == 2
+        );
     }
 
     #[test]
@@ -2512,13 +2525,9 @@ action = "float"
             pinned_workspaces: Some(Vec::new()),
         };
         let serialized = arlen_runtime_serialize(&original).expect("serialize");
-        let parsed: ArlenRuntimeState =
-            toml::from_str(&serialized).expect("parse round-trip");
+        let parsed: ArlenRuntimeState = toml::from_str(&serialized).expect("parse round-trip");
         assert_eq!(parsed.autotile, original.autotile);
-        assert_eq!(
-            parsed.pinned_workspaces.as_ref().map(|v| v.len()),
-            Some(0)
-        );
+        assert_eq!(parsed.pinned_workspaces.as_ref().map(|v| v.len()), Some(0));
     }
 
     /// Missing fields stay `None`. The override semantics in
@@ -2527,8 +2536,7 @@ action = "float"
     /// silently revert a TOML setting it doesn't mention.
     #[test]
     fn runtime_state_missing_fields_use_defaults() {
-        let parsed: ArlenRuntimeState =
-            toml::from_str("").expect("empty body parses");
+        let parsed: ArlenRuntimeState = toml::from_str("").expect("empty body parses");
         assert_eq!(
             parsed.autotile, None,
             "missing autotile must be None so TOML wins"

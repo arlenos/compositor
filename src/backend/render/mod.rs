@@ -577,7 +577,6 @@ pub fn cursor_elements<'a, 'frame, R>(
             .lock()
             .unwrap()
             .as_ref()
-
         {
             grab_state.render(renderer, output, lt, scanout_node, &mut |elem| {
                 push(CosmicElement::MoveGrab(RescaleRenderElement::from_element(

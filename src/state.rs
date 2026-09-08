@@ -27,7 +27,7 @@ use crate::{
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
-            shell_overlay::{ShellOverlayHandler, ShellOverlayState},
+            shell_overlay::ShellOverlayState,
             titlebar::TitlebarManagerState,
             toplevel_info::ToplevelInfoState,
             toplevel_management::{ManagementCapabilities, ToplevelManagementState},
@@ -326,8 +326,7 @@ pub struct Common {
     /// State backing the `arlen-window-attach-v1` protocol. See
     /// Feature 4 (latency-sync) groundwork. v1 keeps the bindings
     /// index dormant until the phase-2 renderer consumes it.
-    pub window_attach_state:
-        crate::wayland::protocols::window_attach::WindowAttachState,
+    pub window_attach_state: crate::wayland::protocols::window_attach::WindowAttachState,
     /// Fullscreen titlebar edge-reveal state machine.
     pub fullscreen_reveal: crate::shell::fullscreen_reveal::FullscreenRevealState,
     /// True while Super was pressed alone with no other key in between.
@@ -737,11 +736,10 @@ impl State {
             ShellOverlayState::new::<Self, _>(dh, client_has_no_security_context);
         let titlebar_manager_state = TitlebarManagerState::new(dh);
         let grid_manager_state = GridManagerState::new(dh);
-        let window_attach_state =
-            crate::wayland::protocols::window_attach::WindowAttachState::new::<Self, _>(
-                dh,
-                client_has_no_security_context,
-            );
+        let window_attach_state = crate::wayland::protocols::window_attach::WindowAttachState::new::<
+            Self,
+            _,
+        >(dh, client_has_no_security_context);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let cosmic_image_capture_source_state =

@@ -47,15 +47,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 // Keeping this comment as a pointer in case a future revision
 // wants to restore titles.
 use smithay::{
-    backend::{
-        allocator::Fourcc,
-        renderer::element::memory::MemoryRenderBuffer,
-    },
+    backend::{allocator::Fourcc, renderer::element::memory::MemoryRenderBuffer},
     utils::Transform,
 };
 use tiny_skia::{
-    Color, FillRule, Paint, PathBuilder, Pixmap, PixmapMut, Rect,
-    Stroke, Transform as SkiaTransform,
+    Color, FillRule, Paint, PathBuilder, Pixmap, PixmapMut, Rect, Stroke,
+    Transform as SkiaTransform,
 };
 
 use arlen_theme::{ArlenTheme, Rgba};
@@ -342,6 +339,11 @@ fn to_skia(c: Rgba) -> Color {
 /// version uses the CSS spec (via `color-mix(in srgb, ...)`), so
 /// the compositor-rendered header must match this math or its
 /// hover states look muted compared to the shell.
+// UNWIRED. Nothing calls this, so the hover states it exists to match are
+// currently computed some other way - which is precisely what its doc comment
+// above says must not happen. Kept rather than deleted because deleting it
+// would erase the finding; raised in compositor-reports.md (8 Sep).
+#[allow(dead_code)]
 fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
     let t = t.clamp(0.0, 1.0);
     let inv = 1.0 - t;
@@ -411,10 +413,7 @@ pub fn theme_generation() -> u64 {
 /// reports every re-rasterisation, because this runs only when
 /// the cache invalidates — seeing many of them during a drag
 /// means the cache key is unstable (bug).
-pub fn rasterize_header(
-    state: &HeaderVisualState,
-    theme: &ArlenTheme,
-) -> MemoryRenderBuffer {
+pub fn rasterize_header(state: &HeaderVisualState, theme: &ArlenTheme) -> MemoryRenderBuffer {
     // Rasterise at an INTEGER scale that matches the buffer's integer scale
     // tag (`MemoryRenderBuffer::from_slice` takes an `i32` scale). The output
     // scale may be fractional (e.g. 1.5), but if the buffer were rasterised at
@@ -445,16 +444,30 @@ pub fn rasterize_header(
          lucide_stroke_at12={:.3}px lucide_stroke_at10={:.3}px \
          accent={:?} error={:?} border={:?} \
          effective_card={} effective_button={}",
-        pixel_w, pixel_h, scale, state.activated,
-        state.interaction, state.theme_generation,
-        theme.color.bg_shell, theme.color.fg_primary,
-        BUTTON_IDLE_OPACITY, BUTTON_IDLE_OPACITY_INACTIVE,
-        BUTTON_LOGICAL_WIDTH, BUTTON_LOGICAL_HEIGHT, BUTTON_GAP,
+        pixel_w,
+        pixel_h,
+        scale,
+        state.activated,
+        state.interaction,
+        state.theme_generation,
+        theme.color.bg_shell,
+        theme.color.fg_primary,
+        BUTTON_IDLE_OPACITY,
+        BUTTON_IDLE_OPACITY_INACTIVE,
+        BUTTON_LOGICAL_WIDTH,
+        BUTTON_LOGICAL_HEIGHT,
+        BUTTON_GAP,
         BUTTON_STRIP_RIGHT_PAD,
-        ICON_SIZE_MINUS, ICON_SIZE_SQUARE, ICON_SIZE_CLOSE,
-        lucide_stroke_width(12.0), lucide_stroke_width(10.0),
-        theme.color.accent, theme.color.error, theme.color.border_default,
-        theme.effective_card(), theme.effective_button(),
+        ICON_SIZE_MINUS,
+        ICON_SIZE_SQUARE,
+        ICON_SIZE_CLOSE,
+        lucide_stroke_width(12.0),
+        lucide_stroke_width(10.0),
+        theme.color.accent,
+        theme.color.error,
+        theme.color.border_default,
+        theme.effective_card(),
+        theme.effective_button(),
     );
 
     let mut pixmap = Pixmap::new(pixel_w.max(1), pixel_h.max(1))
@@ -603,8 +616,7 @@ fn draw_buttons(
     buttons: &[ButtonRect],
 ) {
     for b in buttons {
-        let (bg_color, icon_color, button_scale) =
-            button_visual(b.button, state, theme);
+        let (bg_color, icon_color, button_scale) = button_visual(b.button, state, theme);
         let hw = b.width * 0.5;
         let hh = b.height * 0.5;
 
@@ -647,14 +659,20 @@ fn draw_buttons(
             let top = b.center_y - rh * 0.5;
             rounded_rect_path(
                 &mut pb,
-                left, top, rw, rh, theme.effective_button() + offset,
+                left,
+                top,
+                rw,
+                rh,
+                theme.effective_button() + offset,
             );
             if let Some(path) = pb.finish() {
                 let mut paint = Paint::default();
                 paint.set_color(to_skia(theme.color.accent));
                 paint.anti_alias = true;
-                let mut stroke = Stroke::default();
-                stroke.width = 2.0;
+                let stroke = Stroke {
+                    width: 2.0,
+                    ..Default::default()
+                };
                 pixmap.stroke_path(&path, &paint, &stroke, ts, None);
             }
         }
@@ -717,7 +735,11 @@ fn button_visual(
     //   inactive  + idle  → 0.4   (compositor-only extension)
     //   inactive  + hover → 0.7
     let button_opacity = if hovered {
-        if state.activated { 1.0 } else { BUTTON_IDLE_OPACITY }
+        if state.activated {
+            1.0
+        } else {
+            BUTTON_IDLE_OPACITY
+        }
     } else if state.activated {
         BUTTON_IDLE_OPACITY
     } else {
@@ -807,12 +829,7 @@ fn rounded_rect_path(pb: &mut PathBuilder, x: f32, y: f32, w: f32, h: f32, r: f3
 /// resvg dependency, gives us explicit control over the path
 /// ordering (the X renders as two separate paths so each gets
 /// round caps at both ends, exactly like Lucide's dual `<path>`s).
-fn draw_button_icon(
-    pixmap: &mut PixmapMut,
-    b: &ButtonRect,
-    color: Rgba,
-    ts: SkiaTransform,
-) {
+fn draw_button_icon(pixmap: &mut PixmapMut, b: &ButtonRect, color: Rgba, ts: SkiaTransform) {
     let icon_size = match b.button {
         HeaderButton::Minimize => ICON_SIZE_MINUS,
         HeaderButton::Maximize => ICON_SIZE_SQUARE,
@@ -832,10 +849,12 @@ fn draw_button_icon(
     let mut paint = Paint::default();
     paint.set_color(to_skia(color));
     paint.anti_alias = true;
-    let mut stroke = Stroke::default();
-    stroke.width = stroke_w;
-    stroke.line_cap = tiny_skia::LineCap::Round;
-    stroke.line_join = tiny_skia::LineJoin::Round;
+    let stroke = Stroke {
+        width: stroke_w,
+        line_cap: tiny_skia::LineCap::Round,
+        line_join: tiny_skia::LineJoin::Round,
+        ..Default::default()
+    };
 
     match b.button {
         HeaderButton::Minimize => {
@@ -909,7 +928,6 @@ fn draw_button_icon(
 // from `rasterize_header`, put the `TITLE_LEFT_PAD` /
 // `TITLE_FONT_SIZE` constants back. See the git history for the
 // full body if needed.
-
 
 // ===== Tests =====
 
@@ -1012,7 +1030,11 @@ mod tests {
         assert!((bg[0] - theme.color.error[0]).abs() < 0.001, "R {}", bg[0]);
         assert!((bg[1] - theme.color.error[1]).abs() < 0.001);
         assert!((bg[2] - theme.color.error[2]).abs() < 0.001);
-        assert!((bg[3] - 1.0).abs() < 0.001, "A should be full, got {}", bg[3]);
+        assert!(
+            (bg[3] - 1.0).abs() < 0.001,
+            "A should be full, got {}",
+            bg[3]
+        );
         // Icon pure white at full alpha on activated window.
         assert_eq!(icon, [1.0, 1.0, 1.0, 1.0]);
         // Canonical app-settings WindowControls has NO scale on
@@ -1137,11 +1159,19 @@ mod tests {
         let transparent: Rgba = [0.0, 0.0, 0.0, 0.0];
         let m = mix(fg, transparent, 0.10);
         // RGB should be preserved (premultiplied math divides back).
-        assert!((m[0] - 0.98).abs() < 0.001, "R should be preserved, got {}", m[0]);
+        assert!(
+            (m[0] - 0.98).abs() < 0.001,
+            "R should be preserved, got {}",
+            m[0]
+        );
         assert!((m[1] - 0.98).abs() < 0.001);
         assert!((m[2] - 0.98).abs() < 0.001);
         // Alpha reduced by the weight.
-        assert!((m[3] - 0.10).abs() < 0.001, "A should be 0.10, got {}", m[3]);
+        assert!(
+            (m[3] - 0.10).abs() < 0.001,
+            "A should be 0.10, got {}",
+            m[3]
+        );
     }
 
     #[test]
@@ -1282,7 +1312,10 @@ mod tests {
             Some(out) => out,
             None => return,
         };
-        assert_eq!(a, b, "bg_app is the app-content colour and must not reach the header");
+        assert_eq!(
+            a, b,
+            "bg_app is the app-content colour and must not reach the header"
+        );
 
         let mut red_shell = test_theme_dark();
         red_shell.color.bg_shell = [1.0, 0.0, 0.0, 1.0];
@@ -1290,7 +1323,10 @@ mod tests {
             Some(out) => out,
             None => return,
         };
-        assert_ne!(a, c, "bg_shell is the header's own colour and must reach it");
+        assert_ne!(
+            a, c,
+            "bg_shell is the header's own colour and must reach it"
+        );
     }
 
     /// The focus ring is painted in the theme's accent.
@@ -1332,7 +1368,10 @@ mod tests {
             Some(out) => out,
             None => return,
         };
-        assert_eq!(a, b, "the accent must not paint anything when nothing is focused");
+        assert_eq!(
+            a, b,
+            "the accent must not paint anything when nothing is focused"
+        );
     }
 
     // ── Lucide icon geometry ──────────────────────────────────
@@ -1357,7 +1396,10 @@ mod tests {
         // 12 * 14/24 = 7.0 px.
         let vb_span = 19.0 - 5.0;
         let phys = ICON_SIZE_MINUS * vb_span / LUCIDE_VIEWBOX;
-        assert!((phys - 7.0).abs() < 1e-5, "minus line should be 7px at icon_size=12, got {phys}");
+        assert!(
+            (phys - 7.0).abs() < 1e-5,
+            "minus line should be 7px at icon_size=12, got {phys}"
+        );
     }
 
     #[test]
@@ -1376,7 +1418,10 @@ mod tests {
         // At icon_size 12: 12 * 12/24 = 6.0 px diagonal extent
         // per axis (i.e. ±3 px from centre).
         let extent_per_axis = ICON_SIZE_CLOSE * 12.0 / LUCIDE_VIEWBOX;
-        assert!((extent_per_axis - 6.0).abs() < 1e-5, "X diagonal axis extent {extent_per_axis}");
+        assert!(
+            (extent_per_axis - 6.0).abs() < 1e-5,
+            "X diagonal axis extent {extent_per_axis}"
+        );
         // Endpoints sit `extent/2` from centre.
         let offset_from_centre = extent_per_axis * 0.5;
         assert!((offset_from_centre - 3.0).abs() < 1e-5);
@@ -1394,7 +1439,10 @@ mod tests {
         };
         let theme = test_theme_dark();
         let (bg, _, _) = button_visual(HeaderButton::Close, &state, &theme);
-        assert!((bg[0] - theme.color.error[0]).abs() < 0.01, "close hover R should match theme.color.error");
+        assert!(
+            (bg[0] - theme.color.error[0]).abs() < 0.01,
+            "close hover R should match theme.color.error"
+        );
         assert!((bg[1] - theme.color.error[1]).abs() < 0.01);
         assert!((bg[2] - theme.color.error[2]).abs() < 0.01);
     }
@@ -1419,9 +1467,11 @@ mod tests {
             interaction: ButtonInteraction::Hover(HeaderButton::Minimize),
             ..stub_state(600, true)
         };
-        let (_, icon_act_hover, _) =
-            button_visual(HeaderButton::Minimize, &hover_state, &theme);
-        assert!((icon_act_hover[3] - 1.0).abs() < 1e-5, "activated hover should be 1.0 opacity");
+        let (_, icon_act_hover, _) = button_visual(HeaderButton::Minimize, &hover_state, &theme);
+        assert!(
+            (icon_act_hover[3] - 1.0).abs() < 1e-5,
+            "activated hover should be 1.0 opacity"
+        );
 
         let (_, icon_inact_idle, _) =
             button_visual(HeaderButton::Minimize, &stub_state(600, false), &theme);
@@ -1431,8 +1481,7 @@ mod tests {
             interaction: ButtonInteraction::Hover(HeaderButton::Minimize),
             ..stub_state(600, false)
         };
-        let (_, icon_inact_hover, _) =
-            button_visual(HeaderButton::Minimize, &inact_hover, &theme);
+        let (_, icon_inact_hover, _) = button_visual(HeaderButton::Minimize, &inact_hover, &theme);
         assert!((icon_inact_hover[3] - BUTTON_IDLE_OPACITY).abs() < 1e-5);
     }
 
@@ -1449,8 +1498,24 @@ mod tests {
             dark.color.bg_shell, dark.color.bg_app,
             "dark theme should have distinct shell-chrome vs app-content backgrounds"
         );
-        assert_eq!(dark.color.bg_shell, [0x0a as f32 / 255.0, 0x0a as f32 / 255.0, 0x0a as f32 / 255.0, 1.0]);
-        assert_eq!(dark.color.bg_app,   [0x0f as f32 / 255.0, 0x0f as f32 / 255.0, 0x0f as f32 / 255.0, 1.0]);
+        assert_eq!(
+            dark.color.bg_shell,
+            [
+                0x0a as f32 / 255.0,
+                0x0a as f32 / 255.0,
+                0x0a as f32 / 255.0,
+                1.0
+            ]
+        );
+        assert_eq!(
+            dark.color.bg_app,
+            [
+                0x0f as f32 / 255.0,
+                0x0f as f32 / 255.0,
+                0x0f as f32 / 255.0,
+                1.0
+            ]
+        );
     }
 
     /// Render the real header through the headless render-readback harness
@@ -1458,9 +1523,12 @@ mod tests {
     /// `width*height*4`, no padding), or `None` when no headless GL device is
     /// available so the caller skips instead of failing. Width `w`, scale 1.0,
     /// so the buffer and output are `w x HEADER_LOGICAL_HEIGHT` 1:1.
-    fn render_header_rgba(state: &HeaderVisualState, theme: &ArlenTheme) -> Option<(Vec<u8>, i32, i32)> {
+    fn render_header_rgba(
+        state: &HeaderVisualState,
+        theme: &ArlenTheme,
+    ) -> Option<(Vec<u8>, i32, i32)> {
         use crate::utils::render_harness::{headless_gles_renderer, render_to_rgba};
-        use smithay::backend::renderer::element::{memory::MemoryRenderBufferRenderElement, Kind};
+        use smithay::backend::renderer::element::{Kind, memory::MemoryRenderBufferRenderElement};
         use smithay::utils::Size;
 
         let mut renderer = match headless_gles_renderer() {
@@ -1520,7 +1588,11 @@ mod tests {
         //    buttons) is the opaque near-black shell background. `bg_shell` is
         //    #0a0a0a; allow a small per-channel margin for the GLES blend.
         let drag = px(w / 4, h / 2);
-        assert!(drag[3] >= 250, "drag zone must be opaque, got alpha {}", drag[3]);
+        assert!(
+            drag[3] >= 250,
+            "drag zone must be opaque, got alpha {}",
+            drag[3]
+        );
         assert!(
             drag[0] < 40 && drag[1] < 40 && drag[2] < 40,
             "drag zone must be the dark shell background, got {drag:?}"
@@ -1529,9 +1601,8 @@ mod tests {
         // 2) The bottom-border row differs from the drag-zone background, so
         //    `draw_bottom_border` actually painted `border_default`.
         let border = px(w / 4, h - 1);
-        let channel_delta = |a: [u8; 4], b: [u8; 4]| {
-            (0..3).map(|c| a[c].abs_diff(b[c]) as u32).sum::<u32>()
-        };
+        let channel_delta =
+            |a: [u8; 4], b: [u8; 4]| (0..3).map(|c| a[c].abs_diff(b[c]) as u32).sum::<u32>();
         assert!(
             channel_delta(border, drag) > 8,
             "bottom border ({border:?}) should differ from the bg ({drag:?})"
@@ -1571,7 +1642,12 @@ mod tests {
         };
         let hpx = |x: i32, y: i32| -> [u8; 4] {
             let i = ((y * hw + x) * 4) as usize;
-            [hover_pixels[i], hover_pixels[i + 1], hover_pixels[i + 2], hover_pixels[i + 3]]
+            [
+                hover_pixels[i],
+                hover_pixels[i + 1],
+                hover_pixels[i + 2],
+                hover_pixels[i + 3],
+            ]
         };
         // The close button is rightmost; its hovered red bg makes far-right
         // pixels diverge from the idle render in the same positions.

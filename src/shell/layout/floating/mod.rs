@@ -265,10 +265,7 @@ impl TiledCorners {
 }
 
 impl FloatingLayout {
-    pub fn new(
-        appearance: AppearanceConfig,
-        output: &Output,
-    ) -> FloatingLayout {
+    pub fn new(appearance: AppearanceConfig, output: &Output) -> FloatingLayout {
         let mut layout = Self {
             last_output_size: output.geometry().size.as_local(),
             appearance,
@@ -1041,10 +1038,7 @@ impl FloatingLayout {
         if mapped.is_window() {
             // if it is just a window
             self.space.unmap_elem(&mapped);
-            mapped.convert_to_stack(
-                (&output, mapped.bbox()),
-                self.appearance,
-            );
+            mapped.convert_to_stack((&output, mapped.bbox()), self.appearance);
             self.map_internal(
                 mapped.clone(),
                 Some(location.as_local()),
@@ -1061,11 +1055,7 @@ impl FloatingLayout {
 
             self.space.unmap_elem(&mapped);
             let handle = mapped.loop_handle();
-            mapped.convert_to_surface(
-                first,
-                (&output, mapped.bbox()),
-                self.appearance,
-            );
+            mapped.convert_to_surface(first, (&output, mapped.bbox()), self.appearance);
             let mut new_elements = vec![mapped.clone()];
 
             // map the rest
@@ -1073,11 +1063,8 @@ impl FloatingLayout {
                 other.try_force_undecorated(false);
                 other.set_tiled(false);
                 let focused = other == focused;
-                let window = CosmicMapped::from(CosmicWindow::new(
-                    other,
-                    handle.clone(),
-                    self.appearance,
-                ));
+                let window =
+                    CosmicMapped::from(CosmicWindow::new(other, handle.clone(), self.appearance));
                 window.output_enter(&output, window.bbox());
 
                 {

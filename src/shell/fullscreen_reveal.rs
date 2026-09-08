@@ -7,7 +7,6 @@
 /// - Pointer enters top edge (y <= 2px): immediate reveal
 /// - Pointer leaves titlebar area: 300ms delay, then hide
 /// - Debounce: rapid enter/leave within 50ms cancels pending hide
-
 use std::time::{Duration, Instant};
 
 /// Height of the edge-detection zone in logical pixels.

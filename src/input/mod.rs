@@ -339,13 +339,16 @@ impl State {
                     // without any other key in between.
                     {
                         // XKB keycode = evdev + 8: KEY_LEFTMETA=125+8=133, KEY_RIGHTMETA=126+8=134
-                        let is_super =
-                            keycode == Keycode::new(133) || keycode == Keycode::new(134);
+                        let is_super = keycode == Keycode::new(133) || keycode == Keycode::new(134);
 
                         if is_super && state == KeyState::Pressed {
                             self.common.super_tap_pending = true;
-                            tracing::info!("super_tap: PENDING (Super pressed, keycode={:?})", keycode);
-                        } else if is_super && state == KeyState::Released
+                            tracing::info!(
+                                "super_tap: PENDING (Super pressed, keycode={:?})",
+                                keycode
+                            );
+                        } else if is_super
+                            && state == KeyState::Released
                             && self.common.super_tap_pending
                         {
                             self.common.super_tap_pending = false;
@@ -366,7 +369,10 @@ impl State {
 
                             self.common.shell_overlay_state.send_waypointer_open();
                         } else if is_super && state == KeyState::Released {
-                            tracing::info!("super_tap: Super released but pending={}", self.common.super_tap_pending);
+                            tracing::info!(
+                                "super_tap: Super released but pending={}",
+                                self.common.super_tap_pending
+                            );
                         } else if state == KeyState::Pressed && !is_super {
                             if self.common.super_tap_pending {
                                 tracing::info!("super_tap: CANCELLED by keycode={:?}", keycode);
@@ -449,10 +455,14 @@ impl State {
                     // Debug: log what surface_under found after grab release
                     if let Some((target, _)) = under.as_ref() {
                         match target {
-                            crate::shell::focus::target::PointerFocusTarget::WlSurface { .. } => {
+                            crate::shell::focus::target::PointerFocusTarget::WlSurface {
+                                ..
+                            } => {
                                 tracing::trace!("surface_under: WlSurface (layer or toplevel)");
                             }
-                            crate::shell::focus::target::PointerFocusTarget::X11Surface { .. } => {
+                            crate::shell::focus::target::PointerFocusTarget::X11Surface {
+                                ..
+                            } => {
                                 tracing::trace!("surface_under: X11Surface");
                             }
                             crate::shell::focus::target::PointerFocusTarget::StackUI(_) => {
@@ -884,10 +894,14 @@ impl State {
                         let shell_r = self.common.shell.read();
                         let fs_info = shell_r.active_space(&output).and_then(|ws| {
                             let fs = ws.get_fullscreen(&seat)?;
-                            let sid = fs.surface.wl_surface().map(|wl| {
-                                use smithay::reexports::wayland_server::Resource;
-                                wl.id().protocol_id()
-                            }).unwrap_or(0);
+                            let sid = fs
+                                .surface
+                                .wl_surface()
+                                .map(|wl| {
+                                    use smithay::reexports::wayland_server::Resource;
+                                    wl.id().protocol_id()
+                                })
+                                .unwrap_or(0);
                             let pointer_y = position.y - output.geometry().loc.y as f64;
                             Some((pointer_y, true, sid))
                         });
@@ -897,19 +911,22 @@ impl State {
                         let action = self.common.fullscreen_reveal.update(py, has_fs, sid);
                         match action {
                             RevealAction::Reveal => {
-                                self.common.shell_overlay_state
+                                self.common
+                                    .shell_overlay_state
                                     .send_fullscreen_titlebar_reveal(sid);
                             }
                             RevealAction::Hide => {
                                 let hide_sid = if prev_sid != 0 { prev_sid } else { sid };
-                                self.common.shell_overlay_state
+                                self.common
+                                    .shell_overlay_state
                                     .send_fullscreen_titlebar_hide(hide_sid);
                             }
                             RevealAction::None => {}
                         }
                     }
 
-                    let shell = self.common.shell.read();                    let mut shell = self.common.shell.write();
+                    let _shell = self.common.shell.read();
+                    let mut shell = self.common.shell.write();
                     // Keep the seat's active output following the pointer. Click-to-
                     // focus (PointerButton) resolves its target via
                     // `seat.active_output()`
@@ -1009,8 +1026,9 @@ impl State {
                         if let Some(target) = under.filter(|_| !on_resize_fork) {
                             // Check if Super/Logo is truly held down, not just
                             // a stuck modifier from nested compositor key routing.
-                            let logo_modifier_set = seat.get_keyboard().unwrap().modifier_state().logo;
-                            let logo_physically_held = if logo_modifier_set {
+                            let logo_modifier_set =
+                                seat.get_keyboard().unwrap().modifier_state().logo;
+                            let _logo_physically_held = if logo_modifier_set {
                                 seat.get_keyboard().unwrap().with_pressed_keysyms(|syms| {
                                     syms.iter().any(|k| {
                                         let sym = k.modified_sym();
@@ -2729,8 +2747,12 @@ impl State {
                 tracing::debug!(
                     "toml_keybindings: checking {} bindings (mods: logo={} shift={} ctrl={} alt={}, raw_syms={:?}, latin={:?})",
                     self.common.config.toml_keybindings.len(),
-                    modifiers.logo, modifiers.shift, modifiers.ctrl, modifiers.alt,
-                    raw_syms, latin_sym,
+                    modifiers.logo,
+                    modifiers.shift,
+                    modifiers.ctrl,
+                    modifiers.alt,
+                    raw_syms,
+                    latin_sym,
                 );
             }
             for kb in &self.common.config.toml_keybindings {
@@ -2748,7 +2770,10 @@ impl State {
                 if !key_matches(keysym) {
                     tracing::debug!(
                         "toml_keybindings: mods match for {:?} but key {:?} (keysym={:?}) not in raw_syms={:?}",
-                        kb.action, kb.key, keysym, raw_syms,
+                        kb.action,
+                        kb.key,
+                        keysym,
+                        raw_syms,
                     );
                     continue;
                 }
@@ -2791,12 +2816,13 @@ impl State {
                         if entry.scope != wanted_scope {
                             continue;
                         }
-                        if let Some(app) = focused_app {
-                            if entry.app_id != app {
-                                continue;
-                            }
+                        if let Some(app) = focused_app
+                            && entry.app_id != app
+                        {
+                            continue;
                         }
-                        let Some((mods, key)) = crate::config::parse_keybinding(&entry.binding) else {
+                        let Some((mods, key)) = crate::config::parse_keybinding(&entry.binding)
+                        else {
                             continue;
                         };
                         if mods != current_mods {
@@ -2816,8 +2842,11 @@ impl State {
                     }
                     None
                 };
-                scan("app_global", None)
-                    .or_else(|| focused.as_deref().and_then(|app| scan("app_focused", Some(app))))
+                scan("app_global", None).or_else(|| {
+                    focused
+                        .as_deref()
+                        .and_then(|app| scan("app_focused", Some(app)))
+                })
             };
             if let Some((action, binding, owner)) = matched {
                 tracing::info!(
@@ -3484,7 +3513,9 @@ fn target_may_receive_input(target: &PointerFocusTarget) -> bool {
                 // choice - and that reasoning was left standing above the line
                 // that overruled it, so the comment told a reader the opposite
                 // of what the code does.
-                tracing::info!("presented: refusing input to a surface that has never been on screen");
+                tracing::info!(
+                    "presented: refusing input to a surface that has never been on screen"
+                );
             }
             ok
         }

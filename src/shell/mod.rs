@@ -4,9 +4,11 @@ use grabs::{MenuAlignment, SeatMoveGrabState};
 use indexmap::IndexMap;
 use layout::TilingExceptions;
 use std::{
-    collections::{HashMap, HashSet},
-    sync::{Mutex, atomic::{AtomicBool, Ordering}},
-    thread,
+    collections::HashMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 use wayland_backend::server::ClientId;
@@ -69,7 +71,6 @@ use smithay::{
     },
     xwayland::X11Surface,
 };
-use tracing::error;
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
@@ -104,16 +105,26 @@ mod seats;
 mod workspace;
 pub mod zoom;
 pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
-pub use self::workspace::LayoutMode;
 pub use self::seats::*;
+pub use self::workspace::LayoutMode;
 pub use self::workspace::*;
 use self::zoom::{OutputZoomState, ZoomState};
 
 /// Protocol events queued by Shell, drained by Common::refresh().
 #[derive(Debug)]
 pub(crate) enum ZoomProtocolEvent {
-    Show { level: f64, increment: u32, movement: u32 },
-    Update { level: f64 },
+    Show {
+        level: f64,
+        increment: u32,
+        movement: u32,
+    },
+    /// UNWIRED. Matched when it is dispatched, but nothing ever constructs it,
+    /// so a zoom-level change while the magnifier is open sends desktop-shell
+    /// nothing. Raised in compositor-reports.md (8 Sep).
+    #[allow(dead_code)]
+    Update {
+        level: f64,
+    },
     Hide,
 }
 
@@ -381,7 +392,11 @@ pub struct SessionLock {
     /// the race the desktop is what is on the panel when the machine wakes.
     pub locker: Option<SessionLocker>,
     /// Outputs that have not shown a locked frame yet.
-    pub unpresented: HashSet<Output>,
+    ///
+    /// A `Vec` rather than a `HashSet` for the same reason `pending_windows` is
+    /// one: `Output` carries interior mutability, so it is not a sound hash key.
+    /// There are never more than a handful of outputs, so the scan is free.
+    pub unpresented: Vec<Output>,
 }
 
 impl SessionLock {
@@ -391,9 +406,10 @@ impl SessionLock {
     /// frame, or it is gone - and both mean the same thing to the protocol:
     /// that output can no longer be showing unlocked content.
     pub fn stop_waiting_on(&mut self, output: &Output) {
-        if !self.unpresented.remove(output) {
+        let Some(idx) = self.unpresented.iter().position(|o| o == output) else {
             return;
-        }
+        };
+        self.unpresented.swap_remove(idx);
         if self.unpresented.is_empty()
             && let Some(locker) = self.locker.take()
         {
@@ -495,12 +511,7 @@ fn create_workspace(
             | WorkspaceCapabilities::Pin
             | WorkspaceCapabilities::Move,
     );
-    Workspace::new(
-        workspace_handle,
-        output.clone(),
-        tiling,
-        appearance,
-    )
+    Workspace::new(workspace_handle, output.clone(), tiling, appearance)
 }
 
 fn create_workspace_from_pinned(
@@ -538,12 +549,7 @@ fn create_workspace_from_pinned(
         state.set_workspace_name(&workspace_handle, name);
     }
 
-    Workspace::from_pinned(
-        pinned,
-        workspace_handle,
-        output.clone(),
-        appearance,
-    )
+    Workspace::from_pinned(pinned, workspace_handle, output.clone(), appearance)
 }
 
 /* We will probably need this again at some point
@@ -759,9 +765,7 @@ impl WorkspaceSet {
                 let keep = if workspace.can_auto_remove(xdg_activation_state) {
                     i <= self.active
                         || i == len - 1
-                        || self
-                            .previously_active
-                            .is_some_and(|(p_idx, _)| p_idx == i)
+                        || self.previously_active.is_some_and(|(p_idx, _)| p_idx == i)
                 } else {
                     true
                 };
@@ -983,12 +987,7 @@ impl Workspaces {
                 set
             })
             .unwrap_or_else(|| {
-                WorkspaceSet::new(
-                    workspace_state,
-                    output,
-                    self.autotile,
-                    self.appearance,
-                )
+                WorkspaceSet::new(workspace_state, output, self.autotile, self.appearance)
             });
         workspace_state.add_group_output(&set.group, output);
 
@@ -1748,8 +1747,13 @@ impl Common {
             }
             if let Some(event) = shell.pending_zoom_event.take() {
                 match event {
-                    ZoomProtocolEvent::Show { level, increment, movement } => {
-                        self.shell_overlay_state.send_zoom_toolbar_show(level, increment, movement);
+                    ZoomProtocolEvent::Show {
+                        level,
+                        increment,
+                        movement,
+                    } => {
+                        self.shell_overlay_state
+                            .send_zoom_toolbar_show(level, increment, movement);
                     }
                     ZoomProtocolEvent::Update { level } => {
                         self.shell_overlay_state.send_zoom_toolbar_update(level);
@@ -1875,8 +1879,10 @@ impl Common {
         if cache.contains_key(&payload.surface_id) {
             self.shell_overlay_state.send_window_header_update(
                 payload.surface_id,
-                payload.x, payload.y,
-                payload.width, payload.height,
+                payload.x,
+                payload.y,
+                payload.width,
+                payload.height,
                 payload.title.clone(),
                 payload.activated,
                 payload.stack_id,
@@ -1884,11 +1890,14 @@ impl Common {
         } else {
             self.shell_overlay_state.send_window_header_show(
                 payload.surface_id,
-                payload.x, payload.y,
-                payload.width, payload.height,
+                payload.x,
+                payload.y,
+                payload.width,
+                payload.height,
                 payload.title.clone(),
                 payload.activated,
-                true, true,
+                true,
+                true,
                 payload.stack_id,
             );
         }
@@ -1955,8 +1964,7 @@ impl Common {
             let guard = grab_state_slot.lock().unwrap();
             if let Some(grab_state) = guard.as_ref()
                 && should_emit_shell_header_events(&grab_state.window)
-                && let Some(payload) =
-                    crate::shell::dragged_window_header_payload(grab_state)
+                && let Some(payload) = crate::shell::dragged_window_header_payload(grab_state)
             {
                 current.insert(payload.surface_id, payload);
             }
@@ -1986,8 +1994,10 @@ impl Common {
                 if cache.contains_key(id) {
                     self.shell_overlay_state.send_window_header_update(
                         payload.surface_id,
-                        payload.x, payload.y,
-                        payload.width, payload.height,
+                        payload.x,
+                        payload.y,
+                        payload.width,
+                        payload.height,
                         payload.title.clone(),
                         payload.activated,
                         payload.stack_id,
@@ -1995,11 +2005,14 @@ impl Common {
                 } else {
                     self.shell_overlay_state.send_window_header_show(
                         payload.surface_id,
-                        payload.x, payload.y,
-                        payload.width, payload.height,
+                        payload.x,
+                        payload.y,
+                        payload.width,
+                        payload.height,
                         payload.title.clone(),
                         payload.activated,
-                        true, true,
+                        true,
+                        true,
                         payload.stack_id,
                     );
                 }
@@ -2034,10 +2047,7 @@ impl Common {
         use smithay::reexports::wayland_server::Resource;
 
         // Collect surface IDs with active titlebar bindings.
-        let surface_ids: Vec<u64> = self
-            .titlebar_manager_state
-            .active_surface_ids()
-            .collect();
+        let surface_ids: Vec<u64> = self.titlebar_manager_state.active_surface_ids().collect();
 
         if surface_ids.is_empty() {
             return;
@@ -2054,35 +2064,35 @@ impl Common {
             'outer: for workspace in shell.workspaces.spaces() {
                 // Check fullscreen surfaces.
                 for fs in &workspace.fullscreen_surfaces {
-                    if let Some(wl) = fs.surface.wl_surface() {
-                        if wl.id().protocol_id() as u64 == sid {
-                            is_fullscreen = true;
-                            found = true;
-                            break 'outer;
-                        }
+                    if let Some(wl) = fs.surface.wl_surface()
+                        && wl.id().protocol_id() as u64 == sid
+                    {
+                        is_fullscreen = true;
+                        found = true;
+                        break 'outer;
                     }
                 }
                 // Check tiling layer.
                 for (mapped, _) in workspace.tiling_layer.mapped() {
                     for (surface, _) in mapped.windows() {
-                        if let Some(wl) = surface.wl_surface() {
-                            if wl.id().protocol_id() as u64 == sid {
-                                is_tiled = true;
-                                found = true;
-                                break 'outer;
-                            }
+                        if let Some(wl) = surface.wl_surface()
+                            && wl.id().protocol_id() as u64 == sid
+                        {
+                            is_tiled = true;
+                            found = true;
+                            break 'outer;
                         }
                     }
                 }
                 // Check floating layer.
                 for mapped in workspace.floating_layer.mapped() {
                     for (surface, _) in mapped.windows() {
-                        if let Some(wl) = surface.wl_surface() {
-                            if wl.id().protocol_id() as u64 == sid {
-                                // Floating: is_tiled = false, is_fullscreen = false.
-                                found = true;
-                                break 'outer;
-                            }
+                        if let Some(wl) = surface.wl_surface()
+                            && wl.id().protocol_id() as u64 == sid
+                        {
+                            // Floating: is_tiled = false, is_fullscreen = false.
+                            found = true;
+                            break 'outer;
                         }
                     }
                 }
@@ -2202,23 +2212,6 @@ impl Common {
     }
 }
 
-/// Decides whether the given window should receive a Arlen-rendered
-/// header via the `arlen-shell-overlay` `window_header_*` protocol.
-///
-/// Four inclusion criteria (all must be true):
-///
-/// 1. Wayland surface — X11 clients have their own decoration paradigm
-///    (MOTIF_WM_HINTS with inverted semantics — see decoration-spec
-///    discussion); excluded from v1 to avoid surprises.
-/// 2. Not a stack — stacks carry their own tab-bar which already IS
-///    the decoration.
-/// 3. Client requested SSD — `has_ssd == true` means the client either
-///    explicitly asked for server-side via xdg/kde-decoration, or it
-///    bound the protocol without committing a mode. Clients that draw
-///    their own CSD (GTK, Qt with default settings, Firefox, most
-///    Electron apps) never hit this branch.
-/// 4. Not fullscreen — fullscreen content shouldn't be pushed down by
-///    a 36px header.
 /// Global mirror of `Shell::tiled_headers_enabled` so the render
 /// decision can be made from anywhere without threading a `&Shell`
 /// through the call chain. Same pattern as
@@ -2380,11 +2373,8 @@ fn x11_should_render_header(x11: &smithay::xwayland::X11Surface) -> bool {
         );
         return false;
     }
-    if x11.is_popup() {
-        tracing::debug!(
-            "X11-DEBUG window_id={} skipped: popup",
-            x11.window_id()
-        );
+    if x11.is_modal() {
+        tracing::debug!("X11-DEBUG window_id={} skipped: popup", x11.window_id());
         return false;
     }
     if x11.is_transient_for().is_some() {
@@ -2400,7 +2390,8 @@ fn x11_should_render_header(x11: &smithay::xwayland::X11Surface) -> bool {
         Some(other) => {
             tracing::debug!(
                 "X11-DEBUG window_id={} skipped: window_type={:?}",
-                x11.window_id(), other
+                x11.window_id(),
+                other
             );
             return false;
         }
@@ -2410,7 +2401,9 @@ fn x11_should_render_header(x11: &smithay::xwayland::X11Surface) -> bool {
     if geo.size.w < 200 || geo.size.h < 100 {
         tracing::debug!(
             "X11-DEBUG window_id={} skipped: size {}x{} below 200x100 gate",
-            x11.window_id(), geo.size.w, geo.size.h
+            x11.window_id(),
+            geo.size.w,
+            geo.size.h
         );
         return false;
     }
@@ -2425,7 +2418,9 @@ fn x11_should_render_header(x11: &smithay::xwayland::X11Surface) -> bool {
 
     tracing::debug!(
         "X11-DEBUG window_id={} eligible: size={}x{} type=Normal no_motif_none",
-        x11.window_id(), geo.size.w, geo.size.h
+        x11.window_id(),
+        geo.size.w,
+        geo.size.h
     );
     true
 }
@@ -2471,8 +2466,10 @@ pub(crate) struct CachedHeaderPayload {
 impl From<&WindowHeaderPayload> for CachedHeaderPayload {
     fn from(p: &WindowHeaderPayload) -> Self {
         Self {
-            x: p.x, y: p.y,
-            width: p.width, height: p.height,
+            x: p.x,
+            y: p.y,
+            width: p.width,
+            height: p.height,
             title: p.title.clone(),
             activated: p.activated,
             stack_id: p.stack_id,
@@ -2561,10 +2558,7 @@ pub fn dragged_window_header_payload(
     })
 }
 
-pub fn window_header_payload(
-    shell: &Shell,
-    mapped: &CosmicMapped,
-) -> Option<WindowHeaderPayload> {
+pub fn window_header_payload(shell: &Shell, mapped: &CosmicMapped) -> Option<WindowHeaderPayload> {
     if !should_render_window_header(mapped) {
         return None;
     }
@@ -2662,11 +2656,7 @@ impl Shell {
         workspace_delta: WorkspaceDelta,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
-        tracing::info!(
-            "Shell::activate: output={} idx={}",
-            output.name(),
-            idx,
-        );
+        tracing::info!("Shell::activate: output={} idx={}", output.name(), idx,);
         match &mut self.workspaces.mode {
             WorkspaceMode::OutputBound => {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
@@ -3259,7 +3249,11 @@ impl Shell {
                     self.swap_indicator = Some(swap_indicator(evlh.clone()));
                     evlh.insert_idle(|state| {
                         state.common.shell_overlay_state.send_indicator_show(
-                            2, 0, 0, String::new(), String::new(),
+                            2,
+                            0,
+                            0,
+                            String::new(),
+                            String::new(),
                         );
                     });
                 }
@@ -3337,16 +3331,13 @@ impl Shell {
                     })
                     .unwrap_or_default();
                 evlh.clone().insert_idle(move |state| {
-                    state.common.shell_overlay_state.send_indicator_show(
-                        3, 0x0F, dir_val, s1, s2,
-                    );
+                    state
+                        .common
+                        .shell_overlay_state
+                        .send_indicator_show(3, 0x0F, dir_val, s1, s2);
                 });
             }
-            self.resize_indicator = Some(resize_indicator(
-                direction,
-                config,
-                evlh,
-            ));
+            self.resize_indicator = Some(resize_indicator(direction, config, evlh));
         } else if let Some(direction) = self.resize_mode.active_direction() {
             self.resize_mode = ResizeMode::Ended(Instant::now(), direction);
             if let Some((_, direction, edge, _, _, _)) = self.resize_state.as_ref() {
@@ -3997,8 +3988,10 @@ impl Shell {
         // has_ssd = true. X11 surfaces go through their own path.
         tracing::info!(
             "DECO-DEBUG map_window app_id={:?} title={:?} is_decorated(committed)={} is_decorated(pending)={}",
-            window.app_id(), window.title(),
-            window.is_decorated(false), window.is_decorated(true)
+            window.app_id(),
+            window.title(),
+            window.is_decorated(false),
+            window.is_decorated(true)
         );
 
         new_target
@@ -4600,7 +4593,9 @@ impl Shell {
         // After-state snapshot: geometry on the target workspace + the
         // window's own reported size. Compare with the pre-move snapshot
         // above to tell whether the move caused a layout-driven resize.
-        let post_geo = self.workspaces.space_for_handle(to)
+        let post_geo = self
+            .workspaces
+            .space_for_handle(to)
             .and_then(|ws| ws.element_geometry(mapped));
         let post_size = mapped.geometry().size;
         tracing::info!(
@@ -4734,14 +4729,20 @@ impl Shell {
             for output in shell.outputs() {
                 let layer_map = layer_map_for_output(output);
                 let layer_count = layer_map.layers().count();
-                tracing::info!("find_shell_focus: output={} layer_count={layer_count}", output.name());
+                tracing::info!(
+                    "find_shell_focus: output={} layer_count={layer_count}",
+                    output.name()
+                );
                 for layer in layer_map.layers() {
                     let surface = layer.wl_surface();
                     let surface_pid = surface
                         .client()
                         .and_then(|c| c.get_credentials(dh).ok())
                         .map(|creds| creds.pid);
-                    tracing::info!("find_shell_focus: layer ns={} pid={surface_pid:?}", layer.namespace());
+                    tracing::info!(
+                        "find_shell_focus: layer ns={} pid={surface_pid:?}",
+                        layer.namespace()
+                    );
                     if surface_pid == Some(overlay_pid) {
                         tracing::info!("find_shell_focus: MATCH on layer ns={}", layer.namespace());
                         let target = focus::target::PointerFocusTarget::WlSurface {
@@ -4763,41 +4764,42 @@ impl Shell {
             return None; // TODO: an application can send a menu request for a touch event
         };
 
-        let items_for_element = |mapped: &CosmicMapped,
-                                 is_tiled: bool,
-                                 is_sticky: bool,
-                                 tiling_enabled: bool,
-                                 edge: ResizeEdge,
-                                 workspaces: Vec<crate::shell::grabs::menu::WorkspaceMenuEntry>| {
-            let is_stacked = mapped.is_stack();
+        let items_for_element =
+            |mapped: &CosmicMapped,
+             is_tiled: bool,
+             is_sticky: bool,
+             tiling_enabled: bool,
+             edge: ResizeEdge,
+             workspaces: Vec<crate::shell::grabs::menu::WorkspaceMenuEntry>| {
+                let is_stacked = mapped.is_stack();
 
-            if target_stack || !is_stacked {
-                Box::new(
-                    window_items(
-                        mapped,
-                        is_tiled,
-                        is_stacked,
-                        is_sticky,
-                        tiling_enabled,
-                        edge,
-                        config,
-                        &workspaces,
-                    )
-                    .collect::<Vec<Item>>()
-                    .into_iter(),
-                ) as Box<dyn Iterator<Item = Item>>
-            } else {
-                let (tab, _) = mapped
-                    .windows()
-                    .find(|(s, _)| s.wl_surface().as_deref() == Some(surface))
-                    .unwrap();
-                Box::new(
-                    tab_items(mapped, &tab, is_tiled, config)
+                if target_stack || !is_stacked {
+                    Box::new(
+                        window_items(
+                            mapped,
+                            is_tiled,
+                            is_stacked,
+                            is_sticky,
+                            tiling_enabled,
+                            edge,
+                            config,
+                            &workspaces,
+                        )
                         .collect::<Vec<Item>>()
                         .into_iter(),
-                ) as Box<dyn Iterator<Item = Item>>
-            }
-        };
+                    ) as Box<dyn Iterator<Item = Item>>
+                } else {
+                    let (tab, _) = mapped
+                        .windows()
+                        .find(|(s, _)| s.wl_surface().as_deref() == Some(surface))
+                        .unwrap();
+                    Box::new(
+                        tab_items(mapped, &tab, is_tiled, config)
+                            .collect::<Vec<Item>>()
+                            .into_iter(),
+                    ) as Box<dyn Iterator<Item = Item>>
+                }
+            };
 
         let (global_position, menu_items) = if let Some((set, mapped, relative_loc)) =
             self.workspaces.sets.values().find_map(|set| {
@@ -4822,27 +4824,15 @@ impl Shell {
                 .workspaces
                 .spaces_for_output(&output)
                 .enumerate()
-                .map(|(i, space)| {
-                    crate::shell::grabs::menu::WorkspaceMenuEntry {
-                        handle: space.handle,
-                        label: space
-                            .id
-                            .clone()
-                            .unwrap_or_else(|| format!("{}", i + 1)),
-                        is_current: false,
-                    }
+                .map(|(i, space)| crate::shell::grabs::menu::WorkspaceMenuEntry {
+                    handle: space.handle,
+                    label: space.id.clone().unwrap_or_else(|| format!("{}", i + 1)),
+                    is_current: false,
                 })
                 .collect::<Vec<_>>();
             (
                 global_position,
-                items_for_element(
-                    mapped,
-                    false,
-                    true,
-                    false,
-                    ResizeEdge::all(),
-                    ws_entries,
-                ),
+                items_for_element(mapped, false, true, false, ResizeEdge::all(), ws_entries),
             )
         } else if let Some((workspace, output)) = self.workspace_for_surface(surface) {
             let workspace = self.workspaces.space_for_handle(&workspace).unwrap();
@@ -4890,15 +4880,10 @@ impl Shell {
                     .workspaces
                     .spaces_for_output(&output)
                     .enumerate()
-                    .map(|(i, space)| {
-                        crate::shell::grabs::menu::WorkspaceMenuEntry {
-                            handle: space.handle,
-                            label: space
-                                .id
-                                .clone()
-                                .unwrap_or_else(|| format!("{}", i + 1)),
-                            is_current: space.handle == current_handle,
-                        }
+                    .map(|(i, space)| crate::shell::grabs::menu::WorkspaceMenuEntry {
+                        handle: space.handle,
+                        label: space.id.clone().unwrap_or_else(|| format!("{}", i + 1)),
+                        is_current: space.handle == current_handle,
                     })
                     .collect::<Vec<_>>();
                 (
@@ -4922,39 +4907,43 @@ impl Shell {
         let items: Vec<Item> = menu_items.collect();
 
         // Try the overlay protocol path first.
-        let (menu_id, shell_focus) =
-            if let Some(menu_id) = shell_overlay_state.send_context_menu(
-                global_position.x,
-                global_position.y,
-                &items_to_protocol(&items),
-            ) {
-                let shell_focus = find_shell_focus(self, shell_overlay_state, dh);
-                // Callback Vec must be in the same DFS order as the
-                // protocol stream so `context_menu_activate(index)` resolves
-                // to the right `Item::Entry::on_press` closure, even when
-                // submenus nest arbitrarily deep.
-                let flat = crate::shell::grabs::menu::flatten_callbacks(&items);
-                tracing::info!(
-                    "menu_request: menu_id={menu_id} flat callbacks ({} items):",
-                    flat.len()
-                );
-                for (i, it) in flat.iter().enumerate() {
-                    match it {
-                        Item::Entry { title, action, disabled, .. } => tracing::info!(
-                            "  [{i}] Entry title={title:?} action={action:?} disabled={disabled}"
-                        ),
-                        Item::Submenu { title, .. } => {
-                            tracing::info!("  [{i}] Submenu title={title:?}")
-                        }
-                        Item::Separator => tracing::info!("  [{i}] Separator"),
+        let (menu_id, shell_focus) = if let Some(menu_id) = shell_overlay_state.send_context_menu(
+            global_position.x,
+            global_position.y,
+            &items_to_protocol(&items),
+        ) {
+            let shell_focus = find_shell_focus(self, shell_overlay_state, dh);
+            // Callback Vec must be in the same DFS order as the
+            // protocol stream so `context_menu_activate(index)` resolves
+            // to the right `Item::Entry::on_press` closure, even when
+            // submenus nest arbitrarily deep.
+            let flat = crate::shell::grabs::menu::flatten_callbacks(&items);
+            tracing::info!(
+                "menu_request: menu_id={menu_id} flat callbacks ({} items):",
+                flat.len()
+            );
+            for (i, it) in flat.iter().enumerate() {
+                match it {
+                    Item::Entry {
+                        title,
+                        action,
+                        disabled,
+                        ..
+                    } => tracing::info!(
+                        "  [{i}] Entry title={title:?} action={action:?} disabled={disabled}"
+                    ),
+                    Item::Submenu { title, .. } => {
+                        tracing::info!("  [{i}] Submenu title={title:?}")
                     }
+                    Item::Separator => tracing::info!("  [{i}] Separator"),
                 }
-                pending_callbacks.insert(menu_id, flat);
-                (Some(menu_id), shell_focus)
-            } else {
-                // No shell client connected - fall back to Iced rendering.
-                (None, None)
-            };
+            }
+            pending_callbacks.insert(menu_id, flat);
+            (Some(menu_id), shell_focus)
+        } else {
+            // No shell client connected - fall back to Iced rendering.
+            (None, None)
+        };
 
         let grab = MenuGrab::new(
             GrabStartData::Pointer(start_data),
@@ -4988,10 +4977,7 @@ impl Shell {
 
         // In monocle mode, windows are fixed (maximized, no dragging).
         let output = seat.active_output();
-        if self
-            .active_space(&output)
-            .is_some_and(|ws| ws.is_monocle())
-        {
+        if self.active_space(&output).is_some_and(|ws| ws.is_monocle()) {
             return None;
         }
 
@@ -5042,12 +5028,8 @@ impl Shell {
             .unwrap();
 
         let mapped = if move_out_of_stack {
-            let new_mapped: CosmicMapped = CosmicWindow::new(
-                window.clone(),
-                evlh.clone(),
-                self.appearance_conf,
-            )
-            .into();
+            let new_mapped: CosmicMapped =
+                CosmicWindow::new(window.clone(), evlh.clone(), self.appearance_conf).into();
             if old_mapped.is_maximized(false) {
                 new_mapped.set_maximized(false);
             }
@@ -5358,20 +5340,16 @@ impl Shell {
 
             let current_idx = focus_stack.iter().position(|w| w == &focused);
             let next_idx = match direction {
-                FocusDirection::Down | FocusDirection::Right => {
-                    current_idx.map(|i| (i + 1) % focus_stack.len()).unwrap_or(0)
-                }
-                FocusDirection::Up | FocusDirection::Left => {
-                    current_idx
-                        .map(|i| if i == 0 { focus_stack.len() - 1 } else { i - 1 })
-                        .unwrap_or(0)
-                }
+                FocusDirection::Down | FocusDirection::Right => current_idx
+                    .map(|i| (i + 1) % focus_stack.len())
+                    .unwrap_or(0),
+                FocusDirection::Up | FocusDirection::Left => current_idx
+                    .map(|i| if i == 0 { focus_stack.len() - 1 } else { i - 1 })
+                    .unwrap_or(0),
                 _ => return FocusResult::None,
             };
 
-            return FocusResult::Some(KeyboardFocusTarget::Element(
-                focus_stack[next_idx].clone(),
-            ));
+            return FocusResult::Some(KeyboardFocusTarget::Element(focus_stack[next_idx].clone()));
         }
 
         if workspace.is_tiled(&focused.active_window()) {
@@ -5465,11 +5443,8 @@ impl Shell {
                     .values_mut()
                     .find(|set| set.sticky_layer.mapped().any(|m| &mapped == m))
                 {
-                    set.sticky_layer.move_current_element(
-                        direction,
-                        seat,
-                        ManagedLayer::Sticky,
-                    )
+                    set.sticky_layer
+                        .move_current_element(direction, seat, ManagedLayer::Sticky)
                 } else {
                     if mapped
                         .maximized_state
@@ -5605,10 +5580,7 @@ impl Shell {
         let old = self.tiled_headers_enabled;
         self.tiled_headers_enabled = enabled;
         crate::shell::set_tiled_headers_global(enabled);
-        tracing::info!(
-            "TILE-DEBUG tiled_headers_enabled: {} -> {}",
-            old, enabled
-        );
+        tracing::info!("TILE-DEBUG tiled_headers_enabled: {} -> {}", old, enabled);
 
         // Find every tiled, non-stack mapped window. We collect
         // first to release the iterator borrow on `self` before
@@ -5769,15 +5741,13 @@ impl Shell {
                 .remap_minimized(window, from, previous_position);
             Some(info)
         } else {
-            let Some((workspace, window)) = self.workspaces.spaces_mut().find_map(|w| {
+            let (workspace, window) = self.workspaces.spaces_mut().find_map(|w| {
                 w.minimized_windows
                     .iter()
                     .position(|m| m.windows().any(|s| &s == surface))
                     .map(|i| w.minimized_windows.swap_remove(i))
                     .map(|window| (w, window))
-            }) else {
-                return None;
-            };
+            })?;
 
             if window.mapped().is_some_and(|m| m.is_stack()) {
                 window.mapped().unwrap().set_active(surface);
@@ -6510,7 +6480,7 @@ impl Shell {
 
         // Hide all surfaces of the mapped element.
         for (surface, _) in mapped.windows() {
-            if let Some(wl) = surface.wl_surface() {
+            if let Some(_wl) = surface.wl_surface() {
                 // Setting geometry to zero effectively hides the window.
                 // The window is kept alive in the scratchpad list.
             }
@@ -6596,9 +6566,9 @@ impl Shell {
         let mapped = self.scratchpad.windows[idx].clone();
 
         // Configure the window size.
-        mapped.set_geometry(smithay::utils::Rectangle::from_loc_and_size(
-            (0, 0),
-            (width, height),
+        mapped.set_geometry(smithay::utils::Rectangle::new(
+            (0, 0).into(),
+            (width, height).into(),
         ));
 
         let Some(workspace) = self.active_space_mut(&output) else {
@@ -6606,10 +6576,8 @@ impl Shell {
         };
 
         // Map to floating layer at centered position.
-        let local_pos = Point::<i32, Logical>::from((
-            x - output_geo.loc.x,
-            y - output_geo.loc.y,
-        )).as_local();
+        let local_pos =
+            Point::<i32, Logical>::from((x - output_geo.loc.x, y - output_geo.loc.y)).as_local();
         workspace.floating_layer.map(mapped, Some(local_pos));
 
         self.scratchpad.visible = Some(idx);
@@ -6647,10 +6615,10 @@ impl Shell {
 
         if self.scratchpad.windows.len() != before {
             // Adjust visible index.
-            if let Some(idx) = self.scratchpad.visible {
-                if idx >= self.scratchpad.windows.len() {
-                    self.scratchpad.visible = None;
-                }
+            if let Some(idx) = self.scratchpad.visible
+                && idx >= self.scratchpad.windows.len()
+            {
+                self.scratchpad.visible = None;
             }
         }
     }
@@ -6728,8 +6696,10 @@ pub fn check_grab_preconditions(
 
 #[cfg(test)]
 mod tiled_headers_policy_tests {
-    use super::{HeaderEligibilityInputs, header_eligibility_pure,
-        TILED_HEADERS_ENABLED, set_tiled_headers_global, tiled_headers_enabled_global};
+    use super::{
+        HeaderEligibilityInputs, TILED_HEADERS_ENABLED, header_eligibility_pure,
+        set_tiled_headers_global, tiled_headers_enabled_global,
+    };
     use std::sync::atomic::Ordering;
 
     fn inputs(
@@ -6758,11 +6728,7 @@ mod tiled_headers_policy_tests {
                 for toggle in [true, false] {
                     for csd in [true, false] {
                         let i = inputs(true, fs, tiled, toggle, csd);
-                        assert!(
-                            header_eligibility_pure(i),
-                            "stack should render: {:?}",
-                            i
-                        );
+                        assert!(header_eligibility_pure(i), "stack should render: {:?}", i);
                     }
                 }
             }
@@ -6804,7 +6770,10 @@ mod tiled_headers_policy_tests {
         // window-rule" scenarios.
         for toggle in [true, false] {
             let i = inputs(false, false, false, toggle, true);
-            assert!(header_eligibility_pure(i), "floating ignores toggle: toggle={toggle}");
+            assert!(
+                header_eligibility_pure(i),
+                "floating ignores toggle: toggle={toggle}"
+            );
         }
     }
 
@@ -6814,7 +6783,10 @@ mod tiled_headers_policy_tests {
         // never paints chrome regardless of toggle.
         for toggle in [true, false] {
             let i = inputs(false, false, false, toggle, false);
-            assert!(!header_eligibility_pure(i), "csd app never gets header: toggle={toggle}");
+            assert!(
+                !header_eligibility_pure(i),
+                "csd app never gets header: toggle={toggle}"
+            );
         }
     }
 
@@ -6906,7 +6878,10 @@ mod header_id_tests {
         let wl_encoded = encode_wayland(0x1234);
         let x11_encoded = encode_x11(0x0020_1234);
         assert_eq!(wl_encoded & HEADER_ID_X11_NAMESPACE, 0);
-        assert_eq!(x11_encoded & HEADER_ID_X11_NAMESPACE, HEADER_ID_X11_NAMESPACE);
+        assert_eq!(
+            x11_encoded & HEADER_ID_X11_NAMESPACE,
+            HEADER_ID_X11_NAMESPACE
+        );
         // Recover the X11 XID by masking.
         assert_eq!(x11_encoded & !HEADER_ID_X11_NAMESPACE, 0x0020_1234);
     }

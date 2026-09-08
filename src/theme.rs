@@ -26,8 +26,7 @@ use crate::state::State;
 const DARK_TOML: &str = arlen_theme::DARK_TOML;
 const LIGHT_TOML: &str = arlen_theme::LIGHT_TOML;
 
-static ARLEN_THEME: RwLock<Option<arlen_theme::ArlenTheme>> =
-    RwLock::new(None);
+static ARLEN_THEME: RwLock<Option<arlen_theme::ArlenTheme>> = RwLock::new(None);
 
 /// Read the global ArlenTheme. Falls back to a freshly-resolved
 /// dark theme if the watcher hasn't run yet (early startup
@@ -106,9 +105,7 @@ pub(crate) fn arlen_unfocused_hint_rgb(lt: &arlen_theme::ArlenTheme) -> [f32; 3]
 /// painting the bundled default across every output.
 pub fn recompose_effective_theme() -> arlen_theme::ArlenTheme {
     try_recompose_effective_theme().unwrap_or_else(|err| {
-        tracing::warn!(
-            "theme: initial compose failed ({err}); using bundled dark default"
-        );
+        tracing::warn!("theme: initial compose failed ({err}); using bundled dark default");
         default_dark_theme()
     })
 }
@@ -168,12 +165,9 @@ pub fn try_recompose_effective_theme() -> Result<arlen_theme::ArlenTheme, String
     //    customization. Parse failure propagates as Err — callers
     //    decide how to handle it (startup falls back to bundled,
     //    runtime reload keeps the last-good theme).
-    let mut composed = arlen_theme::ArlenTheme::resolve(
-        bundled,
-        user_theme.as_deref(),
-        customization.as_deref(),
-    )
-    .map_err(|err| format!("customization parse error: {err}"))?;
+    let mut composed =
+        arlen_theme::ArlenTheme::resolve(bundled, user_theme.as_deref(), customization.as_deref())
+            .map_err(|err| format!("customization parse error: {err}"))?;
 
     // 4. Apply appearance.toml preferences (accent override,
     //    radius_intensity, accessibility).
@@ -232,9 +226,7 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) {
         let lt = match try_recompose_effective_theme() {
             Ok(t) => t,
             Err(err) => {
-                tracing::warn!(
-                    "theme reload: parse failed, keeping last-good: {err}"
-                );
+                tracing::warn!("theme reload: parse failed, keeping last-good: {err}");
                 return;
             }
         };
@@ -270,12 +262,9 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) {
     // — see HIGH-1 docstring above for the race that motivated
     // splitting these.
     let theme_path = arlen_theme::ArlenTheme::user_customization_path();
-    let lt_watcher = arlen_theme::ThemeWatcher::start_at(
-        vec![theme_path],
-        move || {
-            lt_ping_tx.ping();
-        },
-    );
+    let lt_watcher = arlen_theme::ThemeWatcher::start_at(vec![theme_path], move || {
+        lt_ping_tx.ping();
+    });
     match lt_watcher {
         Ok(w) => std::mem::forget(w),
         Err(e) => tracing::warn!("failed to start arlen theme watcher: {e}"),

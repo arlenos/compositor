@@ -383,10 +383,7 @@ fn configured_gaps_global() -> (i32, i32, bool) {
 }
 
 impl TilingLayout {
-    pub fn new(
-        appearance: AppearanceConfig,
-        output: &Output,
-    ) -> TilingLayout {
+    pub fn new(appearance: AppearanceConfig, output: &Output) -> TilingLayout {
         let (inner_gap, outer_gap, smart_gaps) = configured_gaps_global();
         TilingLayout {
             queue: TreeQueue {
@@ -714,12 +711,9 @@ impl TilingLayout {
                     let _ = this.unmap(this_mapped, None);
                 }
 
-                let mapped: CosmicMapped = CosmicWindow::new(
-                    stack_surface,
-                    this_stack.loop_handle(),
-                    this.appearance,
-                )
-                .into();
+                let mapped: CosmicMapped =
+                    CosmicWindow::new(stack_surface, this_stack.loop_handle(), this.appearance)
+                        .into();
                 if this.output != other.output {
                     mapped.output_leave(&this.output);
                     mapped.output_enter(&other.output, mapped.bbox());
@@ -1561,12 +1555,8 @@ impl TilingLayout {
             match window.handle_move(direction) {
                 StackMoveResult::Handled => return MoveResult::Done,
                 StackMoveResult::MoveOut(surface, loop_handle) => {
-                    let mapped: CosmicMapped = CosmicWindow::new(
-                        surface,
-                        loop_handle,
-                        self.appearance,
-                    )
-                    .into();
+                    let mapped: CosmicMapped =
+                        CosmicWindow::new(surface, loop_handle, self.appearance).into();
                     mapped.output_enter(&self.output, mapped.bbox());
                     let orientation = match direction {
                         Direction::Left | Direction::Right => Orientation::Vertical,
@@ -2184,10 +2174,7 @@ impl TilingLayout {
             // if it is just a window
             match tree.get_mut(&node_id).unwrap().data_mut() {
                 Data::Mapped { mapped, .. } => {
-                    mapped.convert_to_stack(
-                        (&self.output, mapped.bbox()),
-                        self.appearance,
-                    );
+                    mapped.convert_to_stack((&self.output, mapped.bbox()), self.appearance);
                     focus_stack.append(mapped.clone());
                     KeyboardFocusTarget::Element(mapped.clone())
                 }
@@ -2221,11 +2208,8 @@ impl TilingLayout {
                 other.try_force_undecorated(false);
                 other.set_tiled(false);
                 let focused = other == focused;
-                let window = CosmicMapped::from(CosmicWindow::new(
-                    other,
-                    handle.clone(),
-                    self.appearance,
-                ));
+                let window =
+                    CosmicMapped::from(CosmicWindow::new(other, handle.clone(), self.appearance));
                 window.output_enter(&self.output, window.bbox());
 
                 {
@@ -2322,11 +2306,7 @@ impl TilingLayout {
                         return None;
                     }
                     let handle = handle.unwrap();
-                    let stack = CosmicStack::new(
-                        surfaces.into_iter(),
-                        handle,
-                        self.appearance,
-                    );
+                    let stack = CosmicStack::new(surfaces.into_iter(), handle, self.appearance);
 
                     for child in tree
                         .children_ids(&last_active)
@@ -2739,19 +2719,18 @@ impl TilingLayout {
         // Snapshot target's current Data::Mapped — that's what
         // moves into the placeholder slot. Validate placeholder
         // shape before mutating anything.
-        let target_data_copy =
-            match new_tree.get(&target_node).ok()?.data() {
-                Data::Mapped {
-                    mapped,
-                    last_geometry,
-                    minimize_rect,
-                } => Data::Mapped {
-                    mapped: mapped.clone(),
-                    last_geometry: *last_geometry,
-                    minimize_rect: *minimize_rect,
-                },
-                _ => return None,
-            };
+        let target_data_copy = match new_tree.get(&target_node).ok()?.data() {
+            Data::Mapped {
+                mapped,
+                last_geometry,
+                minimize_rect,
+            } => Data::Mapped {
+                mapped: mapped.clone(),
+                last_geometry: *last_geometry,
+                minimize_rect: *minimize_rect,
+            },
+            _ => return None,
+        };
         let target_loc_old = match &target_data_copy {
             Data::Mapped { last_geometry, .. } => last_geometry.loc,
             _ => unreachable!(),
@@ -2769,9 +2748,7 @@ impl TilingLayout {
             .get_mut(&placeholder_node)
             .unwrap()
             .replace_data(target_data_copy);
-        if let Data::Mapped { mapped, .. } =
-            new_tree.get(&placeholder_node).unwrap().data()
-        {
+        if let Data::Mapped { mapped, .. } = new_tree.get(&placeholder_node).unwrap().data() {
             *mapped.tiling_node_id.lock().unwrap() = Some(placeholder_node.clone());
         }
 
@@ -2913,10 +2890,7 @@ impl TilingLayout {
             Some(TargetZone::WindowStack(window_id, _)) if tree.get(window_id).is_ok() => {
                 match tree.get_mut(window_id).unwrap().data_mut() {
                     Data::Mapped { mapped, .. } => {
-                        mapped.convert_to_stack(
-                            (&self.output, mapped.bbox()),
-                            self.appearance,
-                        );
+                        mapped.convert_to_stack((&self.output, mapped.bbox()), self.appearance);
                         let Some(stack) = mapped.stack_ref() else {
                             unreachable!()
                         };
@@ -4450,8 +4424,12 @@ impl TilingLayout {
 
     /// Count the number of mapped (non-placeholder) windows in the current tree.
     fn mapped_window_count(&self) -> usize {
-        let Some((tree, _, _)) = self.queue.trees.back() else { return 0 };
-        let Some(root) = tree.root_node_id() else { return 0 };
+        let Some((tree, _, _)) = self.queue.trees.back() else {
+            return 0;
+        };
+        let Some(root) = tree.root_node_id() else {
+            return 0;
+        };
         match tree.traverse_pre_order(root) {
             Ok(iter) => iter
                 .filter(|node| matches!(node.data(), Data::Mapped { .. }))
@@ -4550,8 +4528,7 @@ where
     // window-corner radius so the in-flight drag visuals match the
     // tiles they represent. Hardcoded `8.0` would freeze them at the
     // bundled default and ignore the appearance-page intensity slider.
-    let lt_backdrop_radius =
-        crate::theme::arlen_theme().effective_window_corners()[0];
+    let lt_backdrop_radius = crate::theme::arlen_theme().effective_window_corners()[0];
 
     let focused = seat
         .and_then(|seat| {
@@ -5763,15 +5740,18 @@ fn render_new_tree_windows<R>(
                         }) {
                             resize.force_update();
                             let edge_bits = possible_edges.bits();
-                            let dir_val: u32 = resize.with_program(|internal| {
-                                match internal.direction {
+                            let dir_val: u32 =
+                                resize.with_program(|internal| match internal.direction {
                                     ResizeDirection::Outwards => 1,
                                     ResizeDirection::Inwards => 2,
-                                }
-                            });
+                                });
                             resize.loop_handle().insert_idle(move |state| {
                                 state.common.shell_overlay_state.send_indicator_show(
-                                    3, edge_bits, dir_val, String::new(), String::new(),
+                                    3,
+                                    edge_bits,
+                                    dir_val,
+                                    String::new(),
+                                    String::new(),
                                 );
                             });
                         }

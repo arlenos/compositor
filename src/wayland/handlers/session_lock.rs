@@ -37,7 +37,7 @@ impl SessionLockHandler for State {
         // frame callbacks of its own (the KMS surface thread skips them), so
         // waiting for one would hold `locked` back forever; it shows whatever its
         // source output shows, which is the locked frame.
-        let unpresented = shell
+        let unpresented: Vec<_> = shell
             .outputs()
             .filter(|output| output.mirroring().is_none())
             .cloned()

@@ -9,7 +9,7 @@
 //!
 //! The offscreen-render + readback mirrors [`crate::utils::screenshot`], which
 //! already proves the fork's renderer implements `Offscreen<GlesRenderbuffer>`
-//! + `ExportMem`; this module wraps the same calls behind a renderer that is
+//! and `ExportMem`; this module wraps the same calls behind a renderer that is
 //! constructed headlessly (no DRM master, no winit window) so a test can drive
 //! it directly.
 //!
@@ -23,16 +23,16 @@
 
 use std::path::Path;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use smithay::{
     backend::{
         allocator::Fourcc,
         egl::{EGLContext, EGLDevice, EGLDisplay},
         renderer::{
+            Bind, ExportMem, Offscreen,
             damage::OutputDamageTracker,
             element::RenderElement,
             gles::{GlesRenderbuffer, GlesRenderer},
-            Bind, ExportMem, Offscreen,
         },
     },
     utils::{Rectangle, Size, Transform},
@@ -83,10 +83,15 @@ where
 {
     let logical = Size::from((width, height));
     let format = Fourcc::Abgr8888;
-    let mut buffer =
-        Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, logical.to_buffer(1, Transform::Normal))
-            .context("create offscreen buffer")?;
-    let mut fb = renderer.bind(&mut buffer).context("bind offscreen buffer")?;
+    let mut buffer = Offscreen::<GlesRenderbuffer>::create_buffer(
+        renderer,
+        format,
+        logical.to_buffer(1, Transform::Normal),
+    )
+    .context("create offscreen buffer")?;
+    let mut fb = renderer
+        .bind(&mut buffer)
+        .context("bind offscreen buffer")?;
 
     let mut damage = OutputDamageTracker::new(logical.to_physical(1), 1.0, Transform::Normal);
     damage

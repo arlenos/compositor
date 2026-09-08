@@ -274,10 +274,7 @@ impl AppInterface {
     /// `NameOwnerChanged` handles the vast majority of cases — but
     /// apps that know they're about to release the bus name can use
     /// this to be tidy.
-    async fn unregister_app(
-        &self,
-        #[zbus(header)] header: Header<'_>,
-    ) -> zbus::fdo::Result<bool> {
+    async fn unregister_app(&self, #[zbus(header)] header: Header<'_>) -> zbus::fdo::Result<bool> {
         let Some(sender) = header.sender() else {
             return Err(zbus::fdo::Error::Failed(
                 "no sender on D-Bus message".into(),

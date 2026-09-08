@@ -22,10 +22,12 @@
 /// KMS, but a single fullscreen multiplicative shader pass costs
 /// well under a millisecond on any GPU we care about, so the
 /// uniformity is worth more than the optimization.
-
 use std::time::{Duration, Instant};
 
-use calloop::{LoopHandle, timer::{TimeoutAction, Timer}};
+use calloop::{
+    LoopHandle,
+    timer::{TimeoutAction, Timer},
+};
 use tracing::{info, warn};
 
 use crate::state::State;
@@ -46,9 +48,10 @@ pub const MAX_TEMPERATURE_K: u16 = 6500;
 
 /// User-facing schedule for night light. Determines when the engine
 /// transitions to the warm temperature and back to neutral.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NightLightSchedule {
     /// Manual on/off — `enabled` flag is the source of truth.
+    #[default]
     Manual,
     /// Sunset to sunrise based on the user's `[location]`. Computed
     /// in the schedule timer (D2.3); the engine itself is
@@ -57,12 +60,6 @@ pub enum NightLightSchedule {
     /// Custom window in minutes-since-midnight. The schedule timer
     /// flips `enabled` at the boundaries.
     Custom { start_min: u32, end_min: u32 },
-}
-
-impl Default for NightLightSchedule {
-    fn default() -> Self {
-        NightLightSchedule::Manual
-    }
 }
 
 /// Long-lived night-light state hung off `Common`. The schedule
@@ -146,13 +143,13 @@ pub fn kelvin_to_rgb(temperature_k: u16) -> (f32, f32, f32) {
     let red = if t <= 66.0 {
         255.0
     } else {
-        (329.698_727_446 * (t - 60.0).powf(-0.133_204_759_2)).clamp(0.0, 255.0)
+        (329.698_73 * (t - 60.0).powf(-0.133_204_76)).clamp(0.0, 255.0)
     };
 
     let green = if t <= 66.0 {
-        (99.470_802_586_1 * t.ln() - 161.119_568_166_1).clamp(0.0, 255.0)
+        (99.470_8 * t.ln() - 161.119_57).clamp(0.0, 255.0)
     } else {
-        (288.122_169_528_3 * (t - 60.0).powf(-0.075_514_849_2)).clamp(0.0, 255.0)
+        (288.122_16 * (t - 60.0).powf(-0.075_514_846)).clamp(0.0, 255.0)
     };
 
     let blue = if t >= 66.0 {
@@ -160,7 +157,7 @@ pub fn kelvin_to_rgb(temperature_k: u16) -> (f32, f32, f32) {
     } else if t <= 19.0 {
         0.0
     } else {
-        (138.517_731_223_1 * (t - 10.0).ln() - 305.044_792_730_7).clamp(0.0, 255.0)
+        (138.517_73 * (t - 10.0).ln() - 305.044_8).clamp(0.0, 255.0)
     };
 
     (red / 255.0, green / 255.0, blue / 255.0)
@@ -276,7 +273,10 @@ mod tests {
     fn kelvin_warm_drops_blue() {
         let (_r, _g, b_warm) = kelvin_to_rgb(3400);
         let (_, _, b_neutral) = kelvin_to_rgb(NEUTRAL_TEMPERATURE_K);
-        assert!(b_warm < b_neutral, "warm blue {b_warm} >= neutral {b_neutral}");
+        assert!(
+            b_warm < b_neutral,
+            "warm blue {b_warm} >= neutral {b_neutral}"
+        );
         assert!(b_warm < 0.7, "warm blue {b_warm} not strongly warmed");
     }
 

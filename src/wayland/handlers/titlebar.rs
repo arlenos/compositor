@@ -6,7 +6,6 @@
 /// `window_header_*` events.
 ///
 /// See `docs/architecture/titlebar-protocol.md`.
-
 use crate::{
     delegate_titlebar,
     state::{Common, State},
@@ -67,7 +66,10 @@ pub fn update_titlebar_mode(
         TitlebarMode::Floating
     };
 
-    if !common.titlebar_manager_state.send_mode_changed(surface_id, mode) {
+    if !common
+        .titlebar_manager_state
+        .send_mode_changed(surface_id, mode)
+    {
         return; // Mode unchanged.
     }
 
@@ -81,7 +83,13 @@ pub fn update_titlebar_mode(
 }
 
 /// Process a tab addition.
-pub fn handle_add_tab(state: &mut TitlebarState, id: &str, title: &str, icon: Option<&str>, status: u32) {
+pub fn handle_add_tab(
+    state: &mut TitlebarState,
+    id: &str,
+    title: &str,
+    icon: Option<&str>,
+    status: u32,
+) {
     // Remove existing tab with same ID (update case).
     state.tabs.retain(|t| t.id != id);
     state.tabs.push(TabInfo {

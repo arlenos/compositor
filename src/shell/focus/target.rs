@@ -880,8 +880,7 @@ impl WaylandFocus for PointerFocusTarget {
             PointerFocusTarget::X11Surface { surface, .. } => Cow::Owned(surface.wl_surface()?),
             PointerFocusTarget::ResizeFork(_)
             | PointerFocusTarget::StackUI(_)
-            | PointerFocusTarget::WindowUI(_)
-            => {
+            | PointerFocusTarget::WindowUI(_) => {
                 return None;
             }
         })

@@ -3,16 +3,15 @@
 //! Handler implementation for the `arlen-shell-overlay-v1` protocol.
 
 use smithay::utils::SERIAL_COUNTER;
-use smithay::wayland::seat::WaylandFocus;
 
 use crate::{
     delegate_shell_overlay,
-    shell::{SeatExt, grabs::menu::{Item, SeatMenuGrabState}},
-    utils::prelude::*,
-    state::State,
-    wayland::protocols::shell_overlay::{
-        ShellOverlayHandler, ShellOverlayState,
+    shell::{
+        SeatExt,
+        grabs::menu::{Item, SeatMenuGrabState},
     },
+    state::State,
+    wayland::protocols::shell_overlay::{ShellOverlayHandler, ShellOverlayState},
 };
 
 impl ShellOverlayHandler for State {
@@ -40,7 +39,13 @@ impl ShellOverlayHandler for State {
 
         let action_index = index as usize;
         match callbacks.get(action_index) {
-            Some(Item::Entry { title, action, disabled, on_press, .. }) => {
+            Some(Item::Entry {
+                title,
+                action,
+                disabled,
+                on_press,
+                ..
+            }) => {
                 tracing::info!(
                     "context_menu_activate: resolved to Entry title={title:?} \
                      action={action:?} disabled={disabled}"
@@ -51,15 +56,12 @@ impl ShellOverlayHandler for State {
                     );
                 } else {
                     let on_press = on_press.clone();
-                    let _ = self
-                        .common
-                        .event_loop_handle
-                        .insert_idle(move |state| {
-                            tracing::info!(
-                                "context_menu_activate: firing on_press for index {action_index}"
-                            );
-                            (on_press)(&state.common.event_loop_handle);
-                        });
+                    let _ = self.common.event_loop_handle.insert_idle(move |state| {
+                        tracing::info!(
+                            "context_menu_activate: firing on_press for index {action_index}"
+                        );
+                        (on_press)(&state.common.event_loop_handle);
+                    });
                 }
             }
             Some(Item::Submenu { title, .. }) => {
@@ -89,9 +91,7 @@ impl ShellOverlayHandler for State {
         tracing::info!("context_menu_activate: grab released for menu_id={menu_id}");
         // Notify desktop-shell that the menu is closed so it can restore
         // click-through on the layer surface (set_ignore_cursor_events(true)).
-        self.common
-            .shell_overlay_state
-            .close_context_menu(menu_id);
+        self.common.shell_overlay_state.close_context_menu(menu_id);
         tracing::info!("context_menu_activate: context_menu_closed sent for menu_id={menu_id}");
     }
 
@@ -100,24 +100,34 @@ impl ShellOverlayHandler for State {
         self.common.pending_menu_callbacks.remove(&menu_id);
         unset_overlay_grab(self, menu_id);
         tracing::info!("context_menu_dismiss: grab released for menu_id={menu_id}");
-        self.common
-            .shell_overlay_state
-            .close_context_menu(menu_id);
+        self.common.shell_overlay_state.close_context_menu(menu_id);
         tracing::info!("context_menu_dismiss: context_menu_closed sent for menu_id={menu_id}");
     }
 
     fn zoom_increase(&mut self) {
         let seat = self.common.shell.read().seats.last_active().clone();
-        self.update_zoom(&seat, self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0, true);
+        self.update_zoom(
+            &seat,
+            self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0,
+            true,
+        );
     }
 
     fn zoom_decrease(&mut self) {
         let seat = self.common.shell.read().seats.last_active().clone();
-        self.update_zoom(&seat, -(self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0), true);
+        self.update_zoom(
+            &seat,
+            -(self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0),
+            true,
+        );
     }
 
     fn zoom_close(&mut self) {
-        self.common.config.cosmic_conf.accessibility_zoom.show_overlay = false;
+        self.common
+            .config
+            .cosmic_conf
+            .accessibility_zoom
+            .show_overlay = false;
         self.common.update_config();
     }
 
@@ -145,9 +155,9 @@ impl ShellOverlayHandler for State {
         // — see `Shell::window_header_surface_id` for the mapping.
         // Rather than encode the split here, delegate to the same
         // helper that produced the id so the two paths can't drift.
-        let mapped = shell.mapped().find(|m| {
-            crate::shell::window_header_surface_id(m) == Some(surface_id)
-        });
+        let mapped = shell
+            .mapped()
+            .find(|m| crate::shell::window_header_surface_id(m) == Some(surface_id));
         let Some(mapped) = mapped.cloned() else {
             tracing::warn!(
                 "shell_overlay: window_header_action for unknown surface_id {}",
@@ -158,7 +168,9 @@ impl ShellOverlayHandler for State {
         let surface = mapped.active_window();
         tracing::info!(
             "HEADER action={} surface_id={} app_id={:?}",
-            action, surface_id, surface.app_id()
+            action,
+            surface_id,
+            surface.app_id()
         );
         std::mem::drop(shell);
 
@@ -172,8 +184,10 @@ impl ShellOverlayHandler for State {
                 let info = self.common.shell.write().minimize_request(&surface);
                 if let Some(info) = info {
                     self.common.event_bus.emit_window_minimized(
-                        &info.window_id, &info.app_id,
-                        &info.title, &info.workspace_id,
+                        &info.window_id,
+                        &info.app_id,
+                        &info.title,
+                        &info.workspace_id,
                     );
                 }
             }
@@ -185,7 +199,10 @@ impl ShellOverlayHandler for State {
                 // set the ToplevelState but never resized.
                 let seat = self.common.shell.read().seats.last_active().clone();
                 let evlh = self.common.event_loop_handle.clone();
-                self.common.shell.write().maximize_toggle(&mapped, &seat, &evlh);
+                self.common
+                    .shell
+                    .write()
+                    .maximize_toggle(&mapped, &seat, &evlh);
             }
             3 => {
                 // Close — stateless, the client receives the close
@@ -212,7 +229,8 @@ impl ShellOverlayHandler for State {
             _ => {
                 tracing::warn!(
                     "shell_overlay: unknown window_header_action {} for surface {}",
-                    action, surface_id
+                    action,
+                    surface_id
                 );
             }
         }
@@ -322,19 +340,10 @@ impl ShellOverlayHandler for State {
         self.common.night_light_state.manual_state = enabled;
         self.common.night_light_state.target_temperature_k = temp;
         recompute_and_apply_night_light(self);
-        tracing::info!(
-            enabled,
-            temperature = temp,
-            "set_night_light",
-        );
+        tracing::info!(enabled, temperature = temp, "set_night_light",);
     }
 
-    fn set_night_light_schedule(
-        &mut self,
-        mode: u32,
-        custom_start: u32,
-        custom_end: u32,
-    ) {
+    fn set_night_light_schedule(&mut self, mode: u32, custom_start: u32, custom_end: u32) {
         use crate::shell::night_light::NightLightSchedule;
 
         let schedule = match mode {
@@ -372,16 +381,12 @@ impl ShellOverlayHandler for State {
 /// state change so the user sees the result of their click
 /// immediately, without waiting for the 60s schedule tick.
 fn recompute_and_apply_night_light(state: &mut State) {
-    use chrono::Local;
     use crate::shell::night_light_schedule;
+    use chrono::Local;
 
     let nl = &state.common.night_light_state;
-    let active = night_light_schedule::evaluate(
-        nl.schedule,
-        nl.manual_state,
-        Local::now(),
-        nl.location,
-    );
+    let active =
+        night_light_schedule::evaluate(nl.schedule, nl.manual_state, Local::now(), nl.location);
     state.common.night_light_state.enabled = active;
     crate::shell::night_light::apply_to_backend(state);
 }
@@ -399,23 +404,22 @@ fn unset_overlay_grab(state: &mut State, menu_id: u32) {
             .find(|seat| {
                 seat.user_data()
                     .get::<SeatMenuGrabState>()
-                    .and_then(|g| {
-                        g.lock()
-                            .unwrap()
-                            .as_ref()
-                            .and_then(|s| s.menu_id)
-                    })
+                    .and_then(|g| g.lock().unwrap().as_ref().and_then(|s| s.menu_id))
                     == Some(menu_id)
             })
             .cloned()
     };
 
-    if let Some(seat) = matching_seat {
-        if let Some(ptr) = seat.get_pointer() {
-            ptr.unset_grab(state, SERIAL_COUNTER.next_serial(), smithay::backend::input::InputTime::now());
-            // Pointer focus re-evaluation happens in the commit handler
-            // when the layer surface input region is updated by desktop-shell.
-        }
+    if let Some(seat) = matching_seat
+        && let Some(ptr) = seat.get_pointer()
+    {
+        ptr.unset_grab(
+            state,
+            SERIAL_COUNTER.next_serial(),
+            smithay::backend::input::InputTime::now(),
+        );
+        // Pointer focus re-evaluation happens in the commit handler
+        // when the layer surface input region is updated by desktop-shell.
     }
 }
 

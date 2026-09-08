@@ -1,8 +1,4 @@
-use crate::{
-    backend::render::element::AsGlowRenderer,
-    state::State,
-    utils::prelude::*,
-};
+use crate::{backend::render::element::AsGlowRenderer, state::State, utils::prelude::*};
 use calloop::LoopHandle;
 use cosmic_comp_config::AppearanceConfig;
 use id_tree::NodeId;

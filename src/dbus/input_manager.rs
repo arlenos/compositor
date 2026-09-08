@@ -25,12 +25,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
 };
-use zbus::{
-    message::Header,
-    names::UniqueName,
-    object_server::SignalEmitter,
-    zvariant::Type,
-};
+use zbus::{message::Header, names::UniqueName, object_server::SignalEmitter, zvariant::Type};
 
 use super::app_interface::AppRegistry;
 use super::name_owners::NameOwners;
@@ -237,6 +232,12 @@ impl InputManagerState {
 struct InputManager {
     bindings: Arc<Mutex<DynamicBindings>>,
     app_registry: Arc<Mutex<AppRegistry>>,
+    /// UNWIRED. `NameOwners` exists to check that a D-Bus caller owns the
+    /// well-known name it claims, and nothing here ever asks it. So
+    /// `org.arlen.InputManager1` does not enforce caller identity today. Kept
+    /// rather than deleted so the gap stays visible; raised in
+    /// compositor-reports.md (8 Sep).
+    #[allow(dead_code)]
     name_owners: NameOwners,
     /// Background executor used by the cleanup task to run the
     /// NameOwnerChanged loop.
@@ -254,9 +255,7 @@ impl InputManager {
             let proxy = match zbus::fdo::DBusProxy::new(&conn).await {
                 Ok(p) => p,
                 Err(err) => {
-                    tracing::warn!(
-                        "input_manager: cleanup: cannot bind DBusProxy: {err}"
-                    );
+                    tracing::warn!("input_manager: cleanup: cannot bind DBusProxy: {err}");
                     return;
                 }
             };
@@ -385,8 +384,7 @@ impl InputManager {
                 }
                 None => {
                     return Err(zbus::fdo::Error::AccessDenied(
-                        "app_focused scope requires RegisterApp on org.arlen.App1 first"
-                            .into(),
+                        "app_focused scope requires RegisterApp on org.arlen.App1 first".into(),
                     ));
                 }
             }
@@ -474,10 +472,7 @@ impl InputManager {
 
     /// Remove every binding registered by the calling client. Returns
     /// the number of bindings that were removed.
-    async fn unregister_all(
-        &self,
-        #[zbus(header)] header: Header<'_>,
-    ) -> zbus::fdo::Result<u32> {
+    async fn unregister_all(&self, #[zbus(header)] header: Header<'_>) -> zbus::fdo::Result<u32> {
         let Some(sender) = header.sender() else {
             return Err(zbus::fdo::Error::Failed(
                 "no sender on D-Bus message".into(),
@@ -495,7 +490,10 @@ impl InputManager {
         if scope_filter.is_empty() {
             Ok(all)
         } else {
-            Ok(all.into_iter().filter(|b| b.scope == scope_filter).collect())
+            Ok(all
+                .into_iter()
+                .filter(|b| b.scope == scope_filter)
+                .collect())
         }
     }
 
@@ -622,9 +620,15 @@ mod tests {
     #[test]
     fn registration_dominates_same_app_id() {
         let existing = mk("Ctrl+Y", "app_focused", ":1.1", "org.editor");
-        assert!(registration_dominates(&existing, "app_focused", "org.editor"));
+        assert!(registration_dominates(
+            &existing,
+            "app_focused",
+            "org.editor"
+        ));
         assert!(!registration_dominates(
-            &existing, "app_focused", "org.other"
+            &existing,
+            "app_focused",
+            "org.other"
         ));
     }
 

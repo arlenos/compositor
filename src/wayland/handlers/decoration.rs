@@ -158,7 +158,8 @@ impl XdgDecorationHandler for State {
     fn request_mode(&mut self, toplevel: ToplevelSurface, mode: XdgMode) {
         tracing::info!(
             "DECO-DEBUG xdg::request_mode surface={:?} requested_mode={:?}",
-            toplevel.wl_surface(), mode
+            toplevel.wl_surface(),
+            mode
         );
 
         let shell = self.common.shell.read();
@@ -231,10 +232,7 @@ impl KdeDecorationHandler for State {
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
-        tracing::info!(
-            "DECO-DEBUG kde::new_decoration surface={:?}",
-            surface
-        );
+        tracing::info!("DECO-DEBUG kde::new_decoration surface={:?}", surface);
 
         // Symmetric to the xdg-decoration path: neutral default.
         // We still stash the decoration object so `request_mode`
@@ -260,7 +258,8 @@ impl KdeDecorationHandler for State {
     ) {
         tracing::info!(
             "DECO-DEBUG kde::request_mode surface={:?} mode={:?}",
-            surface, mode
+            surface,
+            mode
         );
         if let WEnum::Value(mode) = mode {
             with_states(surface, |states| {

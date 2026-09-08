@@ -461,7 +461,11 @@ pub fn create_seat(
     let conf = config.xkb_config();
     tracing::info!(
         "seat keyboard init: layout={:?} variant={:?} model={:?} rules={:?} options={:?}",
-        conf.layout, conf.variant, conf.model, conf.rules, conf.options,
+        conf.layout,
+        conf.variant,
+        conf.model,
+        conf.rules,
+        conf.options,
     );
     seat.add_keyboard(
         xkb_config_to_wl(&conf),

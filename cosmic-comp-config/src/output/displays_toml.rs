@@ -48,8 +48,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
 use super::comp::{
-    AdaptiveSync, OutputConfig, OutputInfo, OutputState, OutputsConfig,
-    TransformDef,
+    AdaptiveSync, OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef,
 };
 
 // ---------------------------------------------------------------------------
@@ -362,8 +361,7 @@ pub fn from_toml_string(text: &str) -> Result<OutputsConfig, String> {
         // `apply_config_for_outputs`. Two-pass: snapshot enabled
         // states first so repairing one mirror does not invalidate
         // the lookup for another.
-        let snapshot: Vec<OutputState> =
-            outputs.iter().map(|o| o.enabled.clone()).collect();
+        let snapshot: Vec<OutputState> = outputs.iter().map(|o| o.enabled.clone()).collect();
         for (idx, conf) in outputs.iter_mut().enumerate() {
             if let OutputState::Mirroring(target) = &conf.enabled {
                 let target_idx = infos.iter().position(|i| &i.connector == target);
@@ -470,8 +468,7 @@ pub fn load(path: &Path) -> OutputsConfig {
 /// `PersistenceGuard` both rely on the `Result` to gate destructive
 /// follow-ups (delete legacy file, etc).
 pub fn save(path: &Path, cfg: &OutputsConfig) -> io::Result<()> {
-    let text = to_toml_string(cfg)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let text = to_toml_string(cfg).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(
@@ -686,7 +683,8 @@ enabled = "enabled"
 vrr = "disabled"
 xwayland_primary = true
 "#;
-        let b = a.replace("eDP-1", "ZZZ-tmp")
+        let b = a
+            .replace("eDP-1", "ZZZ-tmp")
             .replace("DP-1", "eDP-1")
             .replace("ZZZ-tmp", "DP-1"); // swap entries; same set semantically
         let pa = from_toml_string(a).unwrap();

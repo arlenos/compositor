@@ -17,7 +17,10 @@ use smithay::{
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
             PointerTarget, RelativeMotionEvent,
         },
-        touch::{DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget, UpEvent},
+        touch::{
+            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
+            TouchTarget, UpEvent,
+        },
     },
     output::Output,
     utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
@@ -61,9 +64,7 @@ impl Hash for SwapIndicator {
 }
 
 /// Creates a new [`SwapIndicator`].
-pub fn swap_indicator(
-    _evlh: calloop::LoopHandle<'static, crate::state::State>,
-) -> SwapIndicator {
+pub fn swap_indicator(_evlh: calloop::LoopHandle<'static, crate::state::State>) -> SwapIndicator {
     SwapIndicator {
         inner: Arc::new(Mutex::new(SwapIndicatorInternal {
             size: Size::from((1, 1)),
@@ -150,30 +151,163 @@ impl SpaceElement for SwapIndicator {
 }
 
 impl PointerTarget<crate::state::State> for SwapIndicator {
-    fn enter(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &MotionEvent) {}
-    fn motion(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &MotionEvent) {}
-    fn relative_motion(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &RelativeMotionEvent) {}
-    fn button(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &ButtonEvent) {}
-    fn axis(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: AxisFrame) {}
+    fn enter(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &MotionEvent,
+    ) {
+    }
+    fn motion(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &MotionEvent,
+    ) {
+    }
+    fn relative_motion(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &RelativeMotionEvent,
+    ) {
+    }
+    fn button(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &ButtonEvent,
+    ) {
+    }
+    fn axis(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: AxisFrame,
+    ) {
+    }
     fn frame(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State) {}
-    fn leave(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _serial: Serial, _time: InputTime) {}
-    fn gesture_swipe_begin(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GestureSwipeBeginEvent) {}
-    fn gesture_swipe_update(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GestureSwipeUpdateEvent) {}
-    fn gesture_swipe_end(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GestureSwipeEndEvent) {}
-    fn gesture_pinch_begin(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GesturePinchBeginEvent) {}
-    fn gesture_pinch_update(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GesturePinchUpdateEvent) {}
-    fn gesture_pinch_end(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GesturePinchEndEvent) {}
-    fn gesture_hold_begin(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GestureHoldBeginEvent) {}
-    fn gesture_hold_end(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &GestureHoldEndEvent) {}
+    fn leave(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _serial: Serial,
+        _time: InputTime,
+    ) {
+    }
+    fn gesture_swipe_begin(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &GestureSwipeBeginEvent,
+    ) {
+    }
+    fn gesture_swipe_update(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &GestureSwipeUpdateEvent,
+    ) {
+    }
+    fn gesture_swipe_end(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &GestureSwipeEndEvent,
+    ) {
+    }
+    fn gesture_pinch_begin(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &GesturePinchBeginEvent,
+    ) {
+    }
+    fn gesture_pinch_update(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &GesturePinchUpdateEvent,
+    ) {
+    }
+    fn gesture_pinch_end(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &GesturePinchEndEvent,
+    ) {
+    }
+    fn gesture_hold_begin(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &GestureHoldBeginEvent,
+    ) {
+    }
+    fn gesture_hold_end(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &GestureHoldEndEvent,
+    ) {
+    }
 }
 
 impl TouchTarget<crate::state::State> for SwapIndicator {
-    fn down(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &DownEvent) {}
-    fn up(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &UpEvent) {}
-    fn motion(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &TouchMotionEvent) {}
-    fn frame(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _frame: FrameMarker) {}
-    fn last_frame(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State) -> Option<FrameMarker> { None }
-    fn cancel(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _frame: FrameMarker) {}
-    fn shape(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &ShapeEvent) {}
-    fn orientation(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State, _event: &OrientationEvent) {}
+    fn down(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &DownEvent,
+    ) {
+    }
+    fn up(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &UpEvent,
+    ) {
+    }
+    fn motion(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &TouchMotionEvent,
+    ) {
+    }
+    fn frame(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _frame: FrameMarker,
+    ) {
+    }
+    fn last_frame(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+    ) -> Option<FrameMarker> {
+        None
+    }
+    fn cancel(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _frame: FrameMarker,
+    ) {
+    }
+    fn shape(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &ShapeEvent,
+    ) {
+    }
+    fn orientation(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &OrientationEvent,
+    ) {
+    }
 }
