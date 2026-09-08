@@ -43,7 +43,7 @@ jobs:
                       ~/.cargo/git
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
             - name: System dependencies
-              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev
+              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev protobuf-compiler
             - name: Clippy
               run: cargo +stable clippy --all-features -- -D warnings
 
@@ -62,7 +62,7 @@ jobs:
                       ~/.cargo/git
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
             - name: System dependencies
-              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev
+              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev protobuf-compiler
             - run: cargo +stable check --no-default-features
             - run: cargo +stable check --features debug
             - run: cargo +stable check --features profile-with-tracy
@@ -83,7 +83,7 @@ jobs:
                       ~/.cargo/git
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
             - name: System dependencies
-              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libdisplay-info-dev libpixman-1-dev meson ninja-build
+              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libdisplay-info-dev protobuf-compiler libpixman-1-dev meson ninja-build
             - name: Build cache
               uses: actions/cache@v5
               with:
