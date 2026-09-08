@@ -115,11 +115,7 @@ fn move_fullscreen_next_workspace(state: &mut State, surface: &CosmicSurface) {
 /// handle. Generalises `move_element_prev_workspace` and its `_next`
 /// sibling — the context menu builds one item per workspace and needs
 /// to capture a specific target, not "one step in a direction".
-fn move_element_to_handle(
-    state: &mut State,
-    mapped: &CosmicMapped,
-    target: WorkspaceHandle,
-) {
+fn move_element_to_handle(state: &mut State, mapped: &CosmicMapped, target: WorkspaceHandle) {
     tracing::info!("move_element_to_handle: entered, target={target:?}");
     let mut shell = state.common.shell.write();
     let window = mapped.active_window();
@@ -446,23 +442,22 @@ pub fn window_items(
             .action(WindowAction::Screenshot),
         ),
         Some(Item::Separator),
-        Some(
-            Item::new(fl!("window-menu-move"), move |handle| {
-                let move_clone = move_clone.clone();
-                let _ = handle.insert_idle(move |state| {
-                    if let Some(surface) = move_clone.wl_surface() {
-                        let mut shell = state.common.shell.write();
-                        let seat = shell.seats.last_active().clone();
-                        let res = shell.move_request(
-                            &surface,
-                            &seat,
-                            None,
-                            ReleaseMode::Click,
-                            false,
-                            &state.common.config,
-                            &state.common.event_loop_handle,
-                            false,
-                        );
+        Some(Item::new(fl!("window-menu-move"), move |handle| {
+            let move_clone = move_clone.clone();
+            let _ = handle.insert_idle(move |state| {
+                if let Some(surface) = move_clone.wl_surface() {
+                    let mut shell = state.common.shell.write();
+                    let seat = shell.seats.last_active().clone();
+                    let res = shell.move_request(
+                        &surface,
+                        &seat,
+                        None,
+                        ReleaseMode::Click,
+                        false,
+                        &state.common.config,
+                        &state.common.event_loop_handle,
+                        false,
+                    );
 
                     std::mem::drop(shell);
                     if let Some((grab, focus)) = res {
@@ -490,6 +485,14 @@ pub fn window_items(
                 let mapped = move_prev_clone.clone();
                 let _ =
                     handle.insert_idle(move |state| move_element_prev_workspace(state, &mapped));
+            })
+            .action(WindowAction::Move),
+        ),
+        Some(
+            Item::new(fl!("window-menu-move-next-workspace"), move |handle| {
+                let mapped = move_next_clone.clone();
+                let _ =
+                    handle.insert_idle(move |state| move_element_next_workspace(state, &mapped));
             })
             .action(WindowAction::Move),
         ),
@@ -783,23 +786,23 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
                             false,
                         );
 
-                    std::mem::drop(shell);
-                    if let Some((grab, focus)) = res {
-                        let serial = SERIAL_COUNTER.next_serial();
-                        match grab.grab_type() {
-                            GrabType::Touch => {
-                                seat.get_touch().unwrap().set_grab(state, grab, serial)
+                        std::mem::drop(shell);
+                        if let Some((grab, focus)) = res {
+                            let serial = SERIAL_COUNTER.next_serial();
+                            match grab.grab_type() {
+                                GrabType::Touch => {
+                                    seat.get_touch().unwrap().set_grab(state, grab, serial)
+                                }
+                                GrabType::Pointer => seat
+                                    .get_pointer()
+                                    .unwrap()
+                                    .set_grab(state, grab, serial, focus),
+                                GrabType::TabletTool => seat
+                                    .tablet_seat()
+                                    .get_tool(grab.tool().unwrap())
+                                    .unwrap()
+                                    .set_grab(state, grab, InputTime::now(), serial, focus),
                             }
-                            GrabType::Pointer => seat
-                                .get_pointer()
-                                .unwrap()
-                                .set_grab(state, grab, serial, focus),
-                            GrabType::TabletTool => seat
-                                .tablet_seat()
-                                .get_tool(grab.tool().unwrap())
-                                .unwrap()
-                                .set_grab(state, grab, InputTime::now(), serial, focus),
-                        }
                         }
                     }
                 });
