@@ -9,8 +9,7 @@
 /// Pure logic — no I/O, no state. The caller owns the
 /// `NightLightState` and the `Common::clock`. Tests pump synthetic
 /// times into `evaluate` to verify the boundary behaviour.
-
-use chrono::{DateTime, Datelike, Local, NaiveTime, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Local, NaiveTime, TimeZone, Timelike, Utc};
 
 use crate::shell::night_light::NightLightSchedule;
 
@@ -55,11 +54,8 @@ pub fn evaluate(
                 // in a permanently-on or permanently-off state.
                 return manual_state;
             }
-            let (sunrise, sunset) = sunrise_sunset_local(
-                now,
-                location.latitude,
-                location.longitude,
-            );
+            let (sunrise, sunset) =
+                sunrise_sunset_local(now, location.latitude, location.longitude);
             // Active outside the daylight window. Use minutes-of-day
             // for the comparison so cross-midnight behaviour falls
             // out naturally from `in_window` (sunset is later than
@@ -108,13 +104,24 @@ fn sunrise_sunset_local(
     longitude: f64,
 ) -> (NaiveTime, NaiveTime) {
     let date = now.date_naive();
-    let (rise_unix, set_unix) = sunrise::sunrise_sunset(
-        latitude,
-        longitude,
-        date.year(),
-        date.month(),
-        date.day(),
-    );
+    // `sunrise_sunset` is deprecated in favour of the explicit form. It also
+    // panicked on invalid coordinates; `Coordinates::new` returns an Option, so
+    // a bad latitude now falls through to the same noon fallback the polar
+    // edge case already uses rather than taking the compositor down.
+    let (rise_unix, set_unix) = match sunrise::Coordinates::new(latitude, longitude) {
+        Some(coords) => {
+            let solar_day = sunrise::SolarDay::new(coords, date);
+            (
+                solar_day
+                    .event_time(sunrise::SolarEvent::Sunrise)
+                    .timestamp(),
+                solar_day
+                    .event_time(sunrise::SolarEvent::Sunset)
+                    .timestamp(),
+            )
+        }
+        None => (0, 0),
+    };
     let rise_local = unix_to_local_time(rise_unix);
     let set_local = unix_to_local_time(set_unix);
     (rise_local, set_local)
@@ -166,7 +173,12 @@ mod tests {
     #[test]
     fn manual_mode_returns_manual_state() {
         let now = Local::now();
-        assert!(evaluate(NightLightSchedule::Manual, true, now, Location::default()));
+        assert!(evaluate(
+            NightLightSchedule::Manual,
+            true,
+            now,
+            Location::default()
+        ));
         assert!(!evaluate(
             NightLightSchedule::Manual,
             false,
@@ -180,12 +192,7 @@ mod tests {
         let now = Local::now();
         let loc = Location::default();
         assert!(!loc.is_set());
-        assert!(evaluate(
-            NightLightSchedule::SunsetSunrise,
-            true,
-            now,
-            loc
-        ));
+        assert!(evaluate(NightLightSchedule::SunsetSunrise, true, now, loc));
         assert!(!evaluate(
             NightLightSchedule::SunsetSunrise,
             false,
@@ -233,15 +240,19 @@ mod tests {
 
     #[test]
     fn location_is_set_treats_zero_as_unset() {
-        assert!(!Location {
-            latitude: 0.0,
-            longitude: 0.0,
-        }
-        .is_set());
-        assert!(Location {
-            latitude: 52.52,
-            longitude: 13.405,
-        }
-        .is_set());
+        assert!(
+            !Location {
+                latitude: 0.0,
+                longitude: 0.0,
+            }
+            .is_set()
+        );
+        assert!(
+            Location {
+                latitude: 52.52,
+                longitude: 13.405,
+            }
+            .is_set()
+        );
     }
 }
