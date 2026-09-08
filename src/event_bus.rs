@@ -3,6 +3,13 @@
 //! Non-blocking Event Bus integration for the Arlen compositor.
 
 mod proto {
+    // prost generates a struct for every message in event.proto, and the
+    // compositor sends a handful of them. The rest are other producers' events
+    // that we still have to be able to name; there is nothing to fix in
+    // generated code, so the lint is answered here rather than by trimming the
+    // schema to what one client happens to use today.
+    #![allow(dead_code)]
+
     include!(concat!(env!("OUT_DIR"), "/arlen.eventbus.rs"));
 }
 
@@ -162,10 +169,7 @@ impl EventBusHandle {
         }
     }
 
-    /// Emit a `clipboard.copy` event with the given MIME type.
-    ///
-    /// The clipboard content is never included, only the MIME type.
-    
+    /// Emit a `window.closed` event for the given app id.
     pub fn emit_window_closed(&self, app_id: &str) {
         let event = Event {
             id: uuid::Uuid::now_v7().to_string(),
@@ -302,10 +306,7 @@ impl EventBusHandle {
         };
         if let Some(msg) = encode(event) {
             self.try_send(msg);
-            debug!(
-                module_id,
-                action_id, "emitted module.action_invoked event"
-            );
+            debug!(module_id, action_id, "emitted module.action_invoked event");
         }
     }
 }
@@ -353,7 +354,9 @@ fn sender_thread(socket_path: &str, rx: mpsc::Receiver<EventBusMessage>) {
                     debug!(socket = socket_path, "connected to event bus");
                     break s;
                 }
-                Err(_) => { thread::sleep(Duration::from_secs(2)); }
+                Err(_) => {
+                    thread::sleep(Duration::from_secs(2));
+                }
             }
         };
         loop {
