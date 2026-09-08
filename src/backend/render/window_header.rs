@@ -323,56 +323,6 @@ fn to_skia(c: Rgba) -> Color {
     Color::from_rgba(c[0], c[1], c[2], c[3]).unwrap_or(Color::BLACK)
 }
 
-/// CSS-style `color-mix(in srgb, a N%, b (100-N)%)`. `t` is a
-/// (0..=1) weight for `a`. Uses **premultiplied-alpha** mixing to
-/// match the CSS Color Module Level 5 spec, which says the mix
-/// happens on premultiplied values in the given colour space,
-/// then divides back out by the combined alpha.
-///
-/// The visible difference vs straight-alpha: when mixing a fully
-/// opaque colour `fg` with `transparent` at `t=0.10`, premultiplied
-/// mixing produces `rgba(fg.R, fg.G, fg.B, 0.10)` — full colour at
-/// 10 % opacity, which composites over a dark background as a
-/// bright tint. Straight-alpha mixing would produce
-/// `rgba(0.10*fg.R, 0.10*fg.G, 0.10*fg.B, 0.10)` instead — a dim
-/// tint that renders ~10× darker once composited. The Svelte
-/// version uses the CSS spec (via `color-mix(in srgb, ...)`), so
-/// the compositor-rendered header must match this math or its
-/// hover states look muted compared to the shell.
-// UNWIRED. Nothing calls this, so the hover states it exists to match are
-// currently computed some other way - which is precisely what its doc comment
-// above says must not happen. Kept rather than deleted because deleting it
-// would erase the finding; raised in compositor-reports.md (8 Sep).
-#[allow(dead_code)]
-fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
-    let t = t.clamp(0.0, 1.0);
-    let inv = 1.0 - t;
-
-    // Premultiplied RGB.
-    let ar_pre = a[0] * a[3];
-    let ag_pre = a[1] * a[3];
-    let ab_pre = a[2] * a[3];
-    let br_pre = b[0] * b[3];
-    let bg_pre = b[1] * b[3];
-    let bb_pre = b[2] * b[3];
-
-    let out_r_pre = ar_pre * t + br_pre * inv;
-    let out_g_pre = ag_pre * t + bg_pre * inv;
-    let out_b_pre = ab_pre * t + bb_pre * inv;
-    let out_a = a[3] * t + b[3] * inv;
-
-    if out_a > 1e-6 {
-        [
-            out_r_pre / out_a,
-            out_g_pre / out_a,
-            out_b_pre / out_a,
-            out_a,
-        ]
-    } else {
-        [0.0, 0.0, 0.0, 0.0]
-    }
-}
-
 /// Transparent colour with straight alpha. Used when mixing
 /// `color-mix(in srgb, fg N%, transparent)` from the CSS.
 const TRANSPARENT: Rgba = [0.0, 0.0, 0.0, 0.0];
@@ -698,19 +648,24 @@ fn draw_buttons(
 ///                         color: #ffffff; }
 /// ```
 ///
-/// Notably, the canonical decoration buttons have:
-///  * NO hover-bg tint on non-close buttons (only opacity changes).
-///  * NO scale on hover.
-///  * NO scale on press.
+/// Two of the three departures from that CSS are deliberate and one is not a
+/// departure at all:
+///  * NO scale on hover, NO scale on press. An older
+///    `WindowControls.svelte` had scale(1.1)/scale(0.9); that was a brief
+///    experiment the canonical version never took, and the compositor no
+///    longer mirrors it.
+///  * A 10 % foreground bg-tint on hover for non-close buttons, which the CSS
+///    block above does not show. That one is intended and is covered by
+///    `button_visual_non_close_hover_paints_subtle_tint`: hover on a 0.7
+///    baseline icon is opacity-only otherwise, which reads as almost no change
+///    against a busy app background. It follows the
+///    `color-mix(var(--color-fg-shell), 10%)` convention the rest of the shell
+///    already uses for hover.
 ///
-/// An older variant of `WindowControls.svelte` in `desktop-shell`
-/// has scale(1.1) on hover, scale(0.9) on press, and a 10 %
-/// foreground bg-tint on hover — those were a brief experiment
-/// that never made it back into the canonical version. The
-/// compositor used to mirror that experimental variant; this
-/// function now matches the pared-back canonical look so the
-/// app-settings decorations and the compositor-rendered Kitty
-/// decorations animate identically.
+/// This paragraph said the opposite until 8 September - that the tint was part
+/// of the abandoned experiment and that this function no longer applied one -
+/// while the body applied it and a test asserted it. Two docs pointing in
+/// opposite directions around correct code; the code was never the wrong half.
 ///
 /// Inactive-window dimming (`BUTTON_IDLE_OPACITY_INACTIVE`) stays
 /// — that's a compositor-specific extension because
@@ -1099,6 +1054,22 @@ mod tests {
             ..stub_state(800, true)
         };
         let (bg, _, _) = button_visual(HeaderButton::Minimize, &hover, &theme);
+        // The CSS-parity half, which used to live in the `mix` helper's own
+        // tests: `color-mix(in srgb, fg 10%, transparent)` keeps the colour at
+        // FULL brightness and only drops the alpha. Multiplying the RGB down
+        // as well would render roughly ten times darker over a dark window and
+        // would still pass an alpha-only assertion, so the channels are checked
+        // against the theme rather than the alpha alone.
+        let fg = theme.color.fg_primary;
+        for (i, channel) in ["R", "G", "B"].iter().enumerate() {
+            assert!(
+                (bg[i] - fg[i]).abs() < 1e-5,
+                "hover tint {channel} should stay at full foreground brightness, \
+                 got {} want {}",
+                bg[i],
+                fg[i]
+            );
+        }
         assert!(
             (bg[3] - 0.10).abs() < 1e-5,
             "non-close hover should paint 10% foreground tint, got alpha {}",
@@ -1135,62 +1106,6 @@ mod tests {
         let mut e = a.clone();
         e.interaction = ButtonInteraction::Hover(HeaderButton::Close);
         assert_ne!(a, e);
-    }
-
-    #[test]
-    fn mix_respects_ratio_for_opaque_colours() {
-        // Both inputs opaque — premultiplied mixing collapses to
-        // straight mixing because alpha is 1 on both sides.
-        let black: Rgba = [0.0, 0.0, 0.0, 1.0];
-        let white: Rgba = [1.0, 1.0, 1.0, 1.0];
-        let m = mix(white, black, 0.5);
-        assert!((m[0] - 0.5).abs() < 0.01);
-        assert_eq!(m[3], 1.0);
-    }
-
-    #[test]
-    fn mix_with_transparent_keeps_full_colour_reduces_alpha() {
-        // This is the CSS parity test. `color-mix(in srgb, fg 10%,
-        // transparent)` in a browser produces rgba(fg.R, fg.G,
-        // fg.B, 0.10) — full colour, 10 % alpha. The dim-straight-
-        // alpha alternative would give rgba(0.10*fg.R, ..., 0.10)
-        // which looks ~10× darker on a dark background.
-        let fg: Rgba = [0.98, 0.98, 0.98, 1.0]; // #fafafa
-        let transparent: Rgba = [0.0, 0.0, 0.0, 0.0];
-        let m = mix(fg, transparent, 0.10);
-        // RGB should be preserved (premultiplied math divides back).
-        assert!(
-            (m[0] - 0.98).abs() < 0.001,
-            "R should be preserved, got {}",
-            m[0]
-        );
-        assert!((m[1] - 0.98).abs() < 0.001);
-        assert!((m[2] - 0.98).abs() < 0.001);
-        // Alpha reduced by the weight.
-        assert!(
-            (m[3] - 0.10).abs() < 0.001,
-            "A should be 0.10, got {}",
-            m[3]
-        );
-    }
-
-    #[test]
-    fn mix_with_transparent_and_small_weight_stays_bright() {
-        // Sanity: even at 8% weight (the CSS tab-hover uses 8%),
-        // the RGB colour survives — only the alpha shrinks.
-        let fg: Rgba = [0.98, 0.98, 0.98, 1.0];
-        let transparent: Rgba = [0.0, 0.0, 0.0, 0.0];
-        let m = mix(fg, transparent, 0.08);
-        assert!((m[0] - 0.98).abs() < 0.001);
-        assert!((m[3] - 0.08).abs() < 0.001);
-    }
-
-    #[test]
-    fn mix_zero_weight_returns_second_colour() {
-        let fg: Rgba = [0.5, 0.5, 0.5, 1.0];
-        let transparent: Rgba = [0.0, 0.0, 0.0, 0.0];
-        let m = mix(fg, transparent, 0.0);
-        assert_eq!(m[3], 0.0);
     }
 
     #[test]
