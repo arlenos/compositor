@@ -1,0 +1,83 @@
+version = 1
+SPDX-PackageName = "cosmic-comp"
+SPDX-PackageSupplier = "Arlen OS <https://github.com/arlenos>"
+SPDX-PackageDownloadLocation = "https://github.com/arlenos/compositor"
+
+# Why a path map and not per-file headers. This is a long-lived fork that merges
+# upstream every week; putting an SPDX header into each of upstream's ~180 files
+# would put a licence line into every one of those merge conflicts, forever, for
+# a fact that does not vary per file. REUSE.toml states the same thing without
+# touching a single upstream byte.
+#
+# `precedence = "closest"` means a file that carries its own header keeps it, so
+# the vendored and differently-licensed files below are not overridden by the
+# blanket annotation: `src/logger/serializer.rs` (MPL-2.0 OR MIT OR Apache-2.0),
+# `src/dbus/power.rs` (GPL-3.0-or-later), the protocol XMLs (GPL-2.0-or-later)
+# and `dev/fixtures/sensing-vectors/README.md` (AGPL-3.0-only) all stay as they
+# declare themselves. Three of those declarations look wrong and are raised in
+# `compositor-reports.md` rather than quietly normalised here - a licence gate
+# that edits licences to make itself green is worth nothing.
+
+# The upstream base: cosmic-comp, GPL-3.0-only.
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "System76 <info@system76.com>"
+SPDX-License-Identifier = "GPL-3.0-only"
+
+# Files that exist only in this fork - measured with
+# `git log upstream/master..HEAD --name-only` and then checked against
+# `upstream/master`, not guessed. The attribution follows the one first-party
+# header already in the tree.
+[[annotations]]
+path = [
+    "cosmic-comp-config/src/output/displays_toml.rs",
+    "dev/fixtures/sensing-vectors/README.md",
+    "dev/fixtures/sensing-vectors/not-stated__file-about-another-switch.toml",
+    "dev/fixtures/sensing-vectors/off__as-settings-writes-it.toml",
+    "dev/fixtures/sensing-vectors/off__explicit.toml",
+    "dev/fixtures/sensing-vectors/off__trailing-comment.toml",
+    "dev/fixtures/sensing-vectors/on__explicit.toml",
+    "dev/fixtures/sensing-vectors/on__no-spaces.toml",
+    "dev/fixtures/sensing-vectors/unreadable__commented-out.toml",
+    "dev/fixtures/sensing-vectors/unreadable__empty.toml",
+    "dev/fixtures/sensing-vectors/unreadable__no-value.toml",
+    "dev/fixtures/sensing-vectors/unreadable__truncated-mid-key.toml",
+    "dev/fixtures/sensing-vectors/unreadable__truncated-mid-value.toml",
+    "dev/fixtures/sensing-vectors/unreadable__wrong-case.toml",
+    "dev/screenshot/shoot-compositor.sh",
+    "dev/session-lock-conformance.sh",
+    "dev/wallpaper-pause-baseline.sh",
+    "proto/event.proto",
+    "resources/protocols/arlen-grid-v1.xml",
+    "resources/protocols/arlen-shell-overlay.xml",
+    "resources/protocols/arlen-titlebar-v1.xml",
+    "resources/protocols/arlen-window-attach-v1.xml",
+    "src/backend/render/window_header.rs",
+    "src/bin/ghost-repro.rs",
+    "src/bin/lock-probe.rs",
+    "src/bin/test-client.rs",
+    "src/bin/wallpaper-probe.rs",
+    "src/config/appearance.rs",
+    "src/dbus/app_interface.rs",
+    "src/dbus/input_manager.rs",
+    "src/event_bus.rs",
+    "src/input/binding_resolver.rs",
+    "src/presented.rs",
+    "src/shell/fullscreen_reveal.rs",
+    "src/shell/night_light.rs",
+    "src/shell/night_light_schedule.rs",
+    "src/utils/render_harness.rs",
+    "src/utils/sensing.rs",
+    "src/wayland/handlers/grid.rs",
+    "src/wayland/handlers/shell_overlay.rs",
+    "src/wayland/handlers/titlebar.rs",
+    "src/wayland/handlers/window_attach.rs",
+    "src/wayland/protocols/grid.rs",
+    "src/wayland/protocols/shell_overlay.rs",
+    "src/wayland/protocols/titlebar.rs",
+    "src/wayland/protocols/window_attach.rs",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Tim Kicker"
+SPDX-License-Identifier = "GPL-3.0-only"

@@ -136,4 +136,17 @@ jobs:
                   name: smoke-frame
                   path: smoke.png
                   if-no-files-found: warn
-
+    # REUSE 3.3, the same gate the monorepo runs. This fork mixes upstream's
+    # GPL-3.0-only, our own additions and a vendored file or two, which is the
+    # mixture that goes wrong quietly. Licensing is stated in REUSE.toml by path
+    # rather than by per-file header, so upstream's files carry no licence line
+    # for a weekly merge to conflict on; see the comment in that file.
+    license:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout sources
+              uses: actions/checkout@v6
+            - name: Install reuse
+              run: pipx install reuse
+            - name: Licence gate
+              run: dev/check-licenses.sh
