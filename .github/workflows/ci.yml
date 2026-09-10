@@ -13,7 +13,11 @@ jobs:
             - name: Checkout sources
               uses: actions/checkout@v6
             - name: Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              # The version in rust-toolchain.toml, not floating stable. A
+              # `-D warnings` gate whose lint set is whatever shipped this week
+              # goes red on a commit that changed nothing, and the first
+              # reaction is to "fix" code that was fine. See the 8 Sep report.
+              uses: dtolnay/rust-toolchain@1.93
               with:
                   components: rustfmt
             - name: Cargo cache
@@ -24,7 +28,7 @@ jobs:
                       ~/.cargo/git
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
             - name: Format
-              run: cargo +stable fmt --all -- --check
+              run: cargo fmt --all -- --check
 
     clippy-check:
         runs-on: ubuntu-latest
@@ -32,7 +36,11 @@ jobs:
             - name: Checkout sources
               uses: actions/checkout@v6
             - name: Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              # The version in rust-toolchain.toml, not floating stable. A
+              # `-D warnings` gate whose lint set is whatever shipped this week
+              # goes red on a commit that changed nothing, and the first
+              # reaction is to "fix" code that was fine. See the 8 Sep report.
+              uses: dtolnay/rust-toolchain@1.93
               with:
                   components: clippy
             - name: Cargo cache
@@ -45,7 +53,7 @@ jobs:
             - name: System dependencies
               run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev protobuf-compiler
             - name: Clippy
-              run: cargo +stable clippy --all-features -- -D warnings
+              run: cargo clippy --all-features -- -D warnings
 
     check-features:
         runs-on: ubuntu-latest
@@ -53,7 +61,11 @@ jobs:
             - name: Checkout sources
               uses: actions/checkout@v6
             - name: Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              # The version in rust-toolchain.toml, not floating stable. A
+              # `-D warnings` gate whose lint set is whatever shipped this week
+              # goes red on a commit that changed nothing, and the first
+              # reaction is to "fix" code that was fine. See the 8 Sep report.
+              uses: dtolnay/rust-toolchain@1.93
             - name: Cargo cache
               uses: actions/cache@v5
               with:
@@ -63,10 +75,10 @@ jobs:
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
             - name: System dependencies
               run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev protobuf-compiler
-            - run: cargo +stable check --no-default-features
-            - run: cargo +stable check --features debug
-            - run: cargo +stable check --features profile-with-tracy
-            - run: cargo +stable check --features profile-with-tracy-gpu
+            - run: cargo check --no-default-features
+            - run: cargo check --features debug
+            - run: cargo check --features profile-with-tracy
+            - run: cargo check --features profile-with-tracy-gpu
 
     test:
         runs-on: ubuntu-latest
@@ -74,7 +86,11 @@ jobs:
             - name: Checkout sources
               uses: actions/checkout@v6
             - name: Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              # The version in rust-toolchain.toml, not floating stable. A
+              # `-D warnings` gate whose lint set is whatever shipped this week
+              # goes red on a commit that changed nothing, and the first
+              # reaction is to "fix" code that was fine. See the 8 Sep report.
+              uses: dtolnay/rust-toolchain@1.93
             - name: Cargo cache
               uses: actions/cache@v5
               with:
@@ -115,7 +131,11 @@ jobs:
             - name: Checkout sources
               uses: actions/checkout@v6
             - name: Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              # The version in rust-toolchain.toml, not floating stable. A
+              # `-D warnings` gate whose lint set is whatever shipped this week
+              # goes red on a commit that changed nothing, and the first
+              # reaction is to "fix" code that was fine. See the 8 Sep report.
+              uses: dtolnay/rust-toolchain@1.93
             - name: Cargo cache
               uses: actions/cache@v5
               with:
