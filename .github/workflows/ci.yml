@@ -154,8 +154,8 @@ jobs:
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
             - name: System dependencies
               run: sudo apt-get update; sudo apt-get install -y $BASE_DEPS libseat-dev xvfb x11-utils grim
-            - name: Build the compositor and the test client
-              run: cargo build --bin cosmic-comp --bin test-client --features test-client
+            - name: Build the compositor and the probe
+              run: cargo build --bin cosmic-comp --bin wallpaper-probe --features test-client
             - name: Does it start
               run: XDG_RUNTIME_DIR=$(mktemp -d) SMOKE_LOG=$PWD/smoke-compositor.log dev/smoke.sh smoke.png
             # Both, and on failure especially: the frame says what it looked
