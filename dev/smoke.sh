@@ -50,12 +50,31 @@ mkdir -p "$CFG/arlen"
 printf 'screen_capture = true\n' > "$CFG/arlen/sensing.toml"
 export XDG_CONFIG_HOME="$CFG"
 
-LOG="$(mktemp)"
+LOG="${SMOKE_LOG:-$(mktemp)}"
 cleanup() {
   kill "${CLIENT_PID:-}" "${CC_PID:-}" "${XVFB_PID:-}" 2>/dev/null || true
   wait 2>/dev/null || true
   rm -rf "$CFG"
-  [ -n "${KEEP_LOG:-}" ] || rm -f "$LOG"
+  [ -n "${KEEP_LOG:-}${SMOKE_LOG:-}" ] || rm -f "$LOG"
+}
+
+# What went wrong, rather than the last 30 lines of whatever was printed.
+#
+# The first version of this tailed the log blindly. A compositor panic prints a
+# backtrace far longer than that, so the run on 10 September reported a failure
+# whose entire diagnostic was the bottom of a stack trace - `__libc_start_main`,
+# `_start` - with the panic message itself scrolled off. A failure report that
+# omits the reason costs a whole CI round trip to recover.
+diagnose() {
+  echo "--- compositor log ---" >&2
+  if grep -q "panicked at" "$LOG"; then
+    echo "PANIC:" >&2
+    grep -A4 "panicked at" "$LOG" | head -12 >&2
+    echo "..." >&2
+  fi
+  grep -iE "ERROR|WARN|refus" "$LOG" | tail -12 >&2
+  echo "--- last lines ---" >&2
+  tail -12 "$LOG" >&2
 }
 trap cleanup EXIT
 
@@ -76,8 +95,8 @@ CC_PID=$!
 WL=""
 for _ in $(seq 1 $((TIMEOUT * 2))); do
   if ! kill -0 "$CC_PID" 2>/dev/null; then
-    echo "FAIL: the compositor exited during startup. Last lines:" >&2
-    tail -30 "$LOG" >&2
+    echo "FAIL: the compositor exited during startup." >&2
+    diagnose
     exit 1
   fi
   WL="$(grep -oE 'wayland-[0-9]+' "$LOG" | head -1 || true)"
@@ -86,8 +105,8 @@ for _ in $(seq 1 $((TIMEOUT * 2))); do
   sleep 0.5
 done
 if [ -z "$WL" ]; then
-  echo "FAIL: no Wayland socket after ${TIMEOUT}s. Last lines:" >&2
-  tail -30 "$LOG" >&2
+  echo "FAIL: no Wayland socket after ${TIMEOUT}s." >&2
+  diagnose
   exit 1
 fi
 echo "ok: compositor is up on $WL"
@@ -114,14 +133,14 @@ sleep 5
 
 if ! WAYLAND_DISPLAY="$WL" grim "$OUT" 2>/dev/null; then
   echo "FAIL: the compositor is up but produced no frame to capture." >&2
-  tail -30 "$LOG" >&2
+  diagnose
   exit 1
 fi
 echo "ok: captured a frame to $OUT"
 
 if ! kill -0 "$CC_PID" 2>/dev/null; then
   echo "FAIL: the compositor died while a client was connected." >&2
-  tail -30 "$LOG" >&2
+  diagnose
   exit 1
 fi
 
@@ -130,7 +149,7 @@ if command -v magick >/dev/null && [ -n "$PIXELS" ]; then
   echo "capture has $colors distinct colours"
   if [ "$colors" -le 1 ]; then
     echo "FAIL: the frame is a single flat colour - the client never reached the screen." >&2
-    tail -30 "$LOG" >&2
+    diagnose
     exit 1
   fi
 fi

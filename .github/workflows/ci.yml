@@ -148,13 +148,19 @@ jobs:
             - name: Build the compositor and the test client
               run: cargo build --bin cosmic-comp --bin test-client --features test-client
             - name: Does it start
-              run: XDG_RUNTIME_DIR=$(mktemp -d) dev/smoke.sh smoke.png
-            - name: Keep the frame
+              run: XDG_RUNTIME_DIR=$(mktemp -d) SMOKE_LOG=$PWD/smoke-compositor.log dev/smoke.sh smoke.png
+            # Both, and on failure especially: the frame says what it looked
+            # like, the log says why there was not one. The 10 September run
+            # failed with a compositor panic whose message had scrolled out of
+            # the step output, and nothing was kept that could answer it.
+            - name: Keep the frame and the log
               if: always()
               uses: actions/upload-artifact@v4
               with:
-                  name: smoke-frame
-                  path: smoke.png
+                  name: smoke-evidence
+                  path: |
+                      smoke.png
+                      smoke-compositor.log
                   if-no-files-found: warn
     # REUSE 3.3, the same gate the monorepo runs. This fork mixes upstream's
     # GPL-3.0-only, our own additions and a vendored file or two, which is the
