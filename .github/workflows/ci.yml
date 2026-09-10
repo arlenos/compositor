@@ -1,5 +1,14 @@
 name: Continuous Integration
 
+# One list, because four hand-maintained near-copies is a maintained list
+# wearing a costume. Four separate CI failures came from a job's apt line being
+# a copy of a different job's: `protobuf-compiler` missing everywhere, then
+# `libpixman-1-dev` missing from `smoke`, then `libxkbcommon-x11-dev` missing
+# from it too. Jobs append what only they need; nobody re-types the base.
+env:
+    BASE_DEPS: >-
+        libudev-dev libgbm-dev libxkbcommon-dev libxkbcommon-x11-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libdisplay-info-dev libpixman-1-dev protobuf-compiler
+
 on:
     push:
         branches: [master]
@@ -51,7 +60,7 @@ jobs:
                       ~/.cargo/git
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
             - name: System dependencies
-              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev protobuf-compiler
+              run: sudo apt-get update; sudo apt-get install -y $BASE_DEPS libseat-dev
             - name: Clippy
               run: cargo clippy --all-features -- -D warnings
 
@@ -74,7 +83,7 @@ jobs:
                       ~/.cargo/git
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
             - name: System dependencies
-              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev protobuf-compiler
+              run: sudo apt-get update; sudo apt-get install -y $BASE_DEPS libseat-dev
             - run: cargo check --no-default-features
             - run: cargo check --features debug
             - run: cargo check --features profile-with-tracy
@@ -99,7 +108,7 @@ jobs:
                       ~/.cargo/git
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
             - name: System dependencies
-              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libdisplay-info-dev protobuf-compiler libpixman-1-dev meson ninja-build
+              run: sudo apt-get update; sudo apt-get install -y $BASE_DEPS meson ninja-build
             - name: Build cache
               uses: actions/cache@v5
               with:
@@ -144,7 +153,7 @@ jobs:
                       ~/.cargo/git
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
             - name: System dependencies
-              run: sudo apt-get update; sudo apt-get install -y libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev libpixman-1-dev libxkbcommon-x11-dev protobuf-compiler xvfb x11-utils grim
+              run: sudo apt-get update; sudo apt-get install -y $BASE_DEPS libseat-dev xvfb x11-utils grim
             - name: Build the compositor and the test client
               run: cargo build --bin cosmic-comp --bin test-client --features test-client
             - name: Does it start
