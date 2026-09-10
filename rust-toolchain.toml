@@ -1,3 +1,8 @@
 [toolchain]
 channel = "1.93"
-components = [ "rust-src" ]
+# rustup treats this file as the authority for what the toolchain carries, so a
+# workflow asking for `components: rustfmt` gets overridden by it and the job
+# fails with "cargo-fmt is not installed". The components belong here, once,
+# rather than per job - otherwise the file claims a toolchain that is not the
+# one anybody uses.
+components = [ "rust-src", "rustfmt", "clippy" ]
