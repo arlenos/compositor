@@ -458,7 +458,11 @@ pub fn rasterize_header(state: &HeaderVisualState, theme: &ArlenTheme) -> Memory
 /// premultiplied RGBA; Wayland's `Argb8888` is actually BGRA in
 /// little-endian.
 fn rgba_to_bgra_inplace(data: &mut [u8]) {
-    for chunk in data.chunks_exact_mut(4) {
+    // `as_chunks_mut` rather than `chunks_exact_mut(4)`: the width is a
+    // constant, so the array form lets the compiler drop the length check per
+    // chunk. Also what clippy's `chunks_exact_to_as_chunks` asks for, which is
+    // how this surfaced.
+    for chunk in data.as_chunks_mut::<4>().0 {
         chunk.swap(0, 2);
     }
 }
