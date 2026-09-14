@@ -27,6 +27,7 @@ use crate::{
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
+            session_lock_layer::SessionLockLayerState,
             shell_overlay::ShellOverlayState,
             titlebar::TitlebarManagerState,
             toplevel_info::ToplevelInfoState,
@@ -374,6 +375,7 @@ pub struct Common {
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
+    pub session_lock_layer_state: SessionLockLayerState,
 
     #[cfg(feature = "logind")]
     pub inhibit_lid_fd: Option<OwnedFd>,
@@ -866,6 +868,9 @@ impl State {
             binding_resolver.set_static_bindings(statics);
         }
 
+        let session_lock_layer_state =
+            SessionLockLayerState::new::<State, _>(dh, client_not_sandboxed);
+
         State {
             common: Common {
                 config,
@@ -946,6 +951,7 @@ impl State {
                 pointer_focus_state: None,
                 dbus_state,
                 keyboard_layout_state,
+                session_lock_layer_state,
 
                 #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
@@ -1084,6 +1090,8 @@ impl Common {
         output: &Output,
         render_element_states: &RenderElementStates,
     ) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let shell = self.shell.read();
         let processor = |namespace: Option<usize>| {
             move |surface: &WlSurface, states: &SurfaceData| {
@@ -1190,6 +1198,8 @@ impl Common {
         render_element_states: &RenderElementStates,
         mut dmabuf_feedback: impl FnMut(DrmNode) -> Option<SurfaceDmabufFeedback>,
     ) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let shell = self.shell.read();
 
         if let Some(session_lock) = shell.session_lock.as_ref()
@@ -1430,6 +1440,8 @@ impl Common {
     #[profiling::function]
     pub fn send_frames(&self, output: &Output, sequence: Option<usize>) {
         self.note_locked_frame(output);
+
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
 
         let time = self.clock.now();
         let should_send = |surface: &WlSurface, states: &SurfaceData| {
