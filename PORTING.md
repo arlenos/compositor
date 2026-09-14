@@ -62,6 +62,22 @@ in the `Common` constructor via `crate::event_bus::spawn()`.
 Added `emit_window_focused` call in `Shell::set_focus` after the focus stack is
 updated, before `update_focus_state`.
 
+### Changes to `src/input/mod.rs`
+
+`InputEvent::PointerButton` gates the Super+click grab on Super being
+**physically** held - the pressed keysyms, not the modifier mask. Upstream uses
+`self.source_modifiers(&backend_id, &seat).logo` at that line; this fork uses a
+`logo_physically_held` computed just above it.
+
+A nested host can hand over a modifier mask with no key press behind it
+(smithay #1353), and then every click is read as Super+click, swallowed into a
+move grab, and no application ever sees one. Upstream does not run nested as a
+matter of course; this fork does, all day.
+
+**A merge will offer upstream's line back.** It has been taken once already, in
+`f4ee52c4`, which is how the fix spent three months switched off. Keep this
+fork's side. `dev/super-drag-check.sh` is the guard.
+
 ### Changes to `src/wayland/handlers/compositor.rs`
 
 Added `emit_window_opened` call after successful `shell.map_window` in the Wayland
