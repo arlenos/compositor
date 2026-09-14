@@ -442,51 +442,54 @@ pub fn window_items(
             .action(WindowAction::Screenshot),
         ),
         Some(Item::Separator),
-        Some(Item::new(fl!("window-menu-move"), move |handle| {
-            let move_clone = move_clone.clone();
-            let _ = handle.insert_idle(move |state| {
-                if let Some(surface) = move_clone.wl_surface() {
-                    let mut shell = state.common.shell.write();
-                    let seat = shell.seats.last_active().clone();
-                    let res = shell.move_request(
-                        &surface,
-                        &seat,
-                        None,
-                        ReleaseMode::Click,
-                        false,
-                        &state.common.config,
-                        &state.common.event_loop_handle,
-                        false,
-                    );
+        Some(
+            Item::new(fl!("window-menu-move"), move |handle| {
+                let move_clone = move_clone.clone();
+                let _ = handle.insert_idle(move |state| {
+                    if let Some(surface) = move_clone.wl_surface() {
+                        let mut shell = state.common.shell.write();
+                        let seat = shell.seats.last_active().clone();
+                        let res = shell.move_request(
+                            &surface,
+                            &seat,
+                            None,
+                            ReleaseMode::Click,
+                            false,
+                            &state.common.config,
+                            &state.common.event_loop_handle,
+                            false,
+                        );
 
-                    std::mem::drop(shell);
-                    if let Some((grab, focus)) = res {
-                        let serial = SERIAL_COUNTER.next_serial();
-                        match grab.grab_type() {
-                            GrabType::Touch => {
-                                seat.get_touch().unwrap().set_grab(state, grab, serial)
+                        std::mem::drop(shell);
+                        if let Some((grab, focus)) = res {
+                            let serial = SERIAL_COUNTER.next_serial();
+                            match grab.grab_type() {
+                                GrabType::Touch => {
+                                    seat.get_touch().unwrap().set_grab(state, grab, serial)
+                                }
+                                GrabType::Pointer => seat
+                                    .get_pointer()
+                                    .unwrap()
+                                    .set_grab(state, grab, serial, focus),
+                                GrabType::TabletTool => seat
+                                    .tablet_seat()
+                                    .get_tool(grab.tool().unwrap())
+                                    .unwrap()
+                                    .set_grab(state, grab, InputTime::now(), serial, focus),
                             }
-                            GrabType::Pointer => seat
-                                .get_pointer()
-                                .unwrap()
-                                .set_grab(state, grab, serial, focus),
-                            GrabType::TabletTool => seat
-                                .tablet_seat()
-                                .get_tool(grab.tool().unwrap())
-                                .unwrap()
-                                .set_grab(state, grab, InputTime::now(), serial, focus),
                         }
                     }
-                }
-            });
-        })),
+                });
+            })
+            .action(WindowAction::Move),
+        ),
         Some(
             Item::new(fl!("window-menu-move-prev-workspace"), move |handle| {
                 let mapped = move_prev_clone.clone();
                 let _ =
                     handle.insert_idle(move |state| move_element_prev_workspace(state, &mapped));
             })
-            .action(WindowAction::Move),
+            .action(WindowAction::MovePrevWorkspace),
         ),
         Some(
             Item::new(fl!("window-menu-move-next-workspace"), move |handle| {
@@ -494,7 +497,7 @@ pub fn window_items(
                 let _ =
                     handle.insert_idle(move |state| move_element_next_workspace(state, &mapped));
             })
-            .action(WindowAction::Move),
+            .action(WindowAction::MoveNextWorkspace),
         ),
         // Resize edges exposed as flat entries (no submenu) so the overlay protocol can represent them.
         Some(
