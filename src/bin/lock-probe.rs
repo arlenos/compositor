@@ -59,6 +59,10 @@ struct Probe {
     /// How many lock surfaces we asked the compositor to show.
     painted: usize,
     locked_at: Option<Duration>,
+    /// Outputs whose lock surface had been presented at the moment `locked`
+    /// arrived. The ordering is the guarantee, so it has to be recorded then
+    /// rather than read at the end of the run, when it is always satisfied.
+    locked_presented: Option<usize>,
     finished: bool,
     /// The size the compositor demanded, per lock surface. The protocol kills a
     /// client that commits a buffer of any other size.
@@ -120,6 +124,7 @@ impl Dispatch<ExtSessionLockV1, ()> for Probe {
         match event {
             ext_session_lock_v1::Event::Locked => {
                 state.locked_at = Some(state.start.elapsed());
+                state.locked_presented = Some(state.presented);
                 let detail = format!(
                     "surfaces_painted={} frames_presented={}",
                     state.painted, state.presented
@@ -258,6 +263,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         presented: 0,
         painted: 0,
         locked_at: None,
+        locked_presented: None,
         finished: false,
         configured: std::collections::HashMap::new(),
     };
@@ -310,33 +316,77 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::thread::sleep(Duration::from_millis(20));
     }
 
-    // The one thing a client CAN decide for itself. Whether the locked frame was
-    // really on the panel first is a question about pixels, which no client can
-    // see - but whether the event arrives at all is plain, and never arriving is
-    // the failure mode a compositor that gates the event can newly have: an
-    // output that presents no frame (powered off, mirrored, unplugged mid-lock)
-    // holds it back for the rest of the session, and the lock client and the
-    // idle daemon behind it wait forever.
-    let ok = match probe.locked_at {
-        Some(at) => {
-            probe.say(
-                "verdict",
-                &format!(
-                    "locked arrived at {:.1}ms with {} of {} outputs presented",
-                    at.as_secs_f64() * 1000.0,
-                    probe.presented,
-                    outputs.len()
-                ),
-            );
-            true
-        }
-        None => {
-            probe.say(
-                "verdict",
-                "FAIL locked never arrived; the session lock is stuck half-taken",
-            );
-            false
-        }
+    // What a client can decide for itself, and what it cannot. Whether the
+    // locked frame was on the panel in the sense of photons is a question about
+    // pixels, and no client can see that. What a client CAN see is the ORDER:
+    // its own frame callbacks against the `locked` event. That is enough to
+    // catch the failure that matters, because a compositor which sends `locked`
+    // before this client's surfaces have been presented is claiming something
+    // about the screen that is not true yet.
+    let outputs_total = outputs.len();
+    let ok = match mode {
+        // The guarantee this mode exists for: a lock client that never presents
+        // anything must never be told the session is locked. Before 14 Sep the
+        // compositor sent `locked` here anyway, on a frame of its own, and this
+        // verdict called that a pass because it only asked whether the event
+        // arrived at all.
+        Mode::NoSurface => match probe.locked_at {
+            None => {
+                probe.say(
+                    "verdict",
+                    "locked correctly withheld; nothing was ever presented",
+                );
+                true
+            }
+            Some(at) => {
+                probe.say(
+                    "verdict",
+                    &format!(
+                        "FAIL locked arrived at {:.1}ms although no surface was ever presented",
+                        at.as_secs_f64() * 1000.0
+                    ),
+                );
+                false
+            }
+        },
+        // Here `locked` must arrive, and it must arrive AFTER every output has
+        // shown this client's lock surface. Arrival alone says nothing: the
+        // event is only worth having if what it claims is already on the panel.
+        _ => match (probe.locked_at, probe.locked_presented) {
+            (Some(at), Some(presented)) if presented >= outputs_total => {
+                probe.say(
+                    "verdict",
+                    &format!(
+                        "locked arrived at {:.1}ms with {presented} of {outputs_total} outputs \
+                         already presented",
+                        at.as_secs_f64() * 1000.0,
+                    ),
+                );
+                true
+            }
+            (Some(at), Some(presented)) => {
+                probe.say(
+                    "verdict",
+                    &format!(
+                        "FAIL locked arrived at {:.1}ms with only {presented} of \
+                         {outputs_total} outputs presented",
+                        at.as_secs_f64() * 1000.0,
+                    ),
+                );
+                false
+            }
+            _ => {
+                // Never arriving is the failure a gated event can newly have: an
+                // output that presents no frame (powered off, mirrored,
+                // unplugged mid-lock) holds it back for the rest of the session,
+                // and the lock client and the idle daemon behind it wait forever.
+                probe.say(
+                    "verdict",
+                    "FAIL locked never arrived; the session lock is stuck half-taken",
+                );
+                false
+            }
+        },
     };
 
     match mode {
