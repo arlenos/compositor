@@ -227,52 +227,6 @@ impl MoveGrabState {
         };
 
         let gaps = (lt.wm.gaps_inner as i32, lt.wm.gaps_outer as i32);
-        let _thickness = self.indicator_thickness.max(1);
-        let _lt_radius = lt.effective_window_corners().map(|r| r.round() as u8);
-
-        if let (Some(t), ManagedLayer::Floating) = (&self.snapping_zone, self.previous)
-            && &self.cursor_output == output
-        {
-            // Skeleton-style backdrop: the theme's primary fg colour at 12%
-            // alpha mirrors the shell's `Skeleton` primitive, so the compositor
-            // and the in-shell visual language agree. The outline keeps the
-            // accent-tinted hint colour for the rim.
-            let _base_color = lt.color.fg_primary;
-            let _overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
-        };
-
-        let mut lower_elements = SmallVec::<[CosmicMappedRenderElement<R>; 4]>::new_const();
-        self.window.push_render_elements(
-            renderer,
-            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
-            None,
-            output_scale,
-            alpha,
-            Some(false),
-            scanout_node,
-            &mut |elem| push(map_window_element(elem)),
-            &mut |elem| lower_elements.push(map_window_element(elem)),
-        );
-        if let Some(shadow_element) = self.window.shadow_render_element(
-            renderer,
-            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
-            None,
-            output_scale,
-            scale,
-            alpha,
-        ) {
-            push(shadow_element);
-        }
-        for elem in lower_elements.into_iter() {
-            push(elem);
-        }
-
-        let non_exclusive_geometry = {
-            let layers = layer_map_for_output(output);
-            layers.non_exclusive_zone()
-        };
-
-        let gaps = (lt.wm.gaps_inner as i32, lt.wm.gaps_outer as i32);
         let thickness = self.indicator_thickness.max(1);
         let lt_radius = lt.effective_window_corners().map(|r| r.round() as u8);
 
