@@ -354,7 +354,17 @@ impl FloatingLayout {
         let geometry = layers.non_exclusive_zone().as_local();
 
         mapped.set_bounds(geometry.size.as_logical());
-        mapped.set_tiled(true);
+        // The CLIENT is told it is tiled - that is the xdg-shell convention for
+        // a maximised window, and it is what makes it drop its rounded corners.
+        // What must not happen is flipping the window's own placement flag:
+        // `CosmicMapped::set_tiled` sets both, and that flag means "placed in
+        // the tiling layer", which a maximised floating window is not. Reading
+        // it as placement is what `has_ssd` does, so setting it here took the
+        // header away from every maximised window - along with its close and
+        // restore buttons, leaving no way back with a mouse. It also disagreed
+        // with `should_render_window_header`, which asks the workspace where
+        // the window actually is and answers "draw one".
+        mapped.active_window().set_tiled(true);
         mapped.set_maximized(true);
         mapped.set_geometry(geometry.to_global(&output));
         mapped.configure();
