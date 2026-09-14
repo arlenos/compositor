@@ -70,7 +70,7 @@ cleanup() {
   exec 3>&- 2>/dev/null
   kill ${DRIVER_PID:-} ${LEFT_PID:-} ${RIGHT_PID:-} ${CC_PID:-} ${SWAY_PID:-} 2>/dev/null
   wait 2>/dev/null
-  rm -rf "$CFG" "$ST" "$SWAYDIR" "${PIPE:-}" "$TYPED_L" "$TYPED_R"
+  rm -rf "$CFG" "$ST" "$SWAYDIR" "${PIPE:-}" "$TYPED_L" "$TYPED_R" "${MARKER:-}"
   [ -n "${KEEP_LOG:-}" ] || rm -f "$LOG"
 }
 trap cleanup EXIT
@@ -79,18 +79,33 @@ trap cleanup EXIT
 # refuses to start without one otherwise ("Failed to find any DRM render node").
 # The host only has to composite one client here, so software is plenty; the
 # compositor under test still renders through its own EGL.
+# Which socket is sway's? It does not say, and asking its child processes only
+# worked while it had any - with Xwayland off it may have none. So: take the
+# socket that is created after this marker. Comparing against a list of names
+# is not enough, because a stale socket file left by a killed run keeps its
+# name and sway will reuse it.
+MARKER="$(mktemp)"
 env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
   WLR_RENDERER="${WLR_RENDERER:-pixman}" \
   sway -c "$SWAYDIR/config" > "$SWAYDIR/sway.log" 2>&1 &
 SWAY_PID=$!
 HOST=""
-for _ in $(seq 1 40); do
-  child="$(pgrep -P "$SWAY_PID" -n 2>/dev/null)"
-  [ -n "$child" ] && HOST="$(tr '\0' '\n' < "/proc/$child/environ" 2>/dev/null | grep -m1 '^WAYLAND_DISPLAY=' | cut -d= -f2)"
+for _ in $(seq 1 60); do
+  if ! kill -0 "$SWAY_PID" 2>/dev/null; then
+    echo "FAIL: the headless sway host exited during startup." >&2
+    tail -12 "$SWAYDIR/sway.log" >&2
+    exit 1
+  fi
+  sock="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name 'wayland-[0-9]*' -type s -newer "$MARKER" 2>/dev/null | head -1)"
+  [ -n "$sock" ] && HOST="$(basename "$sock")"
   [ -n "$HOST" ] && break
   sleep 0.5
 done
-[ -n "$HOST" ] || { echo "FAIL: the headless sway host never came up" >&2; tail -5 "$SWAYDIR/sway.log" >&2; exit 1; }
+[ -n "$HOST" ] || {
+  echo "FAIL: the headless sway host never advertised a socket in $XDG_RUNTIME_DIR." >&2
+  tail -12 "$SWAYDIR/sway.log" >&2
+  exit 1
+}
 
 env -u DISPLAY WAYLAND_DISPLAY="$HOST" "$BIN" > "$LOG" 2>&1 &
 CC_PID=$!
