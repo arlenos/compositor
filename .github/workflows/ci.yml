@@ -202,14 +202,15 @@ jobs:
               env:
                   LIBGL_ALWAYS_SOFTWARE: "1"
               run: XDG_RUNTIME_DIR=$(mktemp -d) dev/pointer-input-check.sh
-            - name: Who owns the click
-              env:
-                  LIBGL_ALWAYS_SOFTWARE: "1"
-              run: XDG_RUNTIME_DIR=$(mktemp -d) dev/super-drag-check.sh
-            - name: Do the window controls respond where they are drawn
-              env:
-                  LIBGL_ALWAYS_SOFTWARE: "1"
-              run: XDG_RUNTIME_DIR=$(mktemp -d) dev/header-button-check.sh
+            # `dev/super-drag-check.sh` and `dev/header-button-check.sh` are
+            # NOT run here, and the reason is not laziness. Both have to know
+            # where the window is before they can click a specific part of it,
+            # and they find it by capturing a frame. A runner with no DRM render
+            # node has no screencopy - EGL device binding fails and `grim`
+            # writes nothing - so on CI they would be measuring the runner
+            # rather than the compositor. Same reason `dev/smoke.sh` treats its
+            # capture as best-effort. They are run before a commit, on a machine
+            # with a GPU.
 
     # REUSE 3.3, the same gate the monorepo runs. This fork mixes upstream's
     # GPL-3.0-only, our own additions and a vendored file or two, which is the
