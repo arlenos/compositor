@@ -1032,11 +1032,24 @@ impl State {
                             Some(PointerFocusTarget::ResizeFork(_))
                         );
                         if let Some(target) = under.filter(|_| !on_resize_fork) {
-                            // Check if Super/Logo is truly held down, not just
-                            // a stuck modifier from nested compositor key routing.
+                            // Is Super actually held, or does the seat only
+                            // think so? A nested host can hand the compositor a
+                            // modifier mask with no key press behind it -
+                            // smithay #1353: winit drops the pressed-keys array
+                            // from `wl_keyboard::enter`, so a session focused
+                            // while Super was down starts with the modifier set
+                            // and no way to learn it was released. Every click
+                            // then reads as Super+click, gets swallowed into a
+                            // move grab and never reaches the application.
+                            //
+                            // The pressed keysyms are the second opinion, and
+                            // this asks for it. Added in `b9e365b8` for exactly
+                            // that bug and lost again in `f4ee52c4`, which
+                            // replaced the use with the plain modifier mask and
+                            // left the computation standing.
                             let logo_modifier_set =
                                 seat.get_keyboard().unwrap().modifier_state().logo;
-                            let _logo_physically_held = if logo_modifier_set {
+                            let logo_physically_held = if logo_modifier_set {
                                 seat.get_keyboard().unwrap().with_pressed_keysyms(|syms| {
                                     syms.iter().any(|k| {
                                         let sym = k.modified_sym();
@@ -1048,7 +1061,7 @@ impl State {
                             };
 
                             if let Some(surface) = target.toplevel().map(Cow::into_owned)
-                                && self.source_modifiers(&backend_id, &seat).logo
+                                && logo_physically_held
                                 && !shortcuts_inhibited
                             {
                                 let seat_clone = seat.clone();
