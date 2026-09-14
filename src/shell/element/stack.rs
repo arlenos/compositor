@@ -849,12 +849,6 @@ impl CosmicStack {
             return;
         }
 
-        let geometry = {
-            let p = self.p();
-            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
-        }
-        .to_physical_precise_round(scale);
-        let _stack_loc = location + geometry.loc;
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
 
         // No tab bar: desktop-shell draws it over the shell overlay protocol.
@@ -873,9 +867,6 @@ impl CosmicStack {
                     .map(|x| if x < 4.0 { x } else { x + 4.0 })
                     .map(|x| x.round() as u8)
             });
-
-            let _window_key =
-                CosmicMappedKey(CosmicMappedKeyInner::Stack(Arc::downgrade(&self.inner)));
 
             // No border: the window chrome is desktop-shell's job through the
             // shell overlay protocol.
