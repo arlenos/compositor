@@ -23,13 +23,17 @@
 #   dev/session-lock-conformance.sh <name>:<probe-mode>[:<hold-seconds>] ...
 #
 #   probe modes: no-surface, surface, crash, unlock (see src/bin/lock-probe.rs)
+#                plus `input-leak`, which is this script's own: it locks with a
+#                well-behaved lock client and then drives a pointer and a
+#                keyboard at an ordinary window to check nothing gets through.
 #
 # Env:
 #   OUT      where to write the captures (default: a fresh temp dir, reported)
 #   TAG      prefix for the capture filenames (default: run)
 #
 # Requirements: sway, grim, imagemagick, kitty, and a built lock-probe
-# (`cargo build --bin lock-probe --features test-client`).
+# (`cargo build --bin lock-probe --features test-client`). The `input-leak`
+# mode additionally needs `wtype` and a built pointer-driver.
 set -euo pipefail
 
 CP="$(cd "$(dirname "$0")/.." && pwd)"
@@ -55,9 +59,10 @@ SWAYDIR="$(mktemp -d)"
 printf 'output HEADLESS-1 mode 1920x1080\n' > "$SWAYDIR/config"
 
 cleanup() {
-  kill "${CLIENT_PID:-}" "${CC_PID:-}" "${SWAY_PID:-}" 2>/dev/null || true
+  exec 4>&- 2>/dev/null || true
+  kill "${DRIVER_PID:-}" "${TYPIST_PID:-}" "${CLIENT_PID:-}" "${CC_PID:-}" "${SWAY_PID:-}" 2>/dev/null || true
   wait 2>/dev/null || true
-  rm -rf "$SENSING_HOME" "$SWAYDIR"
+  rm -rf "$SENSING_HOME" "$SWAYDIR" "${TYPED:-}"
 }
 trap cleanup EXIT
 
@@ -97,6 +102,15 @@ DISPLAY="" kitty --title lock-victim -o background=#c81e78 -o font_size=40 \
   sh -c 'echo SECRET-DESKTOP-CONTENT; sleep 600' >/dev/null 2>&1 &
 CLIENT_PID=$!
 sleep 5
+
+# A second ordinary window that writes down everything it is typed at. Nothing
+# it records after the lock should exist; `cat` is line-buffered, hence the
+# Return after every word.
+TYPED="$(mktemp)"
+DISPLAY="" kitty --title lock-typist -o background=#1e78c8 \
+  sh -c "cat > $TYPED" >/dev/null 2>&1 &
+TYPIST_PID=$!
+sleep 4
 grim "$OUT/$TAG-0-desktop.png"
 magick "$OUT/$TAG-0-desktop.png" -format "desktop: colors=%k mean=%[fx:int(255*mean)]\n" info:
 
@@ -121,9 +135,88 @@ step() {
   magick "$OUT/$TAG-$name.png" -format "  screen: colors=%k mean=%[fx:int(255*mean)]\n" info:
 }
 
+# Does anything reach an ordinary client while the session is locked? The lock
+# screen has exactly one job and this is it. Keyboard goes in over
+# zwp_virtual_keyboard_v1 (`wtype`) and the pointer over zwlr_virtual_pointer_v1
+# into the HOST (`pointer-driver`), because the compositor under test has no
+# input devices of its own - see dev/pointer-input-check.sh for why the obvious
+# routes do not work.
+input_leak_step() {
+  local hold="${1:-14}"
+  echo "=== input-leak ==="
+  command -v wtype >/dev/null || { echo "  SKIP: wtype is not installed"; return 0; }
+  [ -x "$CP/target/debug/pointer-driver" ] || {
+    echo "  SKIP: no pointer-driver (cargo build --bin pointer-driver --features test-client)"
+    return 0
+  }
+
+  local pipe driver_log probe_log before
+  pipe="$(mktemp -u)"; mkfifo "$pipe"
+  driver_log="$(mktemp)"; probe_log="$(mktemp)"
+  WAYLAND_DISPLAY="$HOST" "$CP/target/debug/pointer-driver" < "$pipe" > "$driver_log" 2>&1 &
+  local driver_pid=$!
+  DRIVER_PID="$driver_pid"
+  exec 4>"$pipe"
+  for _ in $(seq 1 20); do grep -q "^ready" "$driver_log" && break; sleep 0.5; done
+
+  # A control first: with the session unlocked, the same injection must land.
+  printf 'move 900 500\nsleep 200\nclick\nsleep 200\n' >&4
+  sleep 1
+  wtype UNLOCKED >/dev/null 2>&1; sleep 0.4; wtype -k Return >/dev/null 2>&1; sleep 1
+  if ! grep -q UNLOCKED "$TYPED"; then
+    echo "  FAIL: the control did not land - injection is not reaching clients at all,"
+    echo "        so this step cannot say anything about the locked case."
+    exec 4>&-; kill "$driver_pid" 2>/dev/null; rm -f "$pipe" "$driver_log" "$probe_log"
+    failures=$((failures + 1))
+    return 0
+  fi
+  echo "  ok: with the session unlocked, typing reaches the window"
+
+  "$CP/target/debug/lock-probe" surface "$hold" > "$probe_log" 2>&1 &
+  local probe_pid=$!
+  for _ in $(seq 1 40); do grep -q " locked " "$probe_log" && break; sleep 0.25; done
+  if ! grep -q " locked " "$probe_log"; then
+    echo "  FAIL: the session never locked, so nothing here was tested"
+    sed "s/^/    /" "$probe_log"
+    exec 4>&-; kill "$driver_pid" "$probe_pid" 2>/dev/null; rm -f "$pipe" "$driver_log" "$probe_log"
+    failures=$((failures + 1))
+    return 0
+  fi
+
+  before="$(tr -d '\r\n' < "$TYPED")"
+  printf 'move 900 500\nsleep 200\nclick\nsleep 200\n' >&4
+  sleep 1
+  wtype LEAKED >/dev/null 2>&1; sleep 0.4; wtype -k Return >/dev/null 2>&1; sleep 1
+  printf 'move 300 300\nsleep 200\nclick\nsleep 200\n' >&4
+  sleep 1
+  wtype ALSOLEAKED >/dev/null 2>&1; sleep 0.4; wtype -k Return >/dev/null 2>&1; sleep 1.5
+
+  local after; after="$(tr -d '\r\n' < "$TYPED")"
+  if [ "$after" != "$before" ]; then
+    echo "  FAIL: input reached a client while the session was locked."
+    echo "    before: [$before]"
+    echo "    after : [$after]"
+    failures=$((failures + 1))
+  else
+    echo "  ok: nothing reached the client while locked"
+  fi
+  grim "$OUT/$TAG-input-leak.png" 2>/dev/null \
+    && magick "$OUT/$TAG-input-leak.png" -format "  screen: colors=%k mean=%[fx:int(255*mean)]\n" info:
+
+  exec 4>&-
+  kill "$driver_pid" 2>/dev/null
+  wait "$probe_pid" 2>/dev/null
+  rm -f "$pipe" "$driver_log" "$probe_log"
+  sleep 2
+}
+
 for spec in "$@"; do
   IFS=: read -r name mode hold <<< "$spec"
-  step "$name" "$mode" "${hold:-4}"
+  if [ "$mode" = input-leak ]; then
+    input_leak_step "${hold:-14}"
+  else
+    step "$name" "$mode" "${hold:-4}"
+  fi
 done
 
 if kill -0 "$CC_PID" 2>/dev/null; then
