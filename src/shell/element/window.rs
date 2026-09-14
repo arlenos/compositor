@@ -1153,24 +1153,37 @@ impl KeyboardTarget<State> for CosmicWindow {
 
 impl PointerTarget<State> for CosmicWindow {
     fn enter(&self, seat: &Seat<State>, _data: &mut State, event: &PointerMotionEvent) {
-        let p = self.p();
-        let has_ssd = p.has_ssd(false);
-        if has_ssd || p.has_tiled_state() {
-            let Some(next) = Focus::under(
-                &p.window,
-                if has_ssd { SSD_HEIGHT } else { 0 },
-                event.location,
-            ) else {
-                return;
-            };
+        {
+            let p = self.p();
+            let has_ssd = p.has_ssd(false);
+            if (has_ssd || p.has_tiled_state())
+                && let Some(next) = Focus::under(
+                    &p.window,
+                    if has_ssd { SSD_HEIGHT } else { 0 },
+                    event.location,
+                )
+            {
+                let old_focus = p.swap_focus(Some(next));
+                assert_eq!(old_focus, None);
 
-            let old_focus = p.swap_focus(Some(next));
-            assert_eq!(old_focus, None);
-
-            let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.lock().unwrap().set_shape(next.cursor_shape());
-            seat.set_cursor_image_status(CursorImageStatus::default_named());
+                let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+                cursor_state.lock().unwrap().set_shape(next.cursor_shape());
+                seat.set_cursor_image_status(CursorImageStatus::default_named());
+            }
         }
+
+        // An enter IS a motion - the first one on this window - and the header
+        // hover has to be computed from it like any other. Without this the
+        // pointer can arrive directly on a window-control button (a flick, a
+        // touchpad tap, a warp, or simply the first movement of the session)
+        // and the button stays Idle until some later motion event, so the
+        // click that follows does nothing at all. Measured: moving straight
+        // onto a close button and clicking left the window open; the same
+        // click after any second motion event closed it.
+        //
+        // The guard above is scoped so it is dropped first: this takes
+        // `self.p()` itself and the mutex is not reentrant.
+        self.update_header_button_interaction(event.location);
     }
 
     fn motion(&self, seat: &Seat<State>, _data: &mut State, event: &PointerMotionEvent) {
