@@ -163,6 +163,11 @@ name = "wallpaper-probe"
 path = "src/bin/wallpaper-probe.rs"
 required-features = ["test-client"]
 
+[[bin]]
+name = "pointer-driver"
+path = "src/bin/pointer-driver.rs"
+required-features = ["test-client"]
+
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
