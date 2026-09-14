@@ -501,24 +501,38 @@ fn draw_background(
     let mut pb = PathBuilder::new();
     let w = state.width as f32;
     let h = HEADER_LOGICAL_HEIGHT as f32;
-    // The header's top corners use `window_corners` (the window frame
-    // radius), NOT the card radius, so the headerbar and the app body
-    // below it read as ONE concentric frame with a single radius source
-    // (rounding-fix.md PR-1). It is intensity-scaled; [0] is the top-left
-    // corner, and a window's corners are uniform so it also sets the
-    // top-right. The window body reads the same `window_corners`.
-    let r = theme.effective_window_corners()[0];
+    // The header's top corners are the WINDOW's outer corners, so they come
+    // from the one function that owns that number - not from the theme's
+    // window radius directly. Reading the theme here was the bug Tim found on
+    // 14 September: every other draw of this corner maps the theme value
+    // through `+4`, this one did not, and at the default theme the frame's arc
+    // (16) stood a clear four pixels outside the header's (12). Measured from
+    // a capture, both arcs are circular to within a pixel, so it really was
+    // only the number. [0] is the top-left; a window's corners are uniform, so
+    // it sets the top-right too.
+    let r = crate::theme::window_frame_corners(theme)[0];
 
     // Rounded-top, square-bottom path. Walks clockwise from the
-    // bottom-left. When effective_card == 0 (sharp-corner user
-    // intensity = 0%), the quadratic control points collapse into
-    // the line endpoints and tiny-skia renders a plain rect — no
-    // subpixel rounding tint.
+    // bottom-left. When the radius is 0 the control points collapse into the
+    // line endpoints and tiny-skia renders a plain rect - no subpixel rounding
+    // tint.
+    //
+    // CUBICS, NOT QUADS. The corner this traces is the same corner the clipping
+    // shader cuts on the window below, and that one is a true circle: a signed
+    // distance from the corner centre. A quadratic with its control point at
+    // the corner is not a circle - it bulges outward by about 6% of the radius
+    // at the middle of the arc, which at the default theme is a whole pixel of
+    // daylight between two curves that are supposed to be one. Measured 14 Sep
+    // against the window body's arc: 1.2 px apart at the top row with the radii
+    // already equal. A cubic with control points at `k = r * 0.5523` is the
+    // textbook circular approximation and is wrong by 0.02% instead.
+    const KAPPA: f32 = 0.552_284_8;
+    let k = r * KAPPA;
     pb.move_to(0.0, h);
     pb.line_to(0.0, r);
-    pb.quad_to(0.0, 0.0, r, 0.0);
+    pb.cubic_to(0.0, r - k, r - k, 0.0, r, 0.0);
     pb.line_to(w - r, 0.0);
-    pb.quad_to(w, 0.0, w, r);
+    pb.cubic_to(w - r + k, 0.0, w, r - k, w, r);
     pb.line_to(w, h);
     pb.close();
 
