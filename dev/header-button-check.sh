@@ -86,6 +86,29 @@ hover_state() {
     | grep -oE 'interaction=[A-Za-z]+\([A-Za-z]+\)|interaction=Idle' | tail -1
 }
 
+# Sweep leftwards along a header row and print the middle of the run that
+# reports the named button. Guessing a pixel offset from the window's right edge
+# is what this replaces - the offsets differ between a floating and a maximised
+# window, and a guess that lands on Close instead of Maximise closes the window
+# under test. The sweep may take as many motions as it likes; the single-jump
+# assertion is elsewhere.
+find_button() {  # $1 = row y, $2 = button name (Close / Maximize / Minimize)
+  local row="$1" want="interaction=Hover($2)" from="$3" to="$4"
+  local lo="" hi="" probe
+  for probe in $(seq "$from" -4 "$to"); do
+    xdotool mousemove 600 500
+    sleep 0.1
+    xdotool mousemove "$probe" "$row"
+    sleep 0.25
+    if [ "$(hover_state)" = "$want" ]; then
+      [ -z "$hi" ] && hi="$probe"
+      lo="$probe"
+    fi
+  done
+  [ -n "$lo" ] || return 1
+  echo $(( (lo + hi) / 2 ))
+}
+
 spawn
 for _ in $(seq 1 40); do
   grep -q "reached the screen for the first time" "$LOG" && break
@@ -124,7 +147,55 @@ if [ "$STATE" != "interaction=Hover(Close)" ]; then
 fi
 echo "ok: one motion onto the close button hovers it"
 
-# 3. And the click that follows must actually close the window.
+# 3. Maximise, and the header has to survive it. It did not: maximising set the
+#    window's "placed in the tiling layer" flag, headers are off for tiled
+#    windows by default, and the controls vanished along with any way back to
+#    a smaller window using a mouse.
+MAX_X="$(find_button "$HEADER_Y" Maximize $(( CLOSE_X - 20 )) $(( CLOSE_X - 60 )))" || {
+  echo "FAIL: no maximise button on the window's header." >&2
+  exit 1
+}
+xdotool mousemove 10 10; sleep 0.4
+xdotool mousemove "$MAX_X" "$HEADER_Y"; sleep 0.5
+xdotool mousedown 1; sleep 0.15; xdotool mouseup 1; sleep 2.5
+MAXED="$(rect "$SHOTS/max.png")"
+[ "$MAXED" != none ] || { echo "FAIL: the window vanished when maximised." >&2; exit 1; }
+set -- $MAXED
+if [ "$2" -gt 60 ]; then
+  echo "FAIL: the maximise button did not maximise the window ($MAXED)." >&2
+  exit 1
+fi
+# The header is now at the top of the output, so the controls are too.
+MAX_HEADER_Y=$(( $2 - 18 ))
+MAX_CLOSE_X=$(( $3 - 18 ))
+MAX_CLOSE="$(find_button "$MAX_HEADER_Y" Close $(( MAX_CLOSE_X + 14 )) $(( MAX_CLOSE_X - 40 )))" || {
+  echo "FAIL: a maximised window has no header controls - nothing hovers along its top." >&2
+  echo "  maximised to $MAXED, swept row y=$MAX_HEADER_Y" >&2
+  exit 1
+}
+echo "ok: a maximised window keeps its controls (close at $MAX_CLOSE)"
+
+MAX_RESTORE="$(find_button "$MAX_HEADER_Y" Maximize $(( MAX_CLOSE - 8 )) $(( MAX_CLOSE - 60 )))" || {
+  echo "FAIL: a maximised window has a close button but no restore button." >&2
+  exit 1
+}
+
+# Restore, so the close test below runs against an ordinary window again.
+xdotool mousemove 600 500; sleep 0.2
+xdotool mousemove "$MAX_RESTORE" "$MAX_HEADER_Y"; sleep 0.4
+xdotool mousedown 1; sleep 0.15; xdotool mouseup 1; sleep 2.5
+RESTORED="$(rect "$SHOTS/restored.png")"
+if [ "$RESTORED" = "$MAXED" ]; then
+  echo "FAIL: the maximise button did not restore the window ($RESTORED)." >&2
+  exit 1
+fi
+echo "ok: and it restores to $RESTORED"
+set -- $RESTORED
+CLOSE_X=$(( $3 - 18 )); HEADER_Y=$(( $2 - 18 ))
+xdotool mousemove 10 10; sleep 0.4
+xdotool mousemove "$CLOSE_X" "$HEADER_Y"; sleep 0.8
+
+# 4. And the click that follows must actually close the window.
 xdotool click 1
 CLOSED=no
 for _ in $(seq 1 15); do
