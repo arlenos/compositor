@@ -206,6 +206,10 @@ jobs:
               env:
                   LIBGL_ALWAYS_SOFTWARE: "1"
               run: XDG_RUNTIME_DIR=$(mktemp -d) dev/super-drag-check.sh
+            - name: Do the window controls respond where they are drawn
+              env:
+                  LIBGL_ALWAYS_SOFTWARE: "1"
+              run: XDG_RUNTIME_DIR=$(mktemp -d) dev/header-button-check.sh
 
     # REUSE 3.3, the same gate the monorepo runs. This fork mixes upstream's
     # GPL-3.0-only, our own additions and a vendored file or two, which is the
