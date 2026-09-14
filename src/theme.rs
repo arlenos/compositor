@@ -28,6 +28,28 @@ const LIGHT_TOML: &str = arlen_theme::LIGHT_TOML;
 
 static ARLEN_THEME: RwLock<Option<arlen_theme::ArlenTheme>> = RwLock::new(None);
 
+/// The radius a window's OUTER corner is drawn at, for every draw that draws it.
+///
+/// **One value, one owner.** A window's outer corner is rounded by several
+/// different pieces of code - the client surface through the clipping shader,
+/// the drop shadow, the tiling backdrop, and the compositor-drawn header - and
+/// until 14 September each of them derived the number for itself. Eight of them
+/// applied this `+4` mapping to the theme's window radius; the header did not,
+/// and drew its top corners at the raw value. At the default theme that is 12
+/// against 16, which is visible as exactly what it is: the frame's arc standing
+/// outside the header's at the top-left, two curves that do not meet. Tim found
+/// it in a screenshot.
+///
+/// The mapping itself predates the Arlen theme system and is deliberately left
+/// as it was; what changes here is that it exists once. A caller that needs
+/// physical pixels scales and rounds afterwards - `[f32; 4]` so that rounding
+/// happens at the end and not twice.
+pub fn window_frame_corners(theme: &arlen_theme::ArlenTheme) -> [f32; 4] {
+    theme
+        .effective_window_corners()
+        .map(|x| if x < 4.0 { x } else { x + 4.0 })
+}
+
 /// Read the global ArlenTheme. Falls back to a freshly-resolved
 /// dark theme if the watcher hasn't run yet (early startup
 /// frames).

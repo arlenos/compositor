@@ -5532,9 +5532,7 @@ fn render_new_tree_windows<R>(
         .unwrap();
         let scale = swap_geo.size.to_f64() / origin.size.to_f64();
 
-        let radius = crate::theme::arlen_theme()
-            .effective_window_corners()
-            .map(|x| if x < 4.0 { x } else { x + 4.0 })
+        let radius = crate::theme::window_frame_corners(&crate::theme::arlen_theme())
             .map(|val| (val * scale.x.min(scale.y) as f32).round() as u8);
         swap_elements.push(CosmicMappedRenderElement::FocusIndicator(
             IndicatorShader::focus_element(
@@ -5612,9 +5610,7 @@ fn render_new_tree_windows<R>(
                                 .corner_radius(geo.size.as_logical(), indicator_thickness)
                                 .map(|val| (val as f64 * scale.x.min(scale.y)).round() as u8)
                         }
-                        _ => crate::theme::arlen_theme()
-                            .effective_window_corners()
-                            .map(|x| if x < 4.0 { x } else { x + 4.0 })
+                        _ => crate::theme::window_frame_corners(&crate::theme::arlen_theme())
                             .map(|val| (val * scale.x.min(scale.y) as f32).round() as u8),
                     };
 

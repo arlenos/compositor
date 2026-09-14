@@ -526,10 +526,8 @@ impl CosmicWindow {
             return None;
         }
         let lt = crate::theme::arlen_theme();
-        let mut radii = lt
-            .effective_window_corners()
-            .map(|x| if x < 4.0 { x } else { x + 4.0 })
-            .map(|x| (x * scale as f32).round() as u8);
+        let mut radii =
+            crate::theme::window_frame_corners(&lt).map(|x| (x * scale as f32).round() as u8);
         if has_ssd && !clip {
             // bottom corners
             radii[0] = 0;
@@ -590,9 +588,7 @@ impl CosmicWindow {
     {
         let (has_ssd, is_tiled, is_maximized, mut radii, appearance) = {
             let p = self.p();
-            let raw_radius = crate::theme::arlen_theme().effective_window_corners();
-            let mapped = raw_radius
-                .map(|x| if x < 4.0 { x } else { x + 4.0 })
+            let mapped = crate::theme::window_frame_corners(&crate::theme::arlen_theme())
                 .map(|x| x.round() as u8);
             // Trace: uncomment to debug radius propagation
             // tracing::trace!("window render: raw_radius={raw_radius:?} mapped={mapped:?}");
@@ -1018,9 +1014,7 @@ impl CosmicWindow {
         let round = (!is_tiled || appearance.clip_tiled_windows) && !p.window.is_maximized(false);
         let radii = if round {
             {
-                crate::theme::arlen_theme()
-                    .effective_window_corners()
-                    .map(|x| if x < 4.0 { x } else { x + 4.0 })
+                crate::theme::window_frame_corners(&crate::theme::arlen_theme())
                     .map(|x| x.round() as u8)
             }
         } else {

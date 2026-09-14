@@ -793,9 +793,7 @@ impl CosmicStack {
         }
         let lt = crate::theme::arlen_theme();
         let radii = if round {
-            lt.effective_window_corners()
-                .map(|x| if x < 4.0 { x } else { x + 4.0 })
-                .map(|x| (x * scale as f32).round() as u8)
+            crate::theme::window_frame_corners(&lt).map(|x| (x * scale as f32).round() as u8)
         } else {
             [0, 0, 0, 0]
         };
@@ -862,11 +860,8 @@ impl CosmicStack {
 
             let lt = crate::theme::arlen_theme();
             let round = (appearance.clip_tiled_windows || !tiled) && !maximized;
-            let radii = round.then(|| {
-                lt.effective_window_corners()
-                    .map(|x| if x < 4.0 { x } else { x + 4.0 })
-                    .map(|x| x.round() as u8)
-            });
+            let radii =
+                round.then(|| crate::theme::window_frame_corners(&lt).map(|x| x.round() as u8));
 
             // No border: the window chrome is desktop-shell's job through the
             // shell overlay protocol.
@@ -1004,9 +999,7 @@ impl CosmicStack {
         let maximized = active_window.is_maximized(false);
 
         let round = (appearance.clip_tiled_windows || !is_tiled) && !maximized;
-        let radii = crate::theme::arlen_theme()
-            .effective_window_corners()
-            .map(|x| if x < 4.0 { x } else { x + 4.0 })
+        let radii = crate::theme::window_frame_corners(&crate::theme::arlen_theme())
             .map(|val| val.round() as u8);
 
         if !round {
