@@ -192,16 +192,21 @@ type_into() {  # $1 = x of the window to click, $2 = the word to type
   WAYLAND_DISPLAY="$WL" DISPLAY="" wtype -k Return >/dev/null 2>&1
   sleep 1.5
 }
-type_into 400 LEFTWINDOW
-type_into 1500 RIGHTWINDOW
-type_into 400 LEFTAGAIN
+type_into 400 FIRST
+type_into 1500 SECOND
+type_into 400 THIRD
 
-GOT_L="$(tr -d '\r\n' < "$TYPED_L")"
-GOT_R="$(tr -d '\r\n' < "$TYPED_R")"
-if [ "$GOT_L" != "LEFTWINDOWLEFTAGAIN" ] || [ "$GOT_R" != "RIGHTWINDOW" ]; then
+# Which of the two terminals the compositor put on the left is its business,
+# not this test's - the layout is not what is being checked. What must hold is
+# that the two positions addressed DIFFERENT windows and that coming back
+# addressed the first one again.
+GOT_A="$(tr -d '\r\n' < "$TYPED_L")"
+GOT_B="$(tr -d '\r\n' < "$TYPED_R")"
+if ! { [ "$GOT_A" = "FIRSTTHIRD" ] && [ "$GOT_B" = "SECOND" ]; } \
+   && ! { [ "$GOT_B" = "FIRSTTHIRD" ] && [ "$GOT_A" = "SECOND" ]; }; then
   echo "FAIL: the keyboard did not follow the click." >&2
-  echo "  left window received : [$GOT_L]   expected [LEFTWINDOWLEFTAGAIN]" >&2
-  echo "  right window received: [$GOT_R]   expected [RIGHTWINDOW]" >&2
+  echo "  one window received [$GOT_A], the other [$GOT_B]" >&2
+  echo "  wanted FIRSTTHIRD in one and SECOND in the other, either way round" >&2
   echo "--- focus decisions ---" >&2
   grep -oE "set_focus: [^ ]+ -> [^ ]+" "$LOG" | tail -6 >&2
   exit 1
