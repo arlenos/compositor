@@ -59,8 +59,10 @@ ST="$(mktemp -d)"; mkdir -p "$ST/arlen/compositor"
 printf 'autotile = true\n' > "$ST/arlen/compositor/state.toml"
 export XDG_STATE_HOME="$ST"
 SWAYDIR="$(mktemp -d)"
-# No border, so a host coordinate is the same coordinate inside.
-printf 'output HEADLESS-1 mode 1920x1080\ndefault_border none\n' > "$SWAYDIR/config"
+# No border, so a host coordinate is the same coordinate inside. No Xwayland
+# either: the host has no X clients and a runner without the binary fails to
+# start it, which is noise in the log of a test about pointers.
+printf 'output HEADLESS-1 mode 1920x1080\ndefault_border none\nxwayland disable\n' > "$SWAYDIR/config"
 LOG="$(mktemp)"
 TYPED_L="$(mktemp)"; TYPED_R="$(mktemp)"
 
@@ -73,7 +75,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# WLR_RENDERER=pixman because a CI runner has no DRM render node and wlroots
+# refuses to start without one otherwise ("Failed to find any DRM render node").
+# The host only has to composite one client here, so software is plenty; the
+# compositor under test still renders through its own EGL.
 env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
+  WLR_RENDERER="${WLR_RENDERER:-pixman}" \
   sway -c "$SWAYDIR/config" > "$SWAYDIR/sway.log" 2>&1 &
 SWAY_PID=$!
 HOST=""
