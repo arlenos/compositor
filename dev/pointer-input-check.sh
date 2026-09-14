@@ -8,13 +8,19 @@
 # run on, so every nested session froze the moment the mouse moved, and no test
 # noticed because no test moved a mouse. This is that test.
 #
-# It asserts two things:
+# It asserts three things:
 #
 #   1. a click reaches the compositor and it decides a focus target
 #   2. a fresh client still gets frames afterwards
+#   3. the keyboard follows the click, to the window that was clicked
 #
-# The second one is the deadlock guard and is the reason this script exists:
-# a wedged compositor answers (1) for the first event and nothing after it.
+# The second is the deadlock guard and is the reason this script exists: a
+# wedged compositor answers (1) for the first event and nothing after it. The
+# third is issue #43 - "clicking a window gives pointer focus but not keyboard
+# focus" - which does not reproduce on today's code, and this is what keeps it
+# that way. It is checked by typing into two terminals that each write what they
+# receive to a file, so "which window has the keyboard" is a fact on disk rather
+# than a judgement about a picture.
 #
 # WHY A NESTED SWAY AND A VIRTUAL POINTER. Injecting input is harder than it
 # looks. `ydotool` writes to /dev/uinput, so the event lands on whichever
@@ -41,20 +47,28 @@ for b in "$DRIVER" "$PROBE"; do
 done
 command -v sway >/dev/null || { echo "FAIL: sway is not installed" >&2; exit 2; }
 command -v kitty >/dev/null || { echo "FAIL: kitty is not installed (the click target)" >&2; exit 2; }
+command -v wtype >/dev/null || { echo "FAIL: wtype is not installed (it types the keyboard-focus check)" >&2; exit 2; }
 
 CFG="$(mktemp -d)"; mkdir -p "$CFG/arlen"
 printf 'screen_capture = true\n' > "$CFG/arlen/sensing.toml"
 export XDG_CONFIG_HOME="$CFG"
+# Side by side, so there are two windows to click BETWEEN. autotile is runtime
+# state rather than a compositor.toml key, so this is the only way to ask for it
+# without driving a keybinding.
+ST="$(mktemp -d)"; mkdir -p "$ST/arlen/compositor"
+printf 'autotile = true\n' > "$ST/arlen/compositor/state.toml"
+export XDG_STATE_HOME="$ST"
 SWAYDIR="$(mktemp -d)"
 # No border, so a host coordinate is the same coordinate inside.
 printf 'output HEADLESS-1 mode 1920x1080\ndefault_border none\n' > "$SWAYDIR/config"
 LOG="$(mktemp)"
+TYPED_L="$(mktemp)"; TYPED_R="$(mktemp)"
 
 cleanup() {
   exec 3>&- 2>/dev/null
-  kill ${DRIVER_PID:-} ${CLIENT_PID:-} ${CC_PID:-} ${SWAY_PID:-} 2>/dev/null
+  kill ${DRIVER_PID:-} ${LEFT_PID:-} ${RIGHT_PID:-} ${CC_PID:-} ${SWAY_PID:-} 2>/dev/null
   wait 2>/dev/null
-  rm -rf "$CFG" "$SWAYDIR" "${PIPE:-}"
+  rm -rf "$CFG" "$ST" "$SWAYDIR" "${PIPE:-}" "$TYPED_L" "$TYPED_R"
   [ -n "${KEEP_LOG:-}" ] || rm -f "$LOG"
 }
 trap cleanup EXIT
@@ -89,15 +103,22 @@ done
 [ -n "$WL" ] || { echo "FAIL: the compositor never advertised a socket." >&2; tail -8 "$LOG" >&2; exit 1; }
 echo "ok: compositor is up on $WL, nested in $HOST"
 
-WAYLAND_DISPLAY="$WL" DISPLAY="" kitty --title click-target \
-  -o background=#c81e78 sh -c 'sleep 600' >/dev/null 2>&1 &
-CLIENT_PID=$!
+# Two terminals, each writing what it is given to its own file. `cat` is
+# line-buffered, which is why the typing below always ends in Return.
+WAYLAND_DISPLAY="$WL" DISPLAY="" kitty --title click-target-left \
+  -o background=#c81e78 sh -c "cat > $TYPED_L" >/dev/null 2>&1 &
+LEFT_PID=$!
+sleep 5
+WAYLAND_DISPLAY="$WL" DISPLAY="" kitty --title click-target-right \
+  -o background=#1e78c8 sh -c "cat > $TYPED_R" >/dev/null 2>&1 &
+RIGHT_PID=$!
 for _ in $(seq 1 40); do
-  grep -q "reached the screen for the first time" "$LOG" && break
+  [ "$(grep -c "reached the screen for the first time" "$LOG")" -ge 2 ] && break
   sleep 0.5
 done
-grep -q "reached the screen" "$LOG" || { echo "FAIL: the click target never reached the screen." >&2; tail -8 "$LOG" >&2; exit 1; }
-echo "ok: a window is on screen to click on"
+[ "$(grep -c "reached the screen for the first time" "$LOG")" -ge 2 ] || {
+  echo "FAIL: the two click targets never both reached the screen." >&2; tail -8 "$LOG" >&2; exit 1; }
+echo "ok: two windows are on screen to click between"
 
 PIPE="$(mktemp -u)"; mkfifo "$PIPE"
 WAYLAND_DISPLAY="$HOST" "$DRIVER" < "$PIPE" > "$SWAYDIR/driver.log" 2>&1 &
@@ -138,8 +159,34 @@ if [ "$FRAMES" -eq 0 ]; then
 fi
 echo "ok: still serving clients after the clicks ($FRAMES frames)"
 
-# What this does NOT check: which window got the focus, whether the keyboard
-# followed the pointer, or anything about the picture. It answers "does input
-# arrive and does the compositor survive it", and those are two different
-# failures that both used to go unnoticed.
-echo "PASS: the compositor takes clicks and keeps running"
+# DOES THE KEYBOARD FOLLOW THE CLICK? Click one window, type a word only that
+# window could have received, then the other. Both directions, because a focus
+# path can be right one way and stuck the other.
+type_into() {  # $1 = x of the window to click, $2 = the word to type
+  printf 'move %d 600\nsleep 300\nclick\nsleep 300\n' "$1" >&3
+  sleep 1.5
+  WAYLAND_DISPLAY="$WL" DISPLAY="" wtype "$2" >/dev/null 2>&1
+  sleep 0.5
+  WAYLAND_DISPLAY="$WL" DISPLAY="" wtype -k Return >/dev/null 2>&1
+  sleep 1.5
+}
+type_into 400 LEFTWINDOW
+type_into 1500 RIGHTWINDOW
+type_into 400 LEFTAGAIN
+
+GOT_L="$(tr -d '\r\n' < "$TYPED_L")"
+GOT_R="$(tr -d '\r\n' < "$TYPED_R")"
+if [ "$GOT_L" != "LEFTWINDOWLEFTAGAIN" ] || [ "$GOT_R" != "RIGHTWINDOW" ]; then
+  echo "FAIL: the keyboard did not follow the click." >&2
+  echo "  left window received : [$GOT_L]   expected [LEFTWINDOWLEFTAGAIN]" >&2
+  echo "  right window received: [$GOT_R]   expected [RIGHTWINDOW]" >&2
+  echo "--- focus decisions ---" >&2
+  grep -oE "set_focus: [^ ]+ -> [^ ]+" "$LOG" | tail -6 >&2
+  exit 1
+fi
+echo "ok: the keyboard follows the click, both directions"
+
+# What this does NOT check: anything about the picture, the KMS backend, or
+# input from a real device - the keys here arrive over zwp_virtual_keyboard_v1,
+# which joins the same seat but not the same backend.
+echo "PASS: the compositor takes clicks, routes them and keeps running"
