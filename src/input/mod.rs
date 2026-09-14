@@ -2322,6 +2322,21 @@ impl State {
         let Some(keyboard) = seat.get_keyboard() else {
             return;
         };
+        // A key from a libei client is a person (or an agent acting for one)
+        // typing, and the idle timer has to hear about it. The libinput arm of
+        // `process_input_event` does this for every physical key; this path
+        // does not go through it, so a remote session that only ever typed went
+        // idle underneath itself - measured 14 Sep, the screen idles out after
+        // its timeout with keys still arriving. EI POINTER events were fine,
+        // because those do go through `process_input_event`, which is what made
+        // it look like input reset the timer.
+        //
+        // Not for the `handle_shortcuts == false` case: that is the synthesised
+        // release of keys a disconnecting client left held, and a cleanup is
+        // not activity.
+        if handle_shortcuts {
+            self.common.idle_notifier_state.notify_activity(seat);
+        }
         let serial = SERIAL_COUNTER.next_serial();
         let time = InputTime::now();
         let previous_modifiers = keyboard.modifier_state();
