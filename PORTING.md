@@ -310,6 +310,14 @@ desktop-shell binds the protocol interfaces by exact name:
   `arlen_window_attach_manager_v1` (these must match the desktop-shell XMLs).
 - the default theme comes from `arlen_theme::DARK_TOML` / `LIGHT_TOML`.
 
+### Merge, never rebase
+
+The fork tracks upstream with `git merge`. Not `git rebase`, and this is a rule
+rather than a preference: `master` is pushed, and a rebase rewrites pushed
+history. A merge is reversible with a revert, which is what makes it safe to do
+often. The same reason rules out squashing an upstream range into one commit -
+the individual upstream commits are what a later bisect has to land on.
+
 ### Manual merge
 
 ```bash
@@ -317,8 +325,57 @@ git fetch upstream
 git merge upstream/master
 # Resolve conflicts if any, then:
 git commit
-cargo build --lib   # the fork builds with --lib, not bare
 ```
+
+**Merge in tranches when the range is large.** The 7 September sync was 195
+commits and three months behind; merged as one range it produces a conflict set
+nobody can read. Merged in tranches - pick a date or a feature boundary, merge
+up to it, resolve, verify, repeat - each resolution is small enough to be
+reasoned about, and a mistake is attributable to one tranche instead of to the
+whole quarter.
+
+**Keep the fork close to zero.** 195 commits of drift cost days; a week of drift
+costs minutes. The distance is the whole difficulty.
+
+### The conflict you will actually get
+
+Almost every conflict in this fork comes from one axis: **upstream still renders
+through `IcedElement` and this fork deleted it.** Tab bars, window headers,
+indicators, menus - upstream edits them as Iced widgets, and here they are either
+gone or reimplemented (see "Iced rendering removal"). When a conflict lands in
+one of those files, the resolution is nearly always "keep this fork's side and
+drop upstream's Iced code", not a merge of the two.
+
+**When one side is a deletion, "keep both" is wrong.** This is the failure mode
+that has cost this fork the most, and the cost is not theoretical: the 7
+September merge resolved
+
+```rust
+-                    let shell = self.common.shell.read();      // upstream deleted this
++                    let mut shell = self.common.shell.write();  // upstream added this
+```
+
+by keeping both lines. Two guards on the same `RwLock`, read held across write:
+the compositor deadlocked on the first absolute pointer motion it ever saw, so
+every nested session froze the moment the mouse moved. It survived a week and
+six green CI jobs because nothing tested input. Before resolving a conflict
+hunk, read what upstream *removed*, not only what it added.
+
+### Verify a merge before pushing it
+
+A merge that compiles is not a merge that works - the deadlock above compiled,
+passed clippy, passed 195 unit tests and passed the smoke job. In order:
+
+```bash
+cargo build --lib          # the fork builds with --lib, not bare
+cargo clippy --all-features -- -D warnings
+cargo test --features test-client
+dev/smoke.sh               # it starts, serves a client and renders
+dev/pointer-input-check.sh # it takes a click, routes it and stays alive
+```
+
+`dev/session-lock-conformance.sh` as well when the merge touched
+`session_lock`, `idle_notify` or anything under `src/wayland/handlers/`.
 
 ### Building against arlen-theme (cross-repo dependency)
 
@@ -371,3 +428,18 @@ minimal (single function calls); they are easy to re-apply after upstream change
 
 **Conflicts in `src/event_bus.rs`:** This file is entirely ours; upstream will never
 touch it. No conflicts expected.
+
+**Conflicts in `src/state.rs`:** The `Common` struct and its initialiser, every
+time. Upstream adds a protocol state field; this fork has its own. Keep both
+sides here - this is the one place where "keep both" is normally right, because
+each side is an addition. Check the initialiser and the struct agree afterwards.
+
+**Conflicts in `src/wayland/protocols/mod.rs`:** The module list, for the same
+reason and with the same resolution: both sides, alphabetically.
+
+**Conflicts in `Cargo.lock`:** Do not hand-resolve it. Take either side and run
+`cargo build --lib`, which rewrites the file correctly; then commit it.
+
+**Conflicts in a file this fork deleted** (the Iced tab bar, `stack/tabs.rs` and
+its neighbours): keep it deleted. `git rm` the file and move on - upstream's
+edits to it are edits to code this fork does not have.
