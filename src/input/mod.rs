@@ -925,7 +925,15 @@ impl State {
                         }
                     }
 
-                    let _shell = self.common.shell.read();
+                    // One guard, never two. A read guard taken here and held
+                    // across this write guard deadlocks the compositor on the
+                    // first absolute motion it ever sees - the main thread
+                    // blocks inside the event handler, so input stops, clients
+                    // stop being served and the session is simply frozen. That
+                    // is what the 7 Sep upstream merge left behind: upstream had
+                    // replaced the read with this write, and the resolution kept
+                    // both. Absolute motion is what nested and remote-input
+                    // sessions run on, which is why it never showed on hardware.
                     let mut shell = self.common.shell.write();
                     // Keep the seat's active output following the pointer. Click-to-
                     // focus (PointerButton) resolves its target via
