@@ -1432,8 +1432,33 @@ impl Common {
             return;
         }
 
-        if let Some(session_lock) = self.shell.write().session_lock.as_mut() {
-            session_lock.stop_waiting_on(output);
+        // WHICH FRAME COUNTS. Not this one, merely because the compositor ran a
+        // frame for this output. That is what this used to do, and it meant
+        // `locked` went out on the compositor's own blank frame - measured 14
+        // Sep: a lock client that creates NO surface at all was still told the
+        // session was locked, 55 ms after asking, with nothing of its own on
+        // any screen. The event then says nothing about what is on the panel,
+        // which is precisely the race the protocol wrote it to close: a client
+        // that suspends on `locked` must not be able to suspend before its own
+        // lock screen has been shown.
+        //
+        // So an output stops being waited on when THE LOCK SURFACE FOR THAT
+        // OUTPUT has reached the screen, and `crate::presented` is the same
+        // per-surface record the input path uses to decide a surface has been
+        // seen. A surface presented during this very frame is not marked yet -
+        // `mark_presented` runs below - so the last output is released one
+        // frame later than it could be. Late is the safe direction here.
+        let mut shell = self.shell.write();
+        if let Some(session_lock) = shell.session_lock.as_mut() {
+            let shown = session_lock
+                .surfaces
+                .get(output)
+                .is_some_and(|lock_surface| {
+                    crate::presented::has_been_presented(lock_surface.wl_surface())
+                });
+            if shown {
+                session_lock.stop_waiting_on(output);
+            }
         }
     }
 
