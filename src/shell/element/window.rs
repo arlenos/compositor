@@ -143,6 +143,21 @@ pub struct CosmicWindowInternal {
     /// rasteriser via `HeaderVisualState::interaction`.
     pub(crate) header_button_interaction:
         Mutex<crate::backend::render::window_header::ButtonInteraction>,
+    /// A left press in the header's drag zone has been seen and the
+    /// move grab it asks for is still queued.
+    ///
+    /// The grab cannot be installed from `PointerTarget::button` -
+    /// smithay holds the pointer's mutex there and `set_grab` would
+    /// deadlock - so the press schedules it on the event loop. That
+    /// leaves a window in which the RELEASE can arrive first, and a
+    /// grab installed after its own release never sees one: the
+    /// window silently sticks to the pointer until the next click.
+    /// A tap on a touchpad is exactly that shape - libinput emits
+    /// the press and release of a tap with no gap worth the name.
+    ///
+    /// So the press arms this, the release disarms it, and the
+    /// queued work installs the grab only if it is still armed.
+    pub(crate) header_drag_pending: Arc<AtomicBool>,
 }
 
 #[repr(u8)]
@@ -310,6 +325,7 @@ impl CosmicWindow {
                 header_button_interaction: Mutex::new(
                     crate::backend::render::window_header::ButtonInteraction::Idle,
                 ),
+                header_drag_pending: Arc::new(AtomicBool::new(false)),
             })),
             handle,
         }
@@ -1240,6 +1256,15 @@ impl PointerTarget<State> for CosmicWindow {
                 // (min/max/close), invoke the corresponding action
                 // instead of falling through to any default handler.
                 // Release of the right or middle button is ignored.
+                // The release disarms a queued move grab whether or not it
+                // finalises a button press: a press and release with no motion
+                // between them is a click, not a drag.
+                if event.state == smithay::backend::input::ButtonState::Released
+                    && event.button == 0x110
+                {
+                    self.p().header_drag_pending.store(false, Ordering::SeqCst);
+                }
+
                 if event.state == smithay::backend::input::ButtonState::Released
                     && event.button == 0x110
                     && let Some(button) = self.finalize_header_button_release()
@@ -1364,7 +1389,18 @@ impl PointerTarget<State> for CosmicWindow {
                         } else {
                             let seat = seat.clone();
                             let surface = surface.clone();
+                            let pending = {
+                                let p = self.p();
+                                p.header_drag_pending.store(true, Ordering::SeqCst);
+                                p.header_drag_pending.clone()
+                            };
                             self.handle.insert_idle(move |state| {
+                                // Released already? Then this was a click and
+                                // there is no drag to install. See
+                                // `header_drag_pending`.
+                                if !pending.swap(false, Ordering::SeqCst) {
+                                    return;
+                                }
                                 let res = state.common.shell.write().move_request(
                                     &surface,
                                     &seat,
