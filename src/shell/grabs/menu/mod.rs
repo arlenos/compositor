@@ -241,8 +241,68 @@ impl PointerGrab<State> for MenuGrab {
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &PointerMotionEvent,
     ) {
+<<<<<<< HEAD
         // Forward pointer events to desktop-shell so it can handle menu interaction.
         handle.motion(state, self.shell_focus.clone(), event);
+=======
+        {
+            let mut guard = self.elements.lock().unwrap();
+            let elements = &mut *guard;
+            let event_location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if state.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
+            if let Some(i) = elements.iter().position(|elem| {
+                let mut bbox = elem.iced.bbox();
+                bbox.loc = elem.position.as_logical();
+
+                bbox.contains(event_location.to_i32_floor())
+            }) {
+                let element = &mut elements[i];
+
+                let new_event = PointerMotionEvent {
+                    location: event_location - element.position.as_logical().to_f64(),
+                    serial: event.serial,
+                    time: event.time,
+                };
+                if !element.pointer_entered {
+                    PointerTarget::enter(&element.iced, &self.seat, state, &new_event);
+                    element.pointer_entered = true;
+                } else {
+                    PointerTarget::motion(&element.iced, &self.seat, state, &new_event);
+                }
+            } else {
+                // Keep the root menu hovered while a submenu is open
+                let keep_root = usize::from(elements.len() > 1);
+                elements
+                    .iter_mut()
+                    .filter(|element| element.pointer_entered)
+                    .skip(keep_root)
+                    .for_each(|element| {
+                        PointerTarget::leave(
+                            &element.iced,
+                            &self.seat,
+                            state,
+                            event.serial,
+                            event.time,
+                        );
+                        element.pointer_entered = false;
+                    })
+            }
+        }
+        handle.motion(state, None, event);
+>>>>>>> upstream/master
     }
 
     fn relative_motion(
@@ -472,6 +532,76 @@ impl TabletToolGrab<State> for MenuGrab {
         _focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
         event: &TabletMotionEvent,
     ) {
+<<<<<<< HEAD
+=======
+        {
+            let location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if data.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
+            let mut elements = self.elements.lock().unwrap();
+            if let Some(i) = elements.iter().position(|elem| {
+                let mut bbox = elem.iced.bbox();
+                bbox.loc = elem.position.as_logical();
+
+                bbox.contains(location.to_i32_floor())
+            }) {
+                let element = &mut elements[i];
+
+                let new_event = TabletMotionEvent {
+                    location: location - element.position.as_logical().to_f64(),
+                    serial: event.serial,
+                    time: event.time,
+                };
+
+                if element.tablet_entered.is_none() {
+                    TabletToolTarget::proximity_in(
+                        &element.iced,
+                        &self.seat,
+                        data,
+                        handle.descriptor(),
+                        &handle.current_tablet(),
+                        event.serial,
+                    );
+                    element.tablet_entered = Some(handle.descriptor().clone());
+                }
+                TabletToolTarget::motion(
+                    &element.iced,
+                    &self.seat,
+                    data,
+                    handle.descriptor(),
+                    &new_event,
+                );
+                self.last_tablet_idx = Some(i);
+            } else {
+                let keep_root = usize::from(elements.len() > 1);
+                elements
+                    .iter_mut()
+                    .filter(|element| element.tablet_entered.is_some())
+                    .skip(keep_root)
+                    .for_each(|element| {
+                        TabletToolTarget::proximity_out(
+                            &element.iced,
+                            &self.seat,
+                            data,
+                            handle.descriptor(),
+                        );
+                    });
+                self.last_tablet_idx.take();
+            }
+        }
+>>>>>>> upstream/master
         handle.motion(data, None, event);
     }
 

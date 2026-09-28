@@ -235,7 +235,20 @@ pub enum ColorFilter {
     Tritanopia = 4,
 }
 
+<<<<<<< HEAD
 // ── Layout configuration ─────────────────────────────────────────────────────
+=======
+impl Config {
+    pub fn load(loop_handle: &LoopHandle<'_, State>, kiosk_mode: bool) -> Config {
+        let config = cosmic_config::Config::new("com.system76.CosmicComp", 1).unwrap();
+        let source = cosmic_config::calloop::ConfigWatchSource::new(&config).unwrap();
+        loop_handle
+            .insert_source(source, |(config, keys), (), state| {
+                config_changed(config, keys, state);
+            })
+            .expect("Failed to add cosmic-config to the event loop");
+        let xdg = xdg::BaseDirectories::new();
+>>>>>>> upstream/master
 
 /// Layout and tiling configuration loaded from `[layout]` in compositor.toml.
 #[derive(Debug, Clone)]
@@ -1209,6 +1222,7 @@ impl Config {
             std::mem::forget(watcher);
         }
 
+<<<<<<< HEAD
         // Build the system-actions map from defaults plus the
         // user's `[system_actions]` overrides. The
         // cosmic-settings-daemon source was removed in
@@ -1235,6 +1249,84 @@ impl Config {
         // this Vec empty so `shell::TilingExceptions::new` and
         // friends still compile.
         let tiling_exceptions: Vec<ApplicationException> = Vec::new();
+=======
+        // Source key bindings from com.system76.CosmicSettings.Shortcuts
+        let settings_context = shortcuts::context().expect("Failed to load shortcuts config");
+        let mut system_actions = Default::default();
+        let mut shortcuts = Default::default();
+        // Kiosk mode disables shortcuts
+        if !kiosk_mode {
+            system_actions = shortcuts::system_actions(&settings_context);
+            shortcuts = shortcuts::shortcuts(&settings_context);
+
+            // Listen for updates to the keybindings config.
+            match cosmic_config::calloop::ConfigWatchSource::new(&settings_context) {
+                Ok(source) => {
+                    if let Err(err) =
+                        loop_handle.insert_source(source, |(config, keys), (), state| {
+                            for key in keys {
+                                match key.as_str() {
+                                    // Reload the keyboard shortcuts config.
+                                    "custom" | "defaults" => {
+                                        state.common.config.shortcuts =
+                                            shortcuts::shortcuts(&config);
+                                    }
+
+                                    "system_actions" => {
+                                        state.common.config.system_actions =
+                                            shortcuts::system_actions(&config);
+                                    }
+
+                                    _ => (),
+                                }
+                            }
+                        })
+                    {
+                        warn!(
+                            ?err,
+                            "Failed to watch com.system76.CosmicSettings.Shortcuts config"
+                        );
+                    }
+                }
+                Err(err) => warn!(
+                    ?err,
+                    "failed to create config watch source for com.system76.CosmicSettings.Shortcuts"
+                ),
+            };
+        }
+
+        let window_rules_context =
+            window_rules::context().expect("Failed to load window rules config");
+        let tiling_exceptions = window_rules::tiling_exceptions(&window_rules_context);
+
+        match cosmic_config::calloop::ConfigWatchSource::new(&window_rules_context) {
+            Ok(source) => {
+                if let Err(err) = loop_handle.insert_source(source, |(config, keys), (), state| {
+                    for key in keys {
+                        match key.as_str() {
+                            "tiling_exception_defaults" | "tiling_exception_custom" => {
+                                let new_exceptions = window_rules::tiling_exceptions(&config);
+                                state.common.config.tiling_exceptions = new_exceptions;
+                                state.common.shell.write().update_tiling_exceptions(
+                                    state.common.config.tiling_exceptions.iter(),
+                                );
+                            }
+                            _ => (),
+                        }
+                    }
+                }) {
+                    warn!(
+                        ?err,
+                        "Failed to watch com.system76.CosmicSettings.WindowRules config"
+                    );
+                }
+            }
+            Err(err) => warn!(
+                ?err,
+                "failed to create config watch source for com.system76.CosmicSettings.WindowRules"
+            ),
+        };
+>>>>>>> upstream/master
 
         let _ = loop_handle.insert_idle(|state| {
             let filter_conf = state.common.config.dynamic_conf.screen_filter();
