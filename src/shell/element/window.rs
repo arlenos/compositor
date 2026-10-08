@@ -720,6 +720,8 @@ impl CosmicWindow {
             scale: 1.0,
             focused_button: None,
             theme_generation: 0,
+            // Not used by the button layout; only the raster reads it.
+            corner_radius: 0.0,
         };
         for b in layout_buttons(&state) {
             if b.hit_test(local_x, local_y) {
@@ -866,7 +868,7 @@ impl CosmicWindow {
             self as wh, ButtonVisibility, HeaderVisualState, rasterize_header,
         };
 
-        let (title, activated, width_logical, interaction, buttons) = {
+        let (title, activated, width_logical, interaction, buttons, corner_radius) = {
             let p = self.p();
             // Only windows with SSD decorations get a Arlen header
             // (the `Shell::should_render_window_header` policy is
@@ -890,7 +892,14 @@ impl CosmicWindow {
                 has_minimize: true,
                 has_maximize: true,
             };
-            (title, activated, width, interaction, buttons)
+            (
+                title,
+                activated,
+                width,
+                interaction,
+                buttons,
+                Self::header_corner_radius(&p),
+            )
         };
         if width_logical <= 0 {
             return None;
@@ -905,6 +914,7 @@ impl CosmicWindow {
             scale: output_scale.x,
             focused_button: None,
             theme_generation: wh::theme_generation(),
+            corner_radius,
         };
 
         let buffer = {
@@ -1001,6 +1011,22 @@ impl CosmicWindow {
     /// `surface().is_tiled(pending)`.
     pub fn is_tiled(&self) -> bool {
         self.p().is_tiled()
+    }
+
+    /// Radius of this window's header's top corners, in logical pixels.
+    ///
+    /// The same rule `corner_radius` applies to the window's outer corners:
+    /// rounded only when the window is rounded at all, which a maximised window
+    /// never is and a tiled one is only with `clip_tiled_windows`.
+    fn header_corner_radius(p: &CosmicWindowInternal) -> f32 {
+        let is_tiled = p.is_tiled();
+        let appearance = p.appearance_conf.lock().unwrap();
+        let round = (!is_tiled || appearance.clip_tiled_windows) && !p.window.is_maximized(false);
+        if round {
+            crate::theme::window_frame_corners(&crate::theme::arlen_theme())[corner::TOP_LEFT]
+        } else {
+            0.0
+        }
     }
 
     /// Compute the corner radii for this window given geometry and defaults.

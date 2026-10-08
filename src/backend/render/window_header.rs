@@ -48,7 +48,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 // wants to restore titles.
 use smithay::{
     backend::{allocator::Fourcc, renderer::element::memory::MemoryRenderBuffer},
-    utils::Transform,
+    utils::{Buffer as BufferCoords, Rectangle as SRect, Transform},
 };
 use tiny_skia::{
     Color, FillRule, Paint, PathBuilder, Pixmap, PixmapMut, Rect, Stroke,
@@ -187,6 +187,14 @@ pub struct HeaderVisualState {
     /// stale. Keeps the cache key `Eq`-comparable without having
     /// to include the entire `ArlenTheme` struct.
     pub theme_generation: u64,
+    /// Radius of the header's two top corners, in logical pixels. The window
+    /// decides it, not the header: it is the frame radius on a floating window
+    /// and 0 on a maximised one, which has no rounded corners at all. A header
+    /// that rounded itself regardless left two slivers of wallpaper showing at
+    /// the top of every maximised window - and since the header also has to say
+    /// which of its pixels are opaque (see `rasterize_header`), it needs the same
+    /// number to say it.
+    pub corner_radius: f32,
 }
 
 impl PartialEq for HeaderVisualState {
@@ -204,6 +212,7 @@ impl PartialEq for HeaderVisualState {
             && (self.scale - other.scale).abs() < f64::EPSILON
             && self.focused_button == other.focused_button
             && self.theme_generation == other.theme_generation
+            && self.corner_radius == other.corner_radius
     }
 }
 
@@ -450,8 +459,42 @@ pub fn rasterize_header(state: &HeaderVisualState, theme: &ArlenTheme) -> Memory
         (pixel_w as i32, pixel_h as i32),
         scale.round() as i32,
         Transform::Normal,
-        None,
+        opaque_regions(state, theme, pixel_w as i32, pixel_h as i32, scale),
     )
+}
+
+/// Which pixels of the header cover what is behind them.
+///
+/// Everything but the two rounded top corners - provided the header's
+/// background is opaque at all. Without this the header declared no opaque
+/// region, so the renderer's occlusion test treated the whole 36 px strip as
+/// see-through: a wallpaper under a maximised window was never "covered" and
+/// kept being given frames. Measured 8 Oct with `wallpaper-probe`: 31 frames a
+/// second behind a maximised window, where it had been 1 before maximised
+/// windows had a header.
+fn opaque_regions(
+    state: &HeaderVisualState,
+    theme: &ArlenTheme,
+    w: i32,
+    h: i32,
+    scale: f64,
+) -> Option<Vec<SRect<i32, BufferCoords>>> {
+    if theme.color.bg_shell[3] < 1.0 {
+        return None;
+    }
+    // Whole pixels the corner arc can reach, rounded up: a pixel the arc
+    // touches is partly transparent and must not be claimed.
+    let r = (state.corner_radius as f64 * scale).ceil() as i32;
+    let r = r.clamp(0, (w / 2).min(h));
+    if r == 0 {
+        return Some(vec![SRect::new((0, 0).into(), (w, h).into())]);
+    }
+    Some(vec![
+        // Everything below the corners, full width.
+        SRect::new((0, r).into(), (w, h - r).into()),
+        // The band between the two corners, above that.
+        SRect::new((r, 0).into(), (w - 2 * r, r).into()),
+    ])
 }
 
 /// Swap red and blue channels in-place. tiny-skia produces
@@ -501,16 +544,13 @@ fn draw_background(
     let mut pb = PathBuilder::new();
     let w = state.width as f32;
     let h = HEADER_LOGICAL_HEIGHT as f32;
-    // The header's top corners are the WINDOW's outer corners, so they come
-    // from the one function that owns that number - not from the theme's
-    // window radius directly. Reading the theme here was the bug Tim found on
-    // 14 September: every other draw of this corner maps the theme value
-    // through `+4`, this one did not, and at the default theme the frame's arc
-    // (16) stood a clear four pixels outside the header's (12). Measured from
-    // a capture, both arcs are circular to within a pixel, so it really was
-    // only the number. [0] is the top-left; a window's corners are uniform, so
-    // it sets the top-right too.
-    let r = crate::theme::window_frame_corners(theme)[0];
+    // The header's top corners are the WINDOW's outer corners, so the window
+    // supplies the radius (`HeaderVisualState::corner_radius`), derived from
+    // `crate::theme::window_frame_corners` like every other draw of that corner.
+    // Reading the theme here directly was the 14 September bug (12 against the
+    // frame's 16); deciding it here at all was the 8 October one (a maximised
+    // window's header stayed round). Uniform corners, so it sets both.
+    let r = state.corner_radius;
 
     // Rounded-top, square-bottom path. Walks clockwise from the
     // bottom-left. When the radius is 0 the control points collapse into the
@@ -929,6 +969,8 @@ mod tests {
             scale: 1.0,
             focused_button: None,
             theme_generation: 0,
+            corner_radius: crate::theme::window_frame_corners(&crate::theme::arlen_theme())
+                [crate::theme::corner::TOP_LEFT],
         }
     }
 
@@ -1180,18 +1222,24 @@ mod tests {
     /// could fail while carrying a name that said it did. The readback harness
     /// the golden test uses answers the question the old comment could not.
     #[test]
-    fn the_header_corner_is_cut_to_the_theme_radius() {
-        let state = stub_state(600, true);
-        let mut sharp = test_theme_dark();
-        sharp.radius.window_corners = [0.0; 4];
-        let mut round = test_theme_dark();
-        round.radius.window_corners = [16.0; 4];
+    fn the_header_corner_is_cut_to_the_radius_it_is_given() {
+        // The window decides the radius (`HeaderVisualState::corner_radius`):
+        // the frame radius when it is rounded, 0 when maximised.
+        let theme = test_theme_dark();
+        let sharp_state = HeaderVisualState {
+            corner_radius: 0.0,
+            ..stub_state(600, true)
+        };
+        let round_state = HeaderVisualState {
+            corner_radius: 16.0,
+            ..stub_state(600, true)
+        };
 
-        let (sharp_px, w, _) = match render_header_rgba(&state, &sharp) {
+        let (sharp_px, w, _) = match render_header_rgba(&sharp_state, &theme) {
             Some(out) => out,
             None => return, // no headless GL device here; skipped, not failed
         };
-        let (round_px, _, _) = match render_header_rgba(&state, &round) {
+        let (round_px, _, _) = match render_header_rgba(&round_state, &theme) {
             Some(out) => out,
             None => return,
         };
@@ -1221,6 +1269,45 @@ mod tests {
             at(&round_px, w / 2, 20)[3],
             "the radius must not change the header away from its corners"
         );
+    }
+
+    #[test]
+    fn the_header_claims_every_opaque_pixel_and_no_corner_pixel() {
+        let theme = test_theme_dark();
+        let (w, h) = (600, 36);
+
+        // Maximised: square, so the whole strip covers what is behind it.
+        let square = HeaderVisualState {
+            corner_radius: 0.0,
+            ..stub_state(w, true)
+        };
+        assert_eq!(
+            opaque_regions(&square, &theme, w, h, 1.0),
+            Some(vec![SRect::new((0, 0).into(), (w, h).into())])
+        );
+
+        // Rounded at 16 on a 1.5 output: 24 px corners, nothing inside them
+        // claimed, everything outside them claimed.
+        let round = HeaderVisualState {
+            corner_radius: 16.0,
+            ..stub_state(w, true)
+        };
+        let (pw, ph) = (900, 54);
+        let rects = opaque_regions(&round, &theme, pw, ph, 1.5).unwrap();
+        let claimed = |x: i32, y: i32| rects.iter().any(|r| r.contains((x, y)));
+        assert!(
+            !claimed(0, 0) && !claimed(23, 23),
+            "a corner pixel was claimed"
+        );
+        assert!(!claimed(pw - 1, 0) && !claimed(pw - 24, 23));
+        assert!(claimed(24, 0) && claimed(0, 24) && claimed(pw - 1, ph - 1));
+        let area: i32 = rects.iter().map(|r| r.size.w * r.size.h).sum();
+        assert_eq!(area, pw * ph - 2 * 24 * 24, "claimed twice, or missed some");
+
+        // A translucent header covers nothing.
+        let mut glass = test_theme_dark();
+        glass.color.bg_shell[3] = 0.9;
+        assert_eq!(opaque_regions(&square, &glass, w, h, 1.0), None);
     }
 
     #[test]
