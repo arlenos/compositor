@@ -67,7 +67,7 @@ impl ShellOverlayState {
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ArlenShellOverlayV1, _>(
-            1,
+            2,
             ShellOverlayGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -458,6 +458,21 @@ impl ShellOverlayState {
     pub fn send_workspace_overlay_open(&self) {
         for instance in &self.instances {
             instance.workspace_overlay_open();
+        }
+    }
+
+    /// Tell connected shells that a move to workspace `target` (0-based) on
+    /// `output` was refused, so the indicator can answer the keystroke.
+    ///
+    /// Version 2 only. An event a client's copy of the protocol does not
+    /// know is a protocol error that disconnects it, so a desktop-shell
+    /// still built against version 1 must simply not be sent this.
+    pub fn send_workspace_move_refused(&self, output: &str, target: u32) {
+        use smithay::reexports::wayland_server::Resource;
+        for instance in &self.instances {
+            if instance.version() >= 2 {
+                instance.workspace_move_refused(output.to_string(), target);
+            }
         }
     }
 

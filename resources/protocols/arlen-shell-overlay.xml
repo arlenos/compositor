@@ -13,7 +13,7 @@
     and receives overlay events. The desktop-shell sends back user actions.
   </description>
 
-  <interface name="arlen_shell_overlay_v1" version="1">
+  <interface name="arlen_shell_overlay_v1" version="2">
     <description summary="shell overlay manager">
       Singleton global. The desktop-shell binds this interface once at
       startup to receive overlay events from the compositor.
@@ -402,6 +402,21 @@
         If the overlay is already open, the shell may use this event
         to cycle keyboard focus to the next window.
       </description>
+    </event>
+
+    <event name="workspace_move_refused" since="2">
+      <description summary="a move to another workspace was refused">
+        Sent when the user asked to move a window to another workspace and
+        the compositor refused, so the request did not go silently nowhere.
+        The one case today is moving the only window of a workspace into the
+        empty trailing workspace, which would change nothing but the
+        numbering. The shell should show the target workspace in its
+        indicator and let it settle back to the active one, the way it
+        animates a successful switch, with no text. Nothing on screen has
+        changed; this only acknowledges the request.
+      </description>
+      <arg name="output" type="string" summary="connector name of the output the move was on"/>
+      <arg name="target" type="uint" summary="0-based index of the workspace that was asked for"/>
     </event>
 
     <!-- ===== Waypointer ===== -->

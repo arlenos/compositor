@@ -453,14 +453,21 @@ impl State {
                     &mut self.common.workspace_state.update(),
                     &self.common.event_loop_handle,
                 );
-                if let Ok(Some((target, _point))) = res {
-                    Shell::set_focus(
+                match res {
+                    Ok(Some((target, _point))) => Shell::set_focus(
                         self,
                         Some(&target),
                         seat,
                         None,
                         matches!(x, Action::MoveToWorkspace(_)),
-                    );
+                    ),
+                    // Refused (ruled 15 Sep): the keystroke still gets an answer.
+                    // See `ShellOverlayState::send_workspace_move_refused`.
+                    Err(InvalidWorkspaceIndex) => self
+                        .common
+                        .shell_overlay_state
+                        .send_workspace_move_refused(&focused_output.name(), workspace as u32),
+                    Ok(None) => {}
                 }
             }
 
@@ -479,15 +486,20 @@ impl State {
                     &self.common.event_loop_handle,
                 );
                 // If the active workspace changed, the cursor_follows_focus should probably be checked
-                if let Ok(Some((target, _point))) = res {
-                    std::mem::drop(shell);
-                    Shell::set_focus(
+                std::mem::drop(shell);
+                match res {
+                    Ok(Some((target, _point))) => Shell::set_focus(
                         self,
                         Some(&target),
                         seat,
                         None,
                         matches!(x, Action::MoveToLastWorkspace),
-                    );
+                    ),
+                    Err(InvalidWorkspaceIndex) => self
+                        .common
+                        .shell_overlay_state
+                        .send_workspace_move_refused(&focused_output.name(), workspace as u32),
+                    Ok(None) => {}
                 }
             }
 
