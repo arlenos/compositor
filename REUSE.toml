@@ -48,6 +48,7 @@ path = [
     "dev/fixtures/sensing-vectors/unreadable__wrong-case.toml",
     "dev/header-button-check.sh",
     "dev/pointer-input-check.sh",
+    "dev/scratchpad-check.sh",
     "dev/screenshot/shoot-compositor.sh",
     "dev/session-lock-conformance.sh",
     "dev/super-drag-check.sh",
