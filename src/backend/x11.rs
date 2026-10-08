@@ -239,8 +239,14 @@ impl Surface {
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
-                state.send_frames(&self.output, None);
+                // The states first, as the KMS path has them: `send_frames` only
+                // calls back a surface whose primary output is this one, and a
+                // surface on its first frame has none until these states are in.
+                // The other way round, it waits for this output's next render, which
+                // on a quiet output never comes: a lock surface on a second nested
+                // output was never called back and `locked` never went out.
                 state.update_primary_output(&self.output, &states);
+                state.send_frames(&self.output, None);
                 state.send_dmabuf_feedback(&self.output, &states, |_| None);
                 if damage.is_some() {
                     let mut output_presentation_feedback = state
