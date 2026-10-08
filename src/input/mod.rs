@@ -2903,7 +2903,15 @@ impl State {
         // toplevel's app_id matches the registration. Static TOML above
         // always wins over dynamic — if we got here the user has not
         // shadowed the dynamic binding.
-        if !shortcuts_inhibited && key_state == KeyState::Pressed {
+        //
+        // Never while the session is locked. A match is swallowed and sent to
+        // the registering app over D-Bus, and a binding needs no modifier, so
+        // a plain-letter `app_global` binding would take characters of the
+        // password off the lock screen and hand them to whoever registered it.
+        if !shortcuts_inhibited
+            && key_state == KeyState::Pressed
+            && self.common.shell.read().session_lock.is_none()
+        {
             let current_mods = crate::config::KeyBindingModifiers {
                 super_key: modifiers.logo,
                 shift: modifiers.shift,
