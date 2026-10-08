@@ -25,7 +25,7 @@ impl SecurityContextHandler for State {
                     .get_client_data(security_context.creator_client_id.clone())
                     .ok();
 
-                let new_state = state.new_client_state();
+                let new_state = state.new_client_state(&client_stream);
 
                 let drm_node = client_data
                     .as_ref()

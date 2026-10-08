@@ -81,7 +81,7 @@ impl Common {
                     client_stream,
                     Arc::new(ClientState {
                         advertised_drm_node: Some(render_node),
-                        ..state.new_client_state()
+                        ..state.new_client_state(&client_stream)
                     }),
                 ) {
                     warn!(

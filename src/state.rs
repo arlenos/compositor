@@ -164,6 +164,10 @@ pub struct ClientState {
     pub evlh: LoopHandle<'static, State>,
     pub evls: LoopSignal,
     pub security_context: Option<SecurityContext>,
+    /// The Arlen app this client is confined as, read from its cgroup when it
+    /// connected (`crate::utils::confinement`). `None` for anything `arlen-run`
+    /// did not launch.
+    pub arlen_app: Option<String>,
 }
 unsafe impl Send for ClientState {}
 unsafe impl Sync for ClientState {}
@@ -171,6 +175,18 @@ unsafe impl Sync for ClientState {}
 impl ClientState {
     /// We treat a client as "sandboxed" if it has a security context for any sandbox engine
     /// other than `dev.arlen.desktop-shell`
+    /// May this client capture the screen directly? A sandboxed client may not,
+    /// and neither may an app confined by `arlen-run`, which connects without a
+    /// security context - unless capturing is its job. Every other app captures
+    /// through the portal.
+    pub fn may_capture(&self) -> bool {
+        self.not_sandboxed()
+            && self
+                .arlen_app
+                .as_deref()
+                .is_none_or(|app| crate::utils::confinement::MAY_CAPTURE.contains(&app))
+    }
+
     pub fn not_sandboxed(&self) -> bool {
         self.security_context
             .as_ref()
@@ -701,6 +717,12 @@ pub fn client_has_no_security_context(client: &Client) -> bool {
         .is_none_or(|client_state| client_state.security_context.is_none())
 }
 
+fn client_may_capture(client: &Client) -> bool {
+    client
+        .get_data::<ClientState>()
+        .is_some_and(|client_state| client_state.may_capture())
+}
+
 fn client_not_sandboxed(client: &Client) -> bool {
     client
         .get_data::<ClientState>()
@@ -748,13 +770,13 @@ impl State {
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let cosmic_image_capture_source_state =
-            CosmicImageCaptureSourceState::new::<Self, _>(dh, client_not_sandboxed);
+            CosmicImageCaptureSourceState::new::<Self, _>(dh, client_may_capture);
         let output_capture_source_state =
-            OutputCaptureSourceState::new_with_filter::<State, _>(dh, client_not_sandboxed);
+            OutputCaptureSourceState::new_with_filter::<State, _>(dh, client_may_capture);
         let toplevel_capture_source_state =
-            ToplevelCaptureSourceState::new_with_filter::<State, _>(dh, client_not_sandboxed);
+            ToplevelCaptureSourceState::new_with_filter::<State, _>(dh, client_may_capture);
         let image_copy_capture_state =
-            ImageCopyCaptureState::new_with_filter::<Self, _>(dh, client_not_sandboxed);
+            ImageCopyCaptureState::new_with_filter::<Self, _>(dh, client_may_capture);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
@@ -970,7 +992,7 @@ impl State {
         }
     }
 
-    pub fn new_client_state(&self) -> ClientState {
+    pub fn new_client_state(&self, stream: &std::os::unix::net::UnixStream) -> ClientState {
         ClientState {
             compositor_client_state: CompositorClientState::default(),
             advertised_drm_node: match &self.backend {
@@ -980,6 +1002,7 @@ impl State {
             evlh: self.common.event_loop_handle.clone(),
             evls: self.common.event_loop_signal.clone(),
             security_context: None,
+            arlen_app: crate::utils::confinement::arlen_app_of(stream),
         }
     }
 
