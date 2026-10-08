@@ -164,6 +164,11 @@ path = "src/bin/wallpaper-probe.rs"
 required-features = ["test-client"]
 
 [[bin]]
+name = "overlay-probe"
+path = "src/bin/overlay-probe.rs"
+required-features = ["test-client"]
+
+[[bin]]
 name = "pointer-driver"
 path = "src/bin/pointer-driver.rs"
 required-features = ["test-client"]
