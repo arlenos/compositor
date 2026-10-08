@@ -36,6 +36,24 @@ use wayland_client::{
         wl_surface::WlSurface,
     },
 };
+#[allow(non_upper_case_globals, non_camel_case_types, dead_code, clippy::all)]
+mod pause_protocol {
+    use wayland_client;
+    use wayland_client::protocol::*;
+
+    pub mod __interfaces {
+        use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!("resources/protocols/arlen-wallpaper-pause-v1.xml");
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!("resources/protocols/arlen-wallpaper-pause-v1.xml");
+}
+use pause_protocol::{
+    arlen_wallpaper_pause_manager_v1::ArlenWallpaperPauseManagerV1,
+    arlen_wallpaper_pause_v1::{self, ArlenWallpaperPauseV1},
+};
+
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::{Layer, ZwlrLayerShellV1},
     zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1},
@@ -45,6 +63,9 @@ struct Probe {
     compositor: Option<WlCompositor>,
     shm: Option<WlShm>,
     layer_shell: Option<ZwlrLayerShellV1>,
+    /// `arlen-wallpaper-pause-v1`, when the compositor offers it: the probe
+    /// then also prints why it is or is not being given frames.
+    pause_manager: Option<ArlenWallpaperPauseManagerV1>,
     output: Option<WlOutput>,
     size: Option<(u32, u32)>,
     /// Frame callbacks granted since the last rate line.
@@ -93,6 +114,9 @@ impl Dispatch<WlRegistry, ()> for Probe {
                 "wl_shm" => state.shm = Some(registry.bind(name, version.min(1), qh, ())),
                 "zwlr_layer_shell_v1" => {
                     state.layer_shell = Some(registry.bind(name, version.min(4), qh, ()))
+                }
+                "arlen_wallpaper_pause_manager_v1" => {
+                    state.pause_manager = Some(registry.bind(name, 1, qh, ()))
                 }
                 "wl_output" if state.output.is_none() => {
                     state.output = Some(registry.bind(name, version.min(3), qh, ()))
@@ -169,7 +193,28 @@ macro_rules! ignore {
     )*};
 }
 
+impl Dispatch<ArlenWallpaperPauseV1, ()> for Probe {
+    fn event(
+        _: &mut Self,
+        _: &ArlenWallpaperPauseV1,
+        event: arlen_wallpaper_pause_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let arlen_wallpaper_pause_v1::Event::State { state } = event;
+        let name = match state.into_result() {
+            Ok(arlen_wallpaper_pause_v1::State::Running) => "running",
+            Ok(arlen_wallpaper_pause_v1::State::Covered) => "covered",
+            Ok(arlen_wallpaper_pause_v1::State::Locked) => "locked",
+            _ => "unknown",
+        };
+        println!("pause state={name}");
+    }
+}
+
 ignore!(
+    ArlenWallpaperPauseManagerV1,
     WlCompositor,
     WlShm,
     WlShmPool,
@@ -189,6 +234,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         compositor: None,
         shm: None,
         layer_shell: None,
+        pause_manager: None,
         output: None,
         size: None,
         frames: 0,
@@ -216,6 +262,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -1 means "ignore other surfaces' exclusive zones and fill the output",
     // which is what a wallpaper wants and what cosmic-bg asks for.
     layer_surface.set_exclusive_zone(-1);
+    let _pause = probe
+        .pause_manager
+        .as_ref()
+        .map(|m| m.get_pause(&surface, &qh, ()));
     surface.commit();
 
     while probe.size.is_none() {
