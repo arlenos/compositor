@@ -367,17 +367,32 @@ pub fn init_backend(
         surfaces: Vec::new(),
     });
 
-    let output = state
-        .backend
-        .x11()
-        .add_window(event_loop.handle())
-        .with_context(|| "Failed to create wl_output")?;
+    // `COSMIC_X11_OUTPUTS=n` opens n windows, one output each. A development
+    // knob: a nested session otherwise has one output, and what the compositor
+    // promises about every output (a session lock first of all) needs two.
+    let count = std::env::var("COSMIC_X11_OUTPUTS")
+        .ok()
+        .and_then(|n| n.parse::<usize>().ok())
+        .unwrap_or(1)
+        .max(1);
+    let mut outputs = Vec::with_capacity(count);
+    for _ in 0..count {
+        outputs.push(
+            state
+                .backend
+                .x11()
+                .add_window(event_loop.handle())
+                .with_context(|| "Failed to create wl_output")?,
+        );
+    }
     state
         .common
         .output_configuration_state
-        .add_heads(std::iter::once(&output));
+        .add_heads(outputs.iter());
     {
-        state.common.add_output(&output);
+        for output in &outputs {
+            state.common.add_output(output);
+        }
         if let Err(err) = state.common.config.read_outputs(
             &mut state.common.output_configuration_state,
             &mut state.backend,
