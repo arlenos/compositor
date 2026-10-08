@@ -328,6 +328,7 @@ pub struct Common {
     /// Feature 4 (latency-sync) groundwork. v1 keeps the bindings
     /// index dormant until the phase-2 renderer consumes it.
     pub window_attach_state: crate::wayland::protocols::window_attach::WindowAttachState,
+    pub wallpaper_pause_state: crate::wayland::protocols::wallpaper_pause::WallpaperPauseState,
     /// Fullscreen titlebar edge-reveal state machine.
     pub fullscreen_reveal: crate::shell::fullscreen_reveal::FullscreenRevealState,
     /// True while Super was pressed alone with no other key in between.
@@ -738,6 +739,8 @@ impl State {
             ShellOverlayState::new::<Self, _>(dh, client_has_no_security_context);
         let titlebar_manager_state = TitlebarManagerState::new(dh);
         let grid_manager_state = GridManagerState::new(dh);
+        let wallpaper_pause_state =
+            crate::wayland::protocols::wallpaper_pause::WallpaperPauseState::new::<Self>(dh);
         let window_attach_state = crate::wayland::protocols::window_attach::WindowAttachState::new::<
             Self,
             _,
@@ -922,6 +925,7 @@ impl State {
                 titlebar_manager_state,
                 grid_manager_state,
                 window_attach_state,
+                wallpaper_pause_state,
                 fullscreen_reveal: Default::default(),
                 super_tap_pending: false,
                 night_light_state: Default::default(),
@@ -1663,6 +1667,27 @@ impl Common {
                     THROTTLE
                 };
             layer_surface.send_frame(output, time, throttle, should_send);
+
+            // And say why, to a client that asked (`arlen-wallpaper-pause-v1`).
+            // Visible means this surface is scanned out on some output, the
+            // same test the frame callbacks above go by.
+            let wl_surface = layer_surface.wl_surface();
+            if self.wallpaper_pause_state.watches(wl_surface) {
+                let visible = smithay::wayland::compositor::with_states(wl_surface, |states| {
+                    surface_primary_scanout_output(wl_surface, states).is_some()
+                });
+                let locked = shell.session_lock.is_some();
+                // Before its first frame a surface is on no output yet, which
+                // would read as "covered" and be wrong. Say nothing until it
+                // has been on screen once, unless the reason is the lock.
+                if !locked && !crate::presented::has_been_presented(wl_surface) {
+                    continue;
+                }
+                self.wallpaper_pause_state.report(
+                    wl_surface,
+                    crate::wayland::protocols::wallpaper_pause::Visibility::of(locked, visible),
+                );
+            }
         }
     }
 }

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="arlen_wallpaper_pause_v1">
+  <copyright>
+    SPDX-License-Identifier: GPL-2.0-or-later
+  </copyright>
+
+  <description summary="tell a wallpaper why it is not being shown">
+    A wallpaper on the background layer draws only when the compositor asks it
+    to, with wl_surface.frame callbacks, and a covered or locked wallpaper is
+    simply not asked. That stops it drawing, but it cannot tell the two apart:
+    a covered wallpaper should keep its place and resume the moment it is seen,
+    while a locked session is a reason to stop a video, release a decoder or
+    drop to a still frame. This protocol says which.
+  </description>
+
+  <interface name="arlen_wallpaper_pause_manager_v1" version="1">
+    <description summary="create pause objects for surfaces">
+      Global. Any client may bind it; a pause object can only ever describe a
+      surface of the client that created it.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Pause objects already created stay valid.
+      </description>
+    </request>
+
+    <request name="get_pause">
+      <description summary="watch why a surface is or is not being shown">
+        The compositor sends the surface's state on the next frame it
+        considers it, and again on every change.
+      </description>
+      <arg name="id" type="new_id" interface="arlen_wallpaper_pause_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+  </interface>
+
+  <interface name="arlen_wallpaper_pause_v1" version="1">
+    <description summary="why one surface is or is not being shown"/>
+
+    <enum name="state">
+      <entry name="running" value="0" summary="the surface can be seen and is given frames"/>
+      <entry name="covered" value="1"
+             summary="nothing of the surface can be seen; frames resume when it can"/>
+      <entry name="locked" value="2"
+             summary="the session is locked; frames resume only after it is unlocked"/>
+    </enum>
+
+    <event name="state">
+      <description summary="the surface's current state">
+        Locked wins over covered: a locked session also covers the
+        wallpaper, and the lock is the reason that matters.
+      </description>
+      <arg name="state" type="uint" enum="state"/>
+    </event>
+
+    <request name="destroy" type="destructor">
+      <description summary="stop watching the surface"/>
+    </request>
+  </interface>
+</protocol>

@@ -14,5 +14,6 @@ pub mod shell_overlay;
 pub mod titlebar;
 pub mod toplevel_info;
 pub mod toplevel_management;
+pub mod wallpaper_pause;
 pub mod window_attach;
 pub mod workspace;
