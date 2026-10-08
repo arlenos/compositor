@@ -555,3 +555,20 @@ fn runtime_state_some_overrides_toml() {
         "explicit Some(true) must override the TOML value"
     );
 }
+
+/// `terminate` is a name a binding can use. It has no default key, and the
+/// locked session refuses it; `dev/lock-terminate-check.sh` drives both.
+#[test]
+fn terminate_is_bindable_but_unbound() {
+    use cosmic_settings_config::shortcuts;
+    assert!(matches!(
+        super::action_from_str("terminate"),
+        Some(super::Action::Shortcut(shortcuts::Action::Terminate))
+    ));
+    assert!(
+        !super::toml_config::default_keybindings()
+            .iter()
+            .any(|kb| kb.action == "terminate"),
+        "ending the session must not be one stray chord away by default"
+    );
+}

@@ -151,6 +151,9 @@ pub fn action_from_str(s: &str) -> Option<Action> {
 
         // Window management
         "close_window" => Action::Shortcut(shortcuts::Action::Close),
+        // Ends the session. Bindable, bound to nothing by default, and refused
+        // while the session is locked (`State::handle_action`).
+        "terminate" => Action::Shortcut(shortcuts::Action::Terminate),
         "maximize" | "toggle_maximize" => Action::Shortcut(shortcuts::Action::Maximize),
         "minimize" => Action::Shortcut(shortcuts::Action::Minimize),
 

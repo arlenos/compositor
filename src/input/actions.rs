@@ -60,13 +60,14 @@ impl State {
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
     ) {
-        // TODO: Detect if started from login manager or tty, and only allow
-        // `Terminate` if it will return to login manager.
+        // `Terminate` is not on this list. Upstream lets it through with a TODO
+        // to allow it only when it returns to a login manager; here it is refused
+        // outright while locked, because whoever is at the keyboard could end the
+        // owner's session and everything unsaved in it.
         if self.common.shell.read().session_lock.is_some()
             && !matches!(
                 action,
-                Action::Shortcut(shortcuts::Action::Terminate)
-                    | Action::Shortcut(shortcuts::Action::Debug)
+                Action::Shortcut(shortcuts::Action::Debug)
                     | Action::Shortcut(shortcuts::Action::System(
                         shortcuts::action::System::InputSourceSwitch
                             | shortcuts::action::System::BrightnessDown
