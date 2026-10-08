@@ -1645,7 +1645,24 @@ impl Common {
 
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
-            layer_surface.send_frame(output, time, THROTTLE, should_send);
+            // A wallpaper that nothing can see gets no frame callbacks at all.
+            //
+            // The throttle is smithay's keepalive: a surface that is on no
+            // output's scanout still gets a callback every 995 ms, so a client
+            // that waits for one cannot stall forever. For a window that is the
+            // right trade. For a background layer it is the one thing standing
+            // between "covered" and "draws zero frames", which the wallpaper plan
+            // makes non-negotiable - measured 7 Sep with `wallpaper-probe`: 31
+            // frames a second visible, exactly 1 covered. A wallpaper has nothing
+            // to finish while covered; the first frame it is seen again, its
+            // primary output is set and the callbacks resume on their own.
+            let throttle =
+                if layer_surface.layer() == smithay::wayland::shell::wlr_layer::Layer::Background {
+                    None
+                } else {
+                    THROTTLE
+                };
+            layer_surface.send_frame(output, time, throttle, should_send);
         }
     }
 }
