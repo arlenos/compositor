@@ -13,7 +13,7 @@
     and receives overlay events. The desktop-shell sends back user actions.
   </description>
 
-  <interface name="arlen_shell_overlay_v1" version="2">
+  <interface name="arlen_shell_overlay_v1" version="3">
     <description summary="shell overlay manager">
       Singleton global. The desktop-shell binds this interface once at
       startup to receive overlay events from the compositor.
@@ -417,6 +417,43 @@
       </description>
       <arg name="output" type="string" summary="connector name of the output the move was on"/>
       <arg name="target" type="uint" summary="0-based index of the workspace that was asked for"/>
+    </event>
+
+    <!-- ===== Screen capture ===== -->
+
+    <enum name="capture_source" since="3">
+      <description summary="what a capture copies"/>
+      <entry name="output" value="0" summary="a whole output"/>
+      <entry name="window" value="1" summary="one window"/>
+      <entry name="workspace" value="2" summary="one workspace"/>
+    </enum>
+
+    <event name="capture_started" since="3">
+      <description summary="a client started capturing the screen">
+        Sent when any client opens a capture session, whichever way it came:
+        the portal, a client that captures directly, or the shell's own
+        screenshot tool. The compositor sees every capture, so this is the
+        one complete source for an indicator. A session that copies a single
+        frame (a screenshot) starts and stops within moments; a recording
+        stays started until capture_stopped.
+
+        app_id names the capturing client: the app id its security context
+        gave, else the Arlen app its launcher confined it as, else the name
+        of its executable. A capture made through the portal names the
+        portal, because the portal is the client; which app asked the portal
+        is the portal's to say.
+      </description>
+      <arg name="capture_id" type="uint" summary="pairs this with its capture_stopped"/>
+      <arg name="app_id" type="string" summary="the capturing client, as above"/>
+      <arg name="source" type="uint" enum="capture_source" summary="what it copies"/>
+    </event>
+
+    <event name="capture_stopped" since="3">
+      <description summary="a capture session ended">
+        The session capture_id named in capture_started is gone, whether the
+        client closed it, the source went away or the client disconnected.
+      </description>
+      <arg name="capture_id" type="uint" summary="as given in capture_started"/>
     </event>
 
     <!-- ===== Waypointer ===== -->

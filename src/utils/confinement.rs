@@ -24,11 +24,16 @@ use std::{os::unix::net::UnixStream, path::Path};
 /// portal, which asks the user.
 pub const MAY_CAPTURE: &[&str] = &["dev.arlen.screenshot"];
 
+/// The process on the other end of `stream`.
+pub fn peer_pid(stream: &UnixStream) -> Option<u32> {
+    let cred = rustix::net::sockopt::socket_peercred(stream).ok()?;
+    u32::try_from(cred.pid.as_raw_nonzero().get()).ok()
+}
+
 /// The app id of the Arlen app the peer of `stream` is confined as, or `None` for
 /// a client `arlen-run` did not launch.
 pub fn arlen_app_of(stream: &UnixStream) -> Option<String> {
-    let cred = rustix::net::sockopt::socket_peercred(stream).ok()?;
-    let pid = cred.pid.as_raw_nonzero().get();
+    let pid = peer_pid(stream)?;
     let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
     arlen_app_in(&cgroup)
 }

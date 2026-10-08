@@ -89,6 +89,7 @@ path = [
     "src/utils/render_harness.rs",
     "src/utils/sensing.rs",
     "src/wayland/handlers/grid.rs",
+    "src/wayland/handlers/image_copy_capture/attribution.rs",
     "src/wayland/handlers/shell_overlay.rs",
     "src/wayland/handlers/titlebar.rs",
     "src/wayland/handlers/wallpaper_pause.rs",

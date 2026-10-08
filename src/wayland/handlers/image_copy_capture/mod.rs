@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+pub mod attribution;
+
 use std::{borrow::Borrow, sync::Mutex};
 
 use indexmap::IndexMap;
@@ -128,6 +130,7 @@ impl ImageCopyCaptureHandler for State {
                     )))
                 });
 
+                attribution::started(&self.common, &session, attribution::CaptureSource::Output);
                 output.add_session(session);
             }
             ImageCaptureSourceKind::Workspace(handle) => {
@@ -142,6 +145,11 @@ impl ImageCopyCaptureHandler for State {
                         workspace.output(),
                     )))
                 });
+                attribution::started(
+                    &self.common,
+                    &session,
+                    attribution::CaptureSource::Workspace,
+                );
                 workspace.add_session(session);
             }
             ImageCaptureSourceKind::Toplevel(toplevel) => {
@@ -158,6 +166,7 @@ impl ImageCopyCaptureHandler for State {
                         Transform::Normal,
                     )))
                 });
+                attribution::started(&self.common, &session, attribution::CaptureSource::Window);
                 toplevel.add_session(session);
             }
             ImageCaptureSourceKind::Destroyed => {
@@ -362,6 +371,7 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn session_destroyed(&mut self, session: SessionRef) {
+        attribution::stopped(&self.common, &session);
         match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {

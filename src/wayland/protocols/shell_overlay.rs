@@ -13,6 +13,7 @@ use smithay::reexports::wayland_server::{
 use wayland_backend::server::GlobalId;
 
 pub use generated::arlen_shell_overlay_v1;
+pub use generated::arlen_shell_overlay_v1::CaptureSource;
 use generated::arlen_shell_overlay_v1::{ArlenShellOverlayV1, Request as OverlayRequest};
 
 #[allow(non_snake_case, non_upper_case_globals, non_camel_case_types)]
@@ -67,7 +68,7 @@ impl ShellOverlayState {
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ArlenShellOverlayV1, _>(
-            2,
+            3,
             ShellOverlayGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -472,6 +473,27 @@ impl ShellOverlayState {
         for instance in &self.instances {
             if instance.version() >= 2 {
                 instance.workspace_move_refused(output.to_string(), target);
+            }
+        }
+    }
+
+    /// Tell connected shells that a capture session started. Version 3 only,
+    /// for the same reason as `send_workspace_move_refused`.
+    pub fn send_capture_started(&self, capture_id: u32, app_id: &str, source: CaptureSource) {
+        use smithay::reexports::wayland_server::Resource;
+        for instance in &self.instances {
+            if instance.version() >= 3 {
+                instance.capture_started(capture_id, app_id.to_string(), source);
+            }
+        }
+    }
+
+    /// Tell connected shells that the capture session `capture_id` ended.
+    pub fn send_capture_stopped(&self, capture_id: u32) {
+        use smithay::reexports::wayland_server::Resource;
+        for instance in &self.instances {
+            if instance.version() >= 3 {
+                instance.capture_stopped(capture_id);
             }
         }
     }

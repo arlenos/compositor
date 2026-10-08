@@ -168,6 +168,8 @@ pub struct ClientState {
     /// connected (`crate::utils::confinement`). `None` for anything `arlen-run`
     /// did not launch.
     pub arlen_app: Option<String>,
+    /// The connecting process, read once at connect time like `arlen_app`.
+    pub pid: Option<u32>,
 }
 unsafe impl Send for ClientState {}
 unsafe impl Sync for ClientState {}
@@ -776,7 +778,13 @@ impl State {
         let toplevel_capture_source_state =
             ToplevelCaptureSourceState::new_with_filter::<State, _>(dh, client_may_capture);
         let image_copy_capture_state =
-            ImageCopyCaptureState::new_with_filter::<Self, _>(dh, client_may_capture);
+            ImageCopyCaptureState::new_with_filter::<Self, _>(dh, |_| false);
+        // The global clients actually bind: it notes who opens each session and
+        // passes the rest to smithay's, which stays hidden. See `attribution`.
+        crate::wayland::handlers::image_copy_capture::attribution::create_global(
+            dh,
+            client_may_capture,
+        );
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
@@ -1003,6 +1011,7 @@ impl State {
             evls: self.common.event_loop_signal.clone(),
             security_context: None,
             arlen_app: crate::utils::confinement::arlen_app_of(stream),
+            pid: crate::utils::confinement::peer_pid(stream),
         }
     }
 
