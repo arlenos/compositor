@@ -14,6 +14,9 @@
 ///                 must stay locked; the screenshot after this is the assertion.
 ///   `unlock`      lock, paint, then unlock cleanly. The control case.
 ///
+/// In every mode it also prints `keyboard enter` and one `key code=N` line per
+/// key press it receives, so a harness can see the lock surface hold the input.
+///
 /// Usage: WAYLAND_DISPLAY=wayland-N lock-probe [mode] [hold-seconds]
 use std::{
     os::unix::io::AsFd,
@@ -26,8 +29,10 @@ use wayland_client::{
         wl_buffer::WlBuffer,
         wl_callback::{self, WlCallback},
         wl_compositor::WlCompositor,
+        wl_keyboard::{self, WlKeyboard},
         wl_output::{self, WlOutput},
         wl_registry::{self, WlRegistry},
+        wl_seat::{self, WlSeat},
         wl_shm::{self, WlShm},
         wl_shm_pool::WlShmPool,
         wl_surface::WlSurface,
@@ -102,6 +107,12 @@ impl Dispatch<WlRegistry, ()> for Probe {
                 "wl_output" => {
                     let output = registry.bind(name, version.min(3), qh, ());
                     state.outputs.push((output, name));
+                }
+                // The keyboard is how a lock surface is proven to hold the
+                // input it is owed: every key typed while locked must arrive
+                // here and nowhere else.
+                "wl_seat" => {
+                    let _: WlSeat = registry.bind(name, version.min(5), qh, ());
                 }
                 "ext_session_lock_manager_v1" => {
                     state.manager = Some(registry.bind(name, 1, qh, ()))
@@ -187,6 +198,47 @@ impl Dispatch<WlOutput, ()> for Probe {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+    }
+}
+
+impl Dispatch<WlSeat, ()> for Probe {
+    fn event(
+        _: &mut Self,
+        seat: &WlSeat,
+        event: wl_seat::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        if let wl_seat::Event::Capabilities {
+            capabilities: wayland_client::WEnum::Value(caps),
+        } = event
+            && caps.contains(wl_seat::Capability::Keyboard)
+        {
+            seat.get_keyboard(qh, ());
+        }
+    }
+}
+
+impl Dispatch<WlKeyboard, ()> for Probe {
+    fn event(
+        state: &mut Self,
+        _: &WlKeyboard,
+        event: wl_keyboard::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_keyboard::Event::Enter { .. } => state.say("keyboard", "enter"),
+            wl_keyboard::Event::Leave { .. } => state.say("keyboard", "leave"),
+            wl_keyboard::Event::Key {
+                key,
+                state: wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed),
+                ..
+            } => state.say("key", &format!("code={key}")),
+            _ => {}
+        }
     }
 }
 

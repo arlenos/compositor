@@ -210,10 +210,74 @@ input_leak_step() {
   sleep 2
 }
 
+# `focus`: the keyboard belongs to the lock surface while locked and goes back
+# to the window that had it once the lock is lifted. A click gives the typist
+# window focus first; nothing is clicked after that, so whatever the typing
+# reaches after the unlock is where the compositor put the focus back.
+focus_step() {
+  local hold="${1:-6}"
+  echo "=== focus ==="
+  command -v wtype >/dev/null || { echo "  SKIP: wtype is not installed"; return 0; }
+  [ -x "$CP/target/debug/pointer-driver" ] || {
+    echo "  SKIP: no pointer-driver (cargo build --bin pointer-driver --features test-client)"
+    return 0
+  }
+
+  local pipe driver_log probe_log before
+  pipe="$(mktemp -u)"; mkfifo "$pipe"
+  driver_log="$(mktemp)"; probe_log="$(mktemp)"
+  WAYLAND_DISPLAY="$HOST" "$CP/target/debug/pointer-driver" < "$pipe" > "$driver_log" 2>&1 &
+  local driver_pid=$!
+  DRIVER_PID="$driver_pid"
+  exec 4>"$pipe"
+  for _ in $(seq 1 20); do grep -q "^ready" "$driver_log" && break; sleep 0.5; done
+  printf 'move 900 500\nsleep 200\nclick\nsleep 200\n' >&4
+  sleep 1
+  exec 4>&-; kill "$driver_pid" 2>/dev/null
+  wtype BEFORE >/dev/null 2>&1; sleep 0.4; wtype -k Return >/dev/null 2>&1; sleep 1
+  if ! grep -q BEFORE "$TYPED"; then
+    echo "  FAIL: the control did not land, so focus cannot be judged"
+    rm -f "$pipe" "$driver_log" "$probe_log"
+    failures=$((failures + 1))
+    return 0
+  fi
+  echo "  ok: before the lock, typing reaches the window"
+
+  "$CP/target/debug/lock-probe" unlock "$hold" > "$probe_log" 2>&1 &
+  local probe_pid=$!
+  for _ in $(seq 1 40); do grep -q " locked " "$probe_log" && break; sleep 0.25; done
+  before="$(tr -d '\r\n' < "$TYPED")"
+  wtype WHILELOCKED >/dev/null 2>&1; sleep 0.4; wtype -k Return >/dev/null 2>&1; sleep 1
+  local keys; keys="$(grep -c " key code=" "$probe_log" || true)"
+  if grep -q "keyboard enter" "$probe_log" && [ "$keys" -ge 12 ]; then
+    echo "  ok: the lock surface had the keyboard and got all $keys presses"
+  else
+    echo "  FAIL: the lock surface did not get the typing (enter: $(grep -c 'keyboard enter' "$probe_log"), keys: $keys)"
+    failures=$((failures + 1))
+  fi
+  [ "$(tr -d '\r\n' < "$TYPED")" = "$before" ] \
+    || { echo "  FAIL: typing reached the window while locked"; failures=$((failures + 1)); }
+
+  wait "$probe_pid" 2>/dev/null
+  grep -q "unlock_and_destroy sent" "$probe_log" || { echo "  FAIL: the probe did not unlock"; failures=$((failures + 1)); }
+  sleep 1
+  wtype AFTER >/dev/null 2>&1; sleep 0.4; wtype -k Return >/dev/null 2>&1; sleep 1
+  if grep -q AFTER "$TYPED"; then
+    echo "  ok: after the unlock, typing reaches the same window with no click"
+  else
+    echo "  FAIL: after the unlock the keyboard did not go back to the window"
+    failures=$((failures + 1))
+  fi
+  rm -f "$pipe" "$driver_log" "$probe_log"
+  sleep 1
+}
+
 for spec in "$@"; do
   IFS=: read -r name mode hold <<< "$spec"
   if [ "$mode" = input-leak ]; then
     input_leak_step "${hold:-14}"
+  elif [ "$mode" = focus ]; then
+    focus_step "${hold:-6}"
   else
     step "$name" "$mode" "${hold:-4}"
   fi
