@@ -59,9 +59,16 @@ impl Shell {
     /// - If a scratchpad window is visible and focused: hide it.
     /// - If a scratchpad window is visible but not focused: focus it.
     /// - If pressed again while focused: cycle to next scratchpad window.
-    pub fn scratchpad_toggle(&mut self, seat: &Seat<State>) {
+    ///
+    /// Returns the window that should now have keyboard focus. The shell
+    /// cannot set focus itself - that takes the whole `State` - so the caller
+    /// does. Until 8 October nothing did: "visible but not focused: focus it"
+    /// was a comment over an empty branch, and since showing a window never
+    /// focused it either, the second press found it unfocused and did nothing,
+    /// every time. Park, bring back, and the key was dead from then on.
+    pub fn scratchpad_toggle(&mut self, seat: &Seat<State>) -> Option<CosmicMapped> {
         if self.scratchpad.windows.is_empty() {
-            return;
+            return None;
         }
 
         let output = seat.focused_or_active_output();
@@ -71,9 +78,7 @@ impl Shell {
             let mapped = &self.scratchpad.windows[visible_idx];
 
             // Check if the scratchpad window is currently focused.
-            let Some(workspace) = self.active_space(&output) else {
-                return;
-            };
+            let workspace = self.active_space(&output)?;
             let is_focused = workspace
                 .focus_stack
                 .get(seat)
@@ -87,18 +92,20 @@ impl Shell {
                 if next_idx == visible_idx {
                     // Only one window: hide it.
                     self.scratchpad_hide(seat);
+                    None
                 } else {
                     // Hide current, show next.
                     self.scratchpad_hide(seat);
-                    self.scratchpad_show(next_idx, seat);
+                    self.scratchpad_show(next_idx, seat)
                 }
             } else {
-                // Visible but not focused: just focus it.
-                // The window is already in the floating layer.
+                // Visible but not focused: focus it. It is already in the
+                // floating layer.
+                Some(mapped.clone())
             }
         } else {
             // No scratchpad window visible: show the first one.
-            self.scratchpad_show(0, seat);
+            self.scratchpad_show(0, seat)
         }
     }
 
@@ -106,9 +113,10 @@ impl Shell {
     ///
     /// Maps it to the active workspace's floating layer, centered at 80%
     /// of the output size.
-    fn scratchpad_show(&mut self, idx: usize, seat: &Seat<State>) {
+    /// Returns the window it showed, so the caller can focus it.
+    fn scratchpad_show(&mut self, idx: usize, seat: &Seat<State>) -> Option<CosmicMapped> {
         if idx >= self.scratchpad.windows.len() {
-            return;
+            return None;
         }
 
         let output = seat.focused_or_active_output();
@@ -128,18 +136,19 @@ impl Shell {
             (width, height).into(),
         ));
 
-        let Some(workspace) = self.active_space_mut(&output) else {
-            return;
-        };
+        let workspace = self.active_space_mut(&output)?;
 
         // Map to floating layer at centered position.
         let local_pos =
             Point::<i32, Logical>::from((x - output_geo.loc.x, y - output_geo.loc.y)).as_local();
-        workspace.floating_layer.map(mapped, Some(local_pos));
+        workspace
+            .floating_layer
+            .map(mapped.clone(), Some(local_pos));
 
         self.scratchpad.visible = Some(idx);
 
         tracing::info!("scratchpad: showing window {idx}");
+        Some(mapped)
     }
 
     /// Hide the currently visible scratchpad window.

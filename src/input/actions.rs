@@ -122,8 +122,16 @@ impl State {
             }
 
             Action::Private(PrivateAction::ScratchpadToggle) => {
-                let mut shell = self.common.shell.write();
-                shell.scratchpad_toggle(seat);
+                let focus = self.common.shell.write().scratchpad_toggle(seat);
+                if let Some(mapped) = focus {
+                    Shell::set_focus(
+                        self,
+                        Some(&KeyboardFocusTarget::Element(mapped)),
+                        seat,
+                        None,
+                        true,
+                    );
+                }
             }
             Action::Private(PrivateAction::ScratchpadMove) => {
                 let mut shell = self.common.shell.write();
