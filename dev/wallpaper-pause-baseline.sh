@@ -30,7 +30,7 @@ CP="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${OUT:-$(mktemp -d)}"
 mkdir -p "$OUT"
 CASE="${1:-maximized}"
-TOTAL="${SECONDS_TOTAL:-14}"
+TOTAL="${SECONDS_TOTAL:-20}"   # settle 5, covered 8+, uncovered the rest
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 for bin in "$CP/target/debug/cosmic-comp" "$CP/target/debug/wallpaper-probe"; do
@@ -121,5 +121,13 @@ esac
 sleep 8
 if grim "$OUT/wallpaper-$CASE.png" 2>/dev/null; then
   magick "$OUT/wallpaper-$CASE.png" -format "screen: colors=%k mean=%[fx:int(255*mean)]\n" info:
+fi
+# And take it away again. Since 8 Oct a covered background layer gets no frame
+# callbacks at all - not even smithay's once-a-second keepalive - so the one
+# thing that must still hold is that it wakes up when it can be seen again.
+# Without this phase a wallpaper that froze forever would pass.
+if [ -n "${COVER_PID:-}" ]; then
+  echo ">>> removing cover"
+  kill "$COVER_PID" 2>/dev/null; COVER_PID=""
 fi
 wait "$PROBE_PID" 2>/dev/null || true
