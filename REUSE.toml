@@ -78,6 +78,7 @@ path = [
     "src/shell/header_policy.rs",
     "src/shell/night_light.rs",
     "src/shell/night_light_schedule.rs",
+    "src/shell/scratchpad.rs",
     "src/shell/zoom_events.rs",
     "src/utils/render_harness.rs",
     "src/utils/sensing.rs",
