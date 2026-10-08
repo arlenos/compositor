@@ -1450,9 +1450,9 @@ impl Common {
         // So an output stops being waited on when THE LOCK SURFACE FOR THAT
         // OUTPUT has reached the screen, and `crate::presented` is the same
         // per-surface record the input path uses to decide a surface has been
-        // seen. A surface presented during this very frame is not marked yet -
-        // `mark_presented` runs below - so the last output is released one
-        // frame later than it could be. Late is the safe direction here.
+        // seen. A surface presented during this very frame is not marked yet
+        // when this runs at the top of `send_frames`, which is why it runs
+        // again at the bottom.
         let mut shell = self.shell.write();
         if let Some(session_lock) = shell.session_lock.as_mut() {
             let shown = session_lock
@@ -1689,5 +1689,16 @@ impl Common {
                 );
             }
         }
+
+        // And once more now that this frame's lock surface is marked. At the
+        // top of this function only surfaces presented by an EARLIER frame
+        // count, so the last output would be released one frame late, and on
+        // an output that draws no further frame (a quiet nested output; KMS
+        // keeps calling back on its vblank timer) never. The mark is set only
+        // after the frame that carries the surface was submitted, so the
+        // guarantee is the same: `locked` follows the lock screen, not the
+        // compositor's own blank frame.
+        drop(shell);
+        self.note_locked_frame(output);
     }
 }
