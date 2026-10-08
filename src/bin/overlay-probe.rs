@@ -8,7 +8,8 @@
 /// and prints one line per event it was asked to watch.
 ///
 /// Usage: WAYLAND_DISPLAY=wayland-N overlay-probe [seconds] [version]
-/// Prints `bound version=N`, then e.g. `workspace_move_refused output=WINIT-0 target=1`.
+/// Prints `bound version=N`, then e.g. `workspace_move_refused output=WINIT-0 target=1`
+/// or `context_menu items=12 separators=3`.
 use std::time::{Duration, Instant};
 
 use wayland_client::{
@@ -33,6 +34,8 @@ use protocol::arlen_shell_overlay_v1::{self, ArlenShellOverlayV1};
 struct Probe {
     want_version: u32,
     overlay: Option<ArlenShellOverlayV1>,
+    /// Items and separators of the context menu being received.
+    menu: (u32, u32),
 }
 
 impl Dispatch<WlRegistry, ()> for Probe {
@@ -60,15 +63,30 @@ impl Dispatch<WlRegistry, ()> for Probe {
 
 impl Dispatch<ArlenShellOverlayV1, ()> for Probe {
     fn event(
-        _: &mut Self,
+        state: &mut Self,
         _: &ArlenShellOverlayV1,
         event: arlen_shell_overlay_v1::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let arlen_shell_overlay_v1::Event::WorkspaceMoveRefused { output, target } = event {
-            println!("workspace_move_refused output={output} target={target}");
+        match event {
+            arlen_shell_overlay_v1::Event::WorkspaceMoveRefused { output, target } => {
+                println!("workspace_move_refused output={output} target={target}");
+            }
+            // A context menu arrives as begin, one event per entry, done. Counting
+            // entries against separators is what shows an entry that went out as a
+            // separator - "Move" did, until 14 September.
+            arlen_shell_overlay_v1::Event::ContextMenuBegin { .. } => state.menu = (0, 0),
+            arlen_shell_overlay_v1::Event::ContextMenuItem { .. } => state.menu.0 += 1,
+            arlen_shell_overlay_v1::Event::ContextMenuSeparator { .. } => state.menu.1 += 1,
+            arlen_shell_overlay_v1::Event::ContextMenuDone { .. } => {
+                println!(
+                    "context_menu items={} separators={}",
+                    state.menu.0, state.menu.1
+                );
+            }
+            _ => {}
         }
     }
 }
@@ -84,6 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut probe = Probe {
         want_version,
         overlay: None,
+        menu: (0, 0),
     };
     conn.display().get_registry(&qh, ());
     queue.roundtrip(&mut probe)?;
