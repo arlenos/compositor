@@ -442,6 +442,10 @@ impl CosmicMapped {
         }
     }
 
+    pub fn is_sticky(&self) -> bool {
+        self.active_window().is_sticky()
+    }
+
     pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
         match &self.element {
             CosmicMappedInternal::Stack(s) => s.pending_size(),

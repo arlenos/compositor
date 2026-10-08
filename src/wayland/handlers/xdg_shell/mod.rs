@@ -2,7 +2,7 @@
 
 use crate::{
     shell::{
-        CosmicSurface, PendingWindow,
+        CosmicSurface, ModalBehavior, PendingWindow,
         focus::target::KeyboardFocusTarget,
         grabs::{GrabType, ReleaseMode},
     },
@@ -27,6 +27,7 @@ use smithay::{
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
             XdgShellState,
+            dialog::{ToplevelDialogHint, XdgDialogHandler},
         },
     },
 };
@@ -193,6 +194,7 @@ impl XdgShellHandler for State {
             &self.common.config,
             &self.common.event_loop_handle,
             true,
+            ModalBehavior::Block,
         ) {
             std::mem::drop(shell);
             match grab.grab_type() {
@@ -226,6 +228,7 @@ impl XdgShellHandler for State {
             edges.into(),
             self.common.config.cosmic_conf.edge_snap_threshold,
             true,
+            ModalBehavior::Block,
         ) {
             std::mem::drop(shell);
             match grab.grab_type() {
@@ -245,7 +248,7 @@ impl XdgShellHandler for State {
 
     fn minimize_request(&mut self, surface: ToplevelSurface) {
         let mut shell = self.common.shell.write();
-        if let Some(info) = shell.minimize_request(surface.wl_surface()) {
+        if let Some(info) = shell.minimize_request(surface.wl_surface(), ModalBehavior::Ignore) {
             drop(shell);
             self.common.event_bus.emit_window_minimized(
                 &info.window_id,
@@ -260,7 +263,13 @@ impl XdgShellHandler for State {
         let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
             let seat = shell.seats.last_active().clone();
-            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle)
+            shell.maximize_request(
+                &mapped,
+                &seat,
+                true,
+                &self.common.event_loop_handle,
+                ModalBehavior::Ignore,
+            )
         } else if let Some(pending) = shell
             .pending_windows
             .iter_mut()
@@ -273,7 +282,7 @@ impl XdgShellHandler for State {
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
         let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
-            shell.unmaximize_request(&mapped);
+            shell.unmaximize_request(&mapped, ModalBehavior::Ignore);
         } else if let Some(pending) = shell
             .pending_windows
             .iter_mut()
@@ -296,7 +305,12 @@ impl XdgShellHandler for State {
             })
             .unwrap_or_else(|| seat.focused_or_active_output());
 
-        match shell.fullscreen_request(&surface, output.clone(), &self.common.event_loop_handle) {
+        match shell.fullscreen_request(
+            &surface,
+            output.clone(),
+            &self.common.event_loop_handle,
+            ModalBehavior::Ignore,
+        ) {
             Some(target) => {
                 // Arlen-Header: fullscreen → hide the header.
                 // Fullscreen windows should claim the entire output
@@ -339,7 +353,11 @@ impl XdgShellHandler for State {
                 }
             });
 
-        if let Some(target) = shell.unfullscreen_request(&surface, &self.common.event_loop_handle) {
+        if let Some(target) = shell.unfullscreen_request(
+            &surface,
+            &self.common.event_loop_handle,
+            ModalBehavior::Ignore,
+        ) {
             // Arlen-Header: compute payload BEFORE dropping the
             // shell read-guard so geometry lookup still works.
             // Feature 4-C: only emit shell-bound header for stacks;
@@ -518,5 +536,11 @@ impl XdgShellHandler for State {
                 .unwrap()
                 .set_grab(self, grab, serial, focus)
         }
+    }
+}
+
+impl XdgDialogHandler for State {
+    fn dialog_hint_changed(&mut self, _toplevel: ToplevelSurface, _hint: ToplevelDialogHint) {
+        Shell::redirect_blocked_focus(self);
     }
 }

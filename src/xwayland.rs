@@ -9,7 +9,7 @@ use std::{
 use crate::{
     backend::render::cursor::{Cursor, load_cursor_env, load_cursor_theme},
     shell::{
-        CosmicSurface, PendingWindow, Shell,
+        CosmicSurface, ModalBehavior, PendingWindow, Shell,
         focus::target::KeyboardFocusTarget,
         grabs::{GrabType, ReleaseMode},
     },
@@ -1095,6 +1095,7 @@ impl XwmHandler for State {
                 resize_edge.into(),
                 self.common.config.cosmic_conf.edge_snap_threshold,
                 true,
+                ModalBehavior::Block,
             ) {
                 std::mem::drop(shell);
                 match grab.grab_type() {
@@ -1138,6 +1139,7 @@ impl XwmHandler for State {
                 &self.common.config,
                 &self.common.event_loop_handle,
                 true,
+                ModalBehavior::Block,
             ) {
                 std::mem::drop(shell);
                 match grab.grab_type() {
@@ -1172,7 +1174,13 @@ impl XwmHandler for State {
         let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             let seat = shell.seats.last_active().clone();
-            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);
+            shell.maximize_request(
+                &mapped,
+                &seat,
+                true,
+                &self.common.event_loop_handle,
+                ModalBehavior::Ignore,
+            );
         } else if let Some(pending) = shell
             .pending_windows
             .iter_mut()
@@ -1185,7 +1193,7 @@ impl XwmHandler for State {
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
-            shell.unmaximize_request(&mapped);
+            shell.unmaximize_request(&mapped, ModalBehavior::Ignore);
         } else if let Some(pending) = shell
             .pending_windows
             .iter_mut()
@@ -1197,7 +1205,7 @@ impl XwmHandler for State {
 
     fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
-        shell.minimize_request(&window);
+        shell.minimize_request(&window, ModalBehavior::Ignore);
     }
 
     fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
@@ -1214,7 +1222,12 @@ impl XwmHandler for State {
             .and_then(|surface| shell.visible_output_for_surface(&surface).cloned())
             .unwrap_or_else(|| seat.focused_or_active_output());
 
-        match shell.fullscreen_request(&window, output.clone(), &self.common.event_loop_handle) {
+        match shell.fullscreen_request(
+            &window,
+            output.clone(),
+            &self.common.event_loop_handle,
+            ModalBehavior::Ignore,
+        ) {
             Some(target) => {
                 std::mem::drop(shell);
                 Shell::set_focus(self, Some(&target), &seat, None, true);
@@ -1246,7 +1259,11 @@ impl XwmHandler for State {
                 }
             });
 
-        if let Some(target) = shell.unfullscreen_request(&window, &self.common.event_loop_handle) {
+        if let Some(target) = shell.unfullscreen_request(
+            &window,
+            &self.common.event_loop_handle,
+            ModalBehavior::Ignore,
+        ) {
             std::mem::drop(shell);
             if should_focus {
                 Shell::set_focus(self, Some(&target), &seat, None, true);
@@ -1258,6 +1275,16 @@ impl XwmHandler for State {
         {
             pending.fullscreen.take();
         }
+    }
+
+    fn modal_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let _ = window.set_modal(true);
+        Shell::redirect_blocked_focus(self);
+    }
+
+    fn unmodal_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let _ = window.set_modal(false);
+        Shell::redirect_blocked_focus(self);
     }
 
     fn stick_request(&mut self, _xwm: XwmId, window: X11Surface) {

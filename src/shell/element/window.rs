@@ -4,6 +4,7 @@ use crate::{
         wayland::SurfaceRenderElement,
     },
     shell::{
+        ModalBehavior,
         element::{CosmicMappedKey, CosmicMappedKeyInner},
         focus::target::PointerFocusTarget,
         grabs::{GrabType, ReleaseMode, ResizeEdge},
@@ -1282,11 +1283,10 @@ impl PointerTarget<State> for CosmicWindow {
                             let Some(mapped) = mapped else { return };
                             match button {
                                 HeaderButton::Minimize => {
-                                    let info = state
-                                        .common
-                                        .shell
-                                        .write()
-                                        .minimize_request(&mapped.active_window());
+                                    let info = state.common.shell.write().minimize_request(
+                                        &mapped.active_window(),
+                                        ModalBehavior::Block,
+                                    );
                                     if let Some(info) = info {
                                         state.common.event_bus.emit_window_minimized(
                                             &info.window_id,
@@ -1301,6 +1301,7 @@ impl PointerTarget<State> for CosmicWindow {
                                         &mapped,
                                         &seat,
                                         &state.common.event_loop_handle,
+                                        ModalBehavior::Block,
                                     );
                                 }
                                 HeaderButton::Close => {
@@ -1377,6 +1378,7 @@ impl PointerTarget<State> for CosmicWindow {
                                         &mapped,
                                         &seat,
                                         &state.common.event_loop_handle,
+                                        ModalBehavior::Block,
                                     );
                                 }
                             });
@@ -1404,6 +1406,7 @@ impl PointerTarget<State> for CosmicWindow {
                                     &state.common.config,
                                     &state.common.event_loop_handle,
                                     false,
+                                    ModalBehavior::Block,
                                 );
                                 if let Some((grab, focus)) = res {
                                     // Feature 4: emit drag_start
@@ -1530,6 +1533,7 @@ impl PointerTarget<State> for CosmicWindow {
                         },
                         state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
+                        ModalBehavior::Block,
                     );
 
                     if let Some((grab, focus)) = res

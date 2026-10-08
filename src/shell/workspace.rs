@@ -560,10 +560,16 @@ impl Workspace {
                     .mapped()
                     .chain(self.tiling_layer.mapped().map(|(w, _)| w))
                     .chain(move_mapped.iter())
+                    .chain(
+                        self.minimized_windows
+                            .iter()
+                            .flat_map(MinimizedWindow::mapped),
+                    )
             };
             stack.retain(|w| match w {
                 FocusTarget::Fullscreen(s) => fullscreen_surfaces.contains(&s),
-                FocusTarget::Window(w) => mapped().any(|m| w == m),
+                // Sticky windows live in the `WorkspaceSet` but are shown on whichever workspace is current
+                FocusTarget::Window(w) => w.is_sticky() || mapped().any(|m| w == m),
             });
         }
     }

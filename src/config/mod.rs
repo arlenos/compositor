@@ -90,6 +90,9 @@ pub struct Config {
     /// `compositor.toml`, layered on top of
     /// `default_system_actions()`.
     pub system_actions: BTreeMap<shortcuts::action::System, String>,
+    /// Kiosk mode: one application, no shortcuts and no system actions, and
+    /// a config reload must not bring them back.
+    pub kiosk_mode: bool,
     /// True when running nested inside another Wayland compositor (Winit/X11 backend).
     /// Note: The XKB layout is applied normally even in nested mode because
     /// the compositor receives scancodes (not keysyms) from the host.
@@ -1131,7 +1134,7 @@ fn parse_keybindings_config(table: &toml::Table) -> Vec<KeyBinding> {
 }
 
 impl Config {
-    pub fn load(loop_handle: &LoopHandle<'_, State>) -> Config {
+    pub fn load(loop_handle: &LoopHandle<'_, State>, kiosk_mode: bool) -> Config {
         let xdg = xdg::BaseDirectories::new();
 
         // Load compositor config from TOML.
@@ -1145,7 +1148,14 @@ impl Config {
         let toml_config = load_toml_config(&toml_path);
         let cosmic_comp_config = toml_config.cosmic;
         let layout_config = toml_config.layout;
-        let toml_keybindings = toml_config.keybindings;
+        // Kiosk mode runs a single application and takes no shortcuts at all,
+        // which is upstream's rule for it: with no bindings there is no key
+        // that can leave the kiosk.
+        let toml_keybindings = if kiosk_mode {
+            Vec::new()
+        } else {
+            toml_config.keybindings
+        };
 
         // Watch the TOML config file for changes via notify.
         if let Some(parent) = toml_path.parent() {
@@ -1214,9 +1224,15 @@ impl Config {
         // cosmic-settings-daemon source was removed in
         // compositor #29 / CC3 — Arlen no longer inherits
         // anything from `com.system76.CosmicSettings.*`.
-        let mut system_actions = default_system_actions();
-        for (action, command) in toml_config.system_actions.clone() {
-            system_actions.insert(action, command);
+        let mut system_actions = if kiosk_mode {
+            BTreeMap::new()
+        } else {
+            default_system_actions()
+        };
+        if !kiosk_mode {
+            for (action, command) in toml_config.system_actions.clone() {
+                system_actions.insert(action, command);
+            }
         }
 
         // Build the cosmic-shape Shortcuts table from our
@@ -1267,6 +1283,7 @@ impl Config {
             layout: layout_config,
             toml_keybindings,
             system_actions,
+            kiosk_mode,
             nested: false,
         }
     }
@@ -2045,7 +2062,12 @@ fn toml_config_changed(toml_path: &std::path::Path, state: &mut State) {
 
     // Update layout config and keybindings.
     state.common.config.layout = toml.layout;
-    state.common.config.toml_keybindings = toml.keybindings;
+    let kiosk_mode = state.common.config.kiosk_mode;
+    state.common.config.toml_keybindings = if kiosk_mode {
+        Vec::new()
+    } else {
+        toml.keybindings
+    };
     // Rebuild the cosmic-shape Shortcuts table off the new
     // toml_keybindings so the dispatch loops in input/mod.rs see
     // the live update.
@@ -2054,9 +2076,15 @@ fn toml_config_changed(toml_path: &std::path::Path, state: &mut State) {
     // Rebuild system-actions from defaults + user overrides.
     // The cosmic-settings-daemon source is gone (CC3); the user's
     // `[system_actions]` table is the only override layer.
-    let mut system_actions = default_system_actions();
-    for (action, command) in toml.system_actions.clone() {
-        system_actions.insert(action, command);
+    let mut system_actions = if kiosk_mode {
+        BTreeMap::new()
+    } else {
+        default_system_actions()
+    };
+    if !kiosk_mode {
+        for (action, command) in toml.system_actions.clone() {
+            system_actions.insert(action, command);
+        }
     }
     state.common.config.system_actions = system_actions;
 

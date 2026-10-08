@@ -4,7 +4,8 @@ use crate::{
     config::{Action, PrivateAction},
     input::InputBackendId,
     shell::{
-        FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
+        FocusResult, InvalidWorkspaceIndex, ModalBehavior, MoveResult, SeatExt, Trigger,
+        WorkspaceDelta,
         focus::{FocusTarget, target::KeyboardFocusTarget},
         layout::tiling::SwapWindowGrab,
     },
@@ -1064,7 +1065,7 @@ impl State {
                     .current_focus()
                     .and_then(|f| f.active_window())
                 {
-                    let info = shell.minimize_request(&focused_window);
+                    let info = shell.minimize_request(&focused_window, ModalBehavior::Block);
                     drop(shell);
                     if let Some(info) = info {
                         self.common.event_bus.emit_window_minimized(
@@ -1082,7 +1083,12 @@ impl State {
                 if let Some(KeyboardFocusTarget::Element(window)) =
                     seat.get_keyboard().unwrap().current_focus()
                 {
-                    shell.maximize_toggle(&window, seat, &self.common.event_loop_handle);
+                    shell.maximize_toggle(
+                        &window,
+                        seat,
+                        &self.common.event_loop_handle,
+                        ModalBehavior::Block,
+                    );
                 }
             }
 
@@ -1097,15 +1103,18 @@ impl State {
                             &window.active_window(),
                             focused_output,
                             &self.common.event_loop_handle,
+                            ModalBehavior::Block,
                         ) {
                             std::mem::drop(shell);
                             Shell::set_focus(self, Some(&target), seat, Some(serial), true);
                         }
                     }
                     Some(KeyboardFocusTarget::Fullscreen(surface)) => {
-                        if let Some(target) =
-                            shell.unfullscreen_request(&surface, &self.common.event_loop_handle)
-                        {
+                        if let Some(target) = shell.unfullscreen_request(
+                            &surface,
+                            &self.common.event_loop_handle,
+                            ModalBehavior::Block,
+                        ) {
                             std::mem::drop(shell);
                             Shell::set_focus(self, Some(&target), seat, Some(serial), true);
                         }

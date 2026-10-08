@@ -8,6 +8,7 @@ use crate::{
         wayland::SurfaceRenderElement,
     },
     shell::{
+        ModalBehavior,
         element::{CosmicMappedKey, CosmicMappedKeyInner},
         focus::target::PointerFocusTarget,
         grabs::{GrabType, ReleaseMode, ResizeEdge},
@@ -916,6 +917,7 @@ impl CosmicStack {
                         &state.common.config,
                         &state.common.event_loop_handle,
                         false,
+                        ModalBehavior::Block,
                     );
                     if let Some((grab, focus)) = res {
                         match grab.grab_type() {
@@ -1383,6 +1385,7 @@ impl PointerTarget<State> for CosmicStack {
                                             &mapped,
                                             &seat,
                                             &state.common.event_loop_handle,
+                                            ModalBehavior::Block,
                                         );
                                     }
                                 });
@@ -1399,6 +1402,7 @@ impl PointerTarget<State> for CosmicStack {
                                     &state.common.config,
                                     &state.common.event_loop_handle,
                                     false,
+                                    ModalBehavior::Block,
                                 );
                                 if let Some((grab, focus)) = res {
                                     // Feature 4: synchronous
@@ -1456,6 +1460,7 @@ impl PointerTarget<State> for CosmicStack {
                         },
                         state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
+                        ModalBehavior::Block,
                     );
                     if let Some((grab, focus)) = res
                         && let GrabType::Pointer = grab.grab_type()
@@ -1517,6 +1522,7 @@ impl PointerTarget<State> for CosmicStack {
                         &state.common.config,
                         &state.common.event_loop_handle,
                         false,
+                        ModalBehavior::Block,
                     );
                     if let Some((grab, focus)) = res
                         && let GrabType::Pointer = grab.grab_type()

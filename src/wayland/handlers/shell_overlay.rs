@@ -181,7 +181,11 @@ impl ShellOverlayHandler for State {
                 // the animation, emits the event-bus event). Just
                 // calling `surface.set_minimized(true)` flipped the
                 // state flag but left the window on-screen.
-                let info = self.common.shell.write().minimize_request(&surface);
+                let info = self
+                    .common
+                    .shell
+                    .write()
+                    .minimize_request(&surface, crate::shell::ModalBehavior::Block);
                 if let Some(info) = info {
                     self.common.event_bus.emit_window_minimized(
                         &info.window_id,
@@ -199,10 +203,12 @@ impl ShellOverlayHandler for State {
                 // set the ToplevelState but never resized.
                 let seat = self.common.shell.read().seats.last_active().clone();
                 let evlh = self.common.event_loop_handle.clone();
-                self.common
-                    .shell
-                    .write()
-                    .maximize_toggle(&mapped, &seat, &evlh);
+                self.common.shell.write().maximize_toggle(
+                    &mapped,
+                    &seat,
+                    &evlh,
+                    crate::shell::ModalBehavior::Block,
+                );
             }
             3 => {
                 // Close — stateless, the client receives the close

@@ -11,7 +11,7 @@ use crate::{
     config::Config,
     fl,
     shell::{
-        CosmicSurface, PointGlobalExt, Shell,
+        CosmicSurface, ModalBehavior, PointGlobalExt, Shell,
         element::{CosmicMapped, CosmicWindow},
         grabs::{GrabType, ReleaseMode},
     },
@@ -372,11 +372,8 @@ pub fn window_items(
             Item::new(fl!("window-menu-minimize"), move |handle| {
                 let mapped = minimize_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    state
-                        .common
-                        .shell
-                        .write()
-                        .minimize_request(&mapped.active_window());
+                    let mut shell = state.common.shell.write();
+                    shell.minimize_request(&mapped.active_window(), ModalBehavior::Block);
                 });
             })
             .shortcut(config.shortcut_for_action(&Action::Minimize))
@@ -388,7 +385,12 @@ pub fn window_items(
                 let _ = handle.insert_idle(move |state| {
                     let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
-                    shell.maximize_toggle(&mapped, &seat, &state.common.event_loop_handle);
+                    shell.maximize_toggle(
+                        &mapped,
+                        &seat,
+                        &state.common.event_loop_handle,
+                        ModalBehavior::Block,
+                    );
                 });
             })
             .shortcut(config.shortcut_for_action(&Action::Maximize))
@@ -406,6 +408,7 @@ pub fn window_items(
                         &mapped.active_window(),
                         output,
                         &state.common.event_loop_handle,
+                        ModalBehavior::Block,
                     ) {
                         std::mem::drop(shell);
                         Shell::set_focus(state, Some(&target), &seat, None, false);
@@ -458,6 +461,7 @@ pub fn window_items(
                             &state.common.config,
                             &state.common.event_loop_handle,
                             false,
+                            ModalBehavior::Block,
                         );
 
                         std::mem::drop(shell);
@@ -511,6 +515,7 @@ pub fn window_items(
                         &seat,
                         ResizeEdge::TOP,
                         state.common.config.cosmic_conf.edge_snap_threshold,
+                        ModalBehavior::Block,
                     );
 
                     std::mem::drop(shell);
@@ -557,6 +562,7 @@ pub fn window_items(
                         &seat,
                         ResizeEdge::LEFT,
                         state.common.config.cosmic_conf.edge_snap_threshold,
+                        ModalBehavior::Block,
                     );
 
                     std::mem::drop(shell);
@@ -603,6 +609,7 @@ pub fn window_items(
                         &seat,
                         ResizeEdge::RIGHT,
                         state.common.config.cosmic_conf.edge_snap_threshold,
+                        ModalBehavior::Block,
                     );
 
                     std::mem::drop(shell);
@@ -649,6 +656,7 @@ pub fn window_items(
                         &seat,
                         ResizeEdge::BOTTOM,
                         state.common.config.cosmic_conf.edge_snap_threshold,
+                        ModalBehavior::Block,
                     );
 
                     std::mem::drop(shell);
@@ -737,7 +745,8 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
             Item::new(fl!("window-menu-minimize"), move |handle| {
                 let window = minimize_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    state.common.shell.write().minimize_request(&window);
+                    let mut shell = state.common.shell.write();
+                    shell.minimize_request(&window, ModalBehavior::Block);
                 });
             })
             .shortcut(config.shortcut_for_action(&Action::Minimize))
@@ -748,9 +757,11 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
                 let window = fullscreen_clone.clone();
                 let _ = handle.insert_idle(move |state| {
                     let mut shell = state.common.shell.write();
-                    if let Some(target) =
-                        shell.unfullscreen_request(&window, &state.common.event_loop_handle)
-                    {
+                    if let Some(target) = shell.unfullscreen_request(
+                        &window,
+                        &state.common.event_loop_handle,
+                        ModalBehavior::Block,
+                    ) {
                         let seat = shell.seats.last_active().clone();
                         std::mem::drop(shell);
                         Shell::set_focus(state, Some(&target), &seat, None, true);
@@ -787,6 +798,7 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
                             &state.common.config,
                             &state.common.event_loop_handle,
                             false,
+                            ModalBehavior::Block,
                         );
 
                         std::mem::drop(shell);
