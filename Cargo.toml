@@ -93,7 +93,7 @@ xdg-user = "0.2.1"
 xkbcommon = "0.9"
 zbus = "5.14.0"
 profiling = { version = "1.0" }
-rustix = { version = "1.1.4", features = ["process"] }
+rustix = { version = "1.1.4", features = ["net", "process"] }
 rand = "0.10"
 # CLI arguments
 clap_lex = "1.0"
@@ -151,6 +151,11 @@ required-features = ["test-client"]
 [[bin]]
 name = "ghost-repro"
 path = "src/bin/ghost-repro.rs"
+required-features = ["test-client"]
+
+[[bin]]
+name = "sandbox-probe"
+path = "src/bin/sandbox-probe.rs"
 required-features = ["test-client"]
 
 [[bin]]
