@@ -75,6 +75,7 @@ path = [
     "src/input/binding_resolver.rs",
     "src/presented.rs",
     "src/shell/fullscreen_reveal.rs",
+    "src/shell/header_policy.rs",
     "src/shell/night_light.rs",
     "src/shell/night_light_schedule.rs",
     "src/utils/render_harness.rs",
