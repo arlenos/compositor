@@ -77,6 +77,7 @@ path = [
     "src/presented.rs",
     "src/shell/fullscreen_reveal.rs",
     "src/shell/header_policy.rs",
+    "src/shell/menu_overlay.rs",
     "src/shell/night_light.rs",
     "src/shell/night_light_schedule.rs",
     "src/shell/scratchpad.rs",
