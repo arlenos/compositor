@@ -15,6 +15,8 @@ wayland-client = { version = "0.31", optional = true }
 # probe speaks.
 wayland-protocols = { version = "0.32", features = ["client", "staging"], optional = true }
 wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
+# zwp-virtual-keyboard-v1, for `pointer-driver` to press real keycodes on a host.
+wayland-protocols-misc = { version = "0.3", features = ["client"], optional = true }
 tempfile = { version = "3", optional = true }
 prost = "0.13"
 uuid = { version = "1", features = ["v7"] }
@@ -183,7 +185,7 @@ debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
 logind = ["logind-zbus"]
 systemd = ["libsystemd", "logind", "tracing-journald"]
-test-client = ["dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols-wlr", "dep:tempfile"]
+test-client = ["dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols-wlr", "dep:wayland-protocols-misc", "dep:tempfile"]
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
 profile-with-tracy-gpu = ["profile-with-tracy", "smithay/tracy_gpu_profiling"]
 
