@@ -10,6 +10,7 @@ use crate::{
         grabs::{GrabType, ReleaseMode, ResizeEdge},
     },
     state::State,
+    theme::corner,
     utils::prelude::*,
 };
 use calloop::LoopHandle;
@@ -530,13 +531,11 @@ impl CosmicWindow {
         let mut radii =
             crate::theme::window_frame_corners(&lt).map(|x| (x * scale as f32).round() as u8);
         if has_ssd && !clip {
-            // bottom corners
-            radii[0] = 0;
-            radii[2] = 0;
+            radii[corner::BOTTOM_RIGHT] = 0;
+            radii[corner::BOTTOM_LEFT] = 0;
             if is_tiled {
-                // top corners
-                radii[1] = 0;
-                radii[3] = 0;
+                radii[corner::TOP_LEFT] = 0;
+                radii[corner::TOP_RIGHT] = 0;
             }
         }
 
@@ -605,13 +604,11 @@ impl CosmicWindow {
             || (is_tiled && appearance.clip_tiled_windows))
             && !is_maximized;
         if has_ssd && !clip {
-            // bottom corners
-            radii[2] = 0;
-            radii[3] = 0;
+            radii[corner::BOTTOM_RIGHT] = 0;
+            radii[corner::BOTTOM_LEFT] = 0;
             if is_tiled {
-                // top corners
-                radii[0] = 0;
-                radii[1] = 0;
+                radii[corner::TOP_LEFT] = 0;
+                radii[corner::TOP_RIGHT] = 0;
             }
         }
 
@@ -634,9 +631,13 @@ impl CosmicWindow {
             push_above(CosmicWindowRenderElement::from(header_element));
         }
 
+        // A corner is drawn once, by the frame. With a header above it, the
+        // client's top edge is not a corner of the window at all - the header's
+        // top corners are - so the client is cut square there. Its bottom
+        // corners are the window's bottom corners and keep the radius.
         if has_ssd {
-            radii[1] = 0;
-            radii[3] = 0;
+            radii[corner::TOP_LEFT] = 0;
+            radii[corner::TOP_RIGHT] = 0;
         }
         {
             let p = self.p();
@@ -1026,26 +1027,32 @@ impl CosmicWindow {
             (has_ssd, true) => {
                 let mut corners = p.window.corner_radius(geometry_size).unwrap_or(radii);
 
-                corners[0] = radii[0].max(corners[0]);
-                corners[1] = if has_ssd {
-                    radii[1]
-                } else {
-                    radii[1].max(corners[1])
-                };
-                corners[2] = radii[2].max(corners[2]);
-                corners[3] = if has_ssd {
-                    radii[3]
-                } else {
-                    radii[3].max(corners[3])
-                };
+                // With a header, the window's top corners are the header's,
+                // and the frame decides them; the client's own request only
+                // counts where the client is the outer edge.
+                for i in [corner::TOP_LEFT, corner::TOP_RIGHT] {
+                    corners[i] = if has_ssd {
+                        radii[i]
+                    } else {
+                        radii[i].max(corners[i])
+                    };
+                }
+                for i in [corner::BOTTOM_RIGHT, corner::BOTTOM_LEFT] {
+                    corners[i] = radii[i].max(corners[i]);
+                }
 
                 corners
             }
             (true, false) => p
                 .window
                 .corner_radius(geometry_size)
-                .map(|[a, _, c, _]| [a, radii[1], c, radii[3]])
-                .unwrap_or([default_radius, radii[1], default_radius, radii[3]]),
+                .map(|[_, _, br, bl]| [radii[corner::TOP_LEFT], radii[corner::TOP_RIGHT], br, bl])
+                .unwrap_or([
+                    radii[corner::TOP_LEFT],
+                    radii[corner::TOP_RIGHT],
+                    default_radius,
+                    default_radius,
+                ]),
             (false, false) => p
                 .window
                 .corner_radius(geometry_size)

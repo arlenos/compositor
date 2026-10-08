@@ -28,6 +28,27 @@ const LIGHT_TOML: &str = arlen_theme::LIGHT_TOML;
 
 static ARLEN_THEME: RwLock<Option<arlen_theme::ArlenTheme>> = RwLock::new(None);
 
+/// Which slot of a `[_; 4]` corner array is which corner.
+///
+/// CSS order, and it is the order every reader of these arrays uses: the
+/// clipping and shadow shaders (`corner_radius.x` is the corner at the origin,
+/// i.e. top-left) and the corner-radius protocol (`surface_corners` returns
+/// `[top_left, top_right, bottom_right, bottom_left]`). Measured 8 Oct by
+/// driving each slot alone at 40 px: slot 0 cuts the client's top-left, slot 2
+/// its bottom-right.
+///
+/// These exist because bare indices went wrong once already. The Iced removal
+/// in April re-wrote four places as if the order were different, zeroing
+/// top-right and BOTTOM-LEFT on a window with a header instead of its two top
+/// corners - which left a second arc under the header at the top-left and cut a
+/// square bottom-left corner into every decorated window.
+pub mod corner {
+    pub const TOP_LEFT: usize = 0;
+    pub const TOP_RIGHT: usize = 1;
+    pub const BOTTOM_RIGHT: usize = 2;
+    pub const BOTTOM_LEFT: usize = 3;
+}
+
 /// The radius a window's OUTER corner is drawn at, for every draw that draws it.
 ///
 /// **One value, one owner.** A window's outer corner is rounded by several

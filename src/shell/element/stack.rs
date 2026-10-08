@@ -15,6 +15,7 @@ use crate::{
         layout::tiling::NodeDesc,
     },
     state::State,
+    theme::corner,
     utils::prelude::*,
 };
 use calloop::LoopHandle;
@@ -864,9 +865,14 @@ impl CosmicStack {
             let radii =
                 round.then(|| crate::theme::window_frame_corners(&lt).map(|x| x.round() as u8));
 
-            // No border: the window chrome is desktop-shell's job through the
-            // shell overlay protocol.
-            let radii = radii.map(|[a, _, c, _]| [a, 0, c, 0]);
+            // A stack always carries a header (its tab strip, drawn by
+            // desktop-shell), so the active client's top corners are interior
+            // and cut square; the window's bottom corners keep the radius.
+            let radii = radii.map(|mut r| {
+                r[corner::TOP_LEFT] = 0;
+                r[corner::TOP_RIGHT] = 0;
+                r
+            });
             windows[active].push_render_elements(
                 renderer,
                 window_loc,
@@ -1009,17 +1015,20 @@ impl CosmicStack {
                 .corner_radius(geometry_size)
                 .unwrap_or([_default_radius; 4]);
 
-            corners[1] = 0;
-            corners[3] = 0;
+            corners[corner::TOP_LEFT] = 0;
+            corners[corner::TOP_RIGHT] = 0;
 
             corners
         } else {
             let mut corners = active_window.corner_radius(geometry_size).unwrap_or(radii);
 
-            corners[0] = radii[0].max(corners[0]);
-            corners[1] = radii[1];
-            corners[2] = radii[2].max(corners[2]);
-            corners[3] = radii[3];
+            // The top corners are the header's, so the frame decides them.
+            corners[corner::TOP_LEFT] = radii[corner::TOP_LEFT];
+            corners[corner::TOP_RIGHT] = radii[corner::TOP_RIGHT];
+            corners[corner::BOTTOM_RIGHT] =
+                radii[corner::BOTTOM_RIGHT].max(corners[corner::BOTTOM_RIGHT]);
+            corners[corner::BOTTOM_LEFT] =
+                radii[corner::BOTTOM_LEFT].max(corners[corner::BOTTOM_LEFT]);
 
             corners
         }
