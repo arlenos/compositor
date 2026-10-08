@@ -48,6 +48,7 @@ path = [
     "dev/fixtures/sensing-vectors/unreadable__wrong-case.toml",
     "dev/ghost-gpu-check.sh",
     "dev/header-button-check.sh",
+    "dev/lock-terminate-check.sh",
     "dev/pointer-input-check.sh",
     "dev/scratchpad-check.sh",
     "dev/screenshot/shoot-compositor.sh",
