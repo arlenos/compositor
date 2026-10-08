@@ -9,7 +9,8 @@
 ///
 /// Usage: WAYLAND_DISPLAY=wayland-N overlay-probe [seconds] [version]
 /// Prints `bound version=N`, then e.g. `workspace_move_refused output=WINIT-0 target=1`
-/// or `context_menu items=12 separators=3`.
+/// or `context_menu items=12 separators=3`, or
+/// `capture_started id=1 app=grim source=output` and `capture_stopped id=1`.
 use std::time::{Duration, Instant};
 
 use wayland_client::{
@@ -80,6 +81,20 @@ impl Dispatch<ArlenShellOverlayV1, ()> for Probe {
             arlen_shell_overlay_v1::Event::ContextMenuBegin { .. } => state.menu = (0, 0),
             arlen_shell_overlay_v1::Event::ContextMenuItem { .. } => state.menu.0 += 1,
             arlen_shell_overlay_v1::Event::ContextMenuSeparator { .. } => state.menu.1 += 1,
+            arlen_shell_overlay_v1::Event::CaptureStarted {
+                capture_id,
+                app_id,
+                source,
+            } => {
+                let source = match source {
+                    wayland_client::WEnum::Value(s) => format!("{s:?}").to_lowercase(),
+                    wayland_client::WEnum::Unknown(n) => format!("unknown-{n}"),
+                };
+                println!("capture_started id={capture_id} app={app_id} source={source}");
+            }
+            arlen_shell_overlay_v1::Event::CaptureStopped { capture_id } => {
+                println!("capture_stopped id={capture_id}");
+            }
             arlen_shell_overlay_v1::Event::ContextMenuDone { .. } => {
                 println!(
                     "context_menu items={} separators={}",
@@ -94,7 +109,7 @@ impl Dispatch<ArlenShellOverlayV1, ()> for Probe {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let seconds: u64 = args.next().as_deref().unwrap_or("10").parse()?;
-    let want_version: u32 = args.next().as_deref().unwrap_or("2").parse()?;
+    let want_version: u32 = args.next().as_deref().unwrap_or("3").parse()?;
 
     let conn = Connection::connect_to_env()?;
     let mut queue = conn.new_event_queue();
