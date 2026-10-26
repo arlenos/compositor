@@ -37,11 +37,18 @@ pub mod session_lock;
 pub mod shell_overlay;
 pub mod shm;
 pub mod tablet_manager;
+<<<<<<< HEAD
 pub mod titlebar;
 pub mod toplevel_info;
 pub mod toplevel_management;
 pub mod wallpaper_pause;
 pub mod window_attach;
+=======
+pub mod text_input;
+pub mod toplevel_info;
+pub mod toplevel_management;
+pub mod virtual_keyboard;
+>>>>>>> upstream/master
 pub mod workspace;
 pub mod xdg_activation;
 pub mod xdg_foreign;

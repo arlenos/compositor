@@ -1052,6 +1052,243 @@ pub fn change_modifier_state(
     input(smithay_input::KeyState::Released, scan_code);
 }
 
+<<<<<<< HEAD
+=======
+fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut State) {
+    for key in &keys {
+        match key.as_str() {
+            "xkb_config" => {
+                let value = get_config::<XkbConfig>(&config, "xkb_config");
+                let seats = state
+                    .common
+                    .shell
+                    .read()
+                    .seats
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for seat in seats.into_iter() {
+                    if let Some(keyboard) = seat.get_keyboard() {
+                        crate::wayland::handlers::virtual_keyboard::clear_active_virtual_keyboard_keymap(&seat);
+                        let old_modifier_state = keyboard.modifier_state();
+                        keyboard.change_repeat_info(
+                            (value.repeat_rate as i32).abs(), // Negative values are illegal
+                            (value.repeat_delay as i32).abs(),
+                        );
+                        if let Err(err) = keyboard.set_xkb_config(state, xkb_config_to_wl(&value)) {
+                            error!(?err, "Failed to load provided xkb config");
+                            // TODO Revert to default?
+                        }
+
+                        // Press and release the numlock key to update modifiers.
+                        if old_modifier_state.num_lock != keyboard.modifier_state().num_lock {
+                            const NUMLOCK_SCANCODE: u32 = 69;
+                            change_modifier_state(&keyboard, NUMLOCK_SCANCODE, state);
+                        }
+                        if old_modifier_state.caps_lock != keyboard.modifier_state().caps_lock {
+                            const CAPSLOCK_SCANCODE: u32 = 58;
+                            change_modifier_state(&keyboard, CAPSLOCK_SCANCODE, state);
+                        }
+                    }
+                }
+                let ei_connections = state
+                    .common
+                    .ei_keyboard_source
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for conn in &ei_connections {
+                    state.release_ei_keyboard(conn);
+                    state.clear_input_source_state(&InputBackendId::Ei(conn.clone()));
+                }
+                for ei_seat in state.common.ei_seats.values() {
+                    if let Err(err) =
+                        ei_seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&value))
+                    {
+                        warn!(?err, "Failed to update libei keyboard keymap");
+                    }
+                }
+                if !state.common.ei_seats.is_empty() {
+                    let seat = state.common.shell.read().seats.last_active().clone();
+                    if let Some(keyboard) = seat.get_keyboard() {
+                        state.broadcast_ei_keyboard_modifiers(&keyboard);
+                    }
+                }
+                state.common.config.cosmic_conf.xkb_config = value;
+            }
+            "keyboard_config" => {
+                let value = get_config::<KeyboardConfig>(&config, "keyboard_config");
+                state.common.config.cosmic_conf.keyboard_config = value;
+                let shell = state.common.shell.read();
+                let seat = shell.seats.last_active();
+                state.common.config.dynamic_conf.numlock_mut().last_state =
+                    seat.get_keyboard().unwrap().modifier_state().num_lock;
+            }
+            "input_default" => {
+                let value = get_config::<InputConfig>(&config, "input_default");
+                state.common.config.cosmic_conf.input_default = value;
+                update_input(state);
+            }
+            "input_touchpad" => {
+                let value = get_config::<InputConfig>(&config, "input_touchpad");
+                state.common.config.cosmic_conf.input_touchpad = value;
+                update_input(state);
+            }
+            "input_touchpad_override" => {
+                let value = get_config::<TouchpadOverride>(&config, "input_touchpad_override");
+                state.common.config.cosmic_conf.input_touchpad_override = value;
+                update_input(state)
+            }
+            "input_devices" => {
+                let value = get_config::<HashMap<String, InputConfig>>(&config, "input_devices");
+                state.common.config.cosmic_conf.input_devices = value;
+                update_input(state);
+            }
+            "workspaces" => {
+                state.common.config.cosmic_conf.workspaces =
+                    get_config::<WorkspaceConfig>(&config, "workspaces");
+                state.common.update_config();
+            }
+            "autotile" => {
+                let new = get_config::<bool>(&config, "autotile");
+                if new != state.common.config.cosmic_conf.autotile {
+                    state.common.config.cosmic_conf.autotile = new;
+
+                    let mut shell = state.common.shell.write();
+                    let shell_ref = &mut *shell;
+                    shell_ref.workspaces.update_autotile(
+                        new,
+                        &mut state.common.workspace_state.update(),
+                        shell_ref.seats.iter(),
+                    );
+                }
+            }
+            "autotile_behavior" => {
+                let new = get_config::<TileBehavior>(&config, "autotile_behavior");
+                if new != state.common.config.cosmic_conf.autotile_behavior {
+                    state.common.config.cosmic_conf.autotile_behavior = new;
+
+                    let mut shell = state.common.shell.write();
+                    let shell_ref = &mut *shell;
+                    shell_ref.workspaces.update_autotile_behavior(
+                        new,
+                        &mut state.common.workspace_state.update(),
+                        shell_ref.seats.iter(),
+                    );
+                }
+            }
+            "active_hint" => {
+                let new = get_config::<bool>(&config, "active_hint");
+                if new != state.common.config.cosmic_conf.active_hint {
+                    state.common.config.cosmic_conf.active_hint = new;
+                    state.common.update_config();
+                }
+            }
+            "descale_xwayland" => {
+                let new = get_config::<XwaylandDescaling>(&config, "descale_xwayland");
+                if new != state.common.config.cosmic_conf.descale_xwayland {
+                    state.common.config.cosmic_conf.descale_xwayland = new;
+                    state.common.update_xwayland_settings();
+                }
+            }
+            "xwayland_eavesdropping" => {
+                let new = get_config::<XwaylandEavesdropping>(&config, "xwayland_eavesdropping");
+                if new != state.common.config.cosmic_conf.xwayland_eavesdropping {
+                    state.common.config.cosmic_conf.xwayland_eavesdropping = new;
+                    state
+                        .common
+                        .xwayland_reset_eavesdropping(SERIAL_COUNTER.next_serial());
+                }
+            }
+            "focus_follows_cursor" => {
+                let new = get_config::<bool>(&config, "focus_follows_cursor");
+                if new != state.common.config.cosmic_conf.focus_follows_cursor {
+                    state.common.config.cosmic_conf.focus_follows_cursor = new;
+                }
+            }
+            "cursor_follows_focus" => {
+                let new = get_config::<bool>(&config, "cursor_follows_focus");
+                if new != state.common.config.cosmic_conf.cursor_follows_focus {
+                    state.common.config.cosmic_conf.cursor_follows_focus = new;
+                }
+            }
+            "focus_follows_cursor_delay" => {
+                let new = get_config::<u64>(&config, "focus_follows_cursor_delay");
+                if new != state.common.config.cosmic_conf.focus_follows_cursor_delay {
+                    state.common.config.cosmic_conf.focus_follows_cursor_delay = new;
+                }
+            }
+            "edge_snap_threshold" => {
+                let new = get_config::<u32>(&config, "edge_snap_threshold");
+                if new != state.common.config.cosmic_conf.edge_snap_threshold {
+                    state.common.config.cosmic_conf.edge_snap_threshold = new;
+                }
+            }
+            "accessibility_zoom" => {
+                let new = get_config::<ZoomConfig>(&config, "accessibility_zoom");
+                if new != state.common.config.cosmic_conf.accessibility_zoom {
+                    state.common.config.cosmic_conf.accessibility_zoom = new;
+                    state.common.update_config();
+                }
+            }
+            "appearance_settings" => {
+                let new = get_config::<AppearanceConfig>(&config, "appearance_settings");
+                if new != state.common.config.cosmic_conf.appearance_settings {
+                    state.common.config.cosmic_conf.appearance_settings = new;
+                    state.common.update_config();
+                    for output in state.common.shell.read().outputs() {
+                        state.backend.schedule_render(output);
+                    }
+                }
+            }
+            "cursor_shake_to_find" => {
+                let new = get_config::<bool>(&config, "cursor_shake_to_find");
+                state.common.config.cosmic_conf.cursor_shake_to_find = new;
+            }
+            "cursor_hide" => {
+                let new = get_config::<CursorHideConfig>(&config, "cursor_hide");
+                if new != state.common.config.cosmic_conf.cursor_hide {
+                    state.common.config.cosmic_conf.cursor_hide = new;
+                    // Reveal on every change: a visible cursor is the safe state,
+                    // and it avoids stranding a hidden cursor when the trigger
+                    // that hid it is switched off.
+                    let seats: Vec<_> = state.common.shell.read().seats.iter().cloned().collect();
+                    let mut needs_render = false;
+                    for seat in seats {
+                        needs_render |= crate::backend::render::cursor::notify_cursor_activity(
+                            state,
+                            &seat,
+                            crate::backend::render::cursor::PointerEventKind::Motion,
+                        );
+                    }
+                    if needs_render {
+                        let outputs: Vec<_> =
+                            state.common.shell.read().outputs().cloned().collect();
+                        for output in outputs {
+                            state.backend.schedule_render(&output);
+                        }
+                    }
+                }
+            }
+            "activation_policy" => {
+                let new = get_config::<ActivationPolicy>(&config, "activation_policy");
+                if new != state.common.config.cosmic_conf.activation_policy {
+                    state.common.config.cosmic_conf.activation_policy = new;
+                }
+            }
+            "decoration_preference" => {
+                let new = get_config::<DecorationPreference>(&config, "decoration_preference");
+                if new != state.common.config.cosmic_conf.decoration_preference {
+                    state.common.config.cosmic_conf.decoration_preference = new;
+                    state.update_decorations();
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+>>>>>>> upstream/master
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CompOutputInfo(OutputInfo);
 
