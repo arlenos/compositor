@@ -333,7 +333,7 @@ impl State {
                         .find_map(|(crtc, surface)| (surface.connector == conn).then_some(crtc))
                         .cloned()
                     {
-                        device.inner.surfaces.remove(&crtc).unwrap();
+                        device.inner.surfaces.remove(&crtc).unwrap().drop_and_join();
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {

@@ -4,6 +4,19 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+<<<<<<< HEAD
+=======
+use calloop::LoopHandle;
+use cosmic::{
+    Apply,
+    iced::{
+        Alignment,
+        core::{Background, Border, Color, Length},
+    },
+    theme,
+    widget::{container, icon::from_name, row, space, text},
+};
+>>>>>>> upstream/master
 use smithay::{
     backend::{
         input::InputTime,
@@ -149,9 +162,36 @@ impl SpaceElement for StackHover {
         Rectangle::from_size(self.inner.lock().unwrap().size)
     }
 
+<<<<<<< HEAD
     fn is_in_input_region(&self, _point: &Point<f64, Logical>) -> bool {
         false
     }
+=======
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
+        row([
+            from_name("window-stack-symbolic")
+                .size(32)
+                .prefer_svg(true)
+                .icon()
+                .into(),
+            space().width(16).into(),
+            text::title3(fl!("stack-windows")).into(),
+        ])
+        .align_y(Alignment::Center)
+        .apply(container)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .padding(16)
+        .apply(container)
+        .class(theme::Container::custom(|theme| {
+            let mut background = theme.cosmic().accent_color();
+            if theme.transparent {
+                background.alpha = theme
+                    .cosmic()
+                    .alpha_map
+                    .blurred_alpha(theme.cosmic().frosted);
+            }
+>>>>>>> upstream/master
 
     fn set_activate(&self, _activated: bool) {}
 

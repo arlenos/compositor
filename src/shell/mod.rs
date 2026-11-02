@@ -1643,7 +1643,7 @@ pub struct OutputId(usize);
 
 impl OutputId {
     pub fn namespace_for_workspace(&self, idx: usize) -> usize {
-        self.0 | (idx << 32)
+        self.0 | (idx << (usize::BITS / 2))
     }
 }
 
@@ -3500,7 +3500,12 @@ impl Shell {
             }
         }
 
-        for set in self.workspaces.sets.values_mut() {
+        for set in self
+            .workspaces
+            .sets
+            .values_mut()
+            .chain(self.workspaces.backup_set.as_mut())
+        {
             let sticky_res = set.sticky_layer.mapped().find_map(|m| {
                 m.windows()
                     .position(|(s, _)| &s == surface)

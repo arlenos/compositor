@@ -4,7 +4,7 @@ edition = "2024"
 license = "GPL-3.0-only"
 name = "cosmic-comp"
 version = "1.0.0"
-rust-version = "1.93"
+rust-version = "1.95"
 
 [workspace]
 members = ["cosmic-comp-config"]
@@ -33,7 +33,15 @@ cosmic-comp-config = { path = "cosmic-comp-config", features = [
     "libdisplay-info",
     "output",
 ] }
+<<<<<<< HEAD
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "160b086", default-features = false, features = [
+=======
+cosmic-config = { git = "https://github.com/pop-os/libcosmic", features = [
+    "calloop",
+    "macro",
+] }
+cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", default-features = false, features = [
+>>>>>>> upstream/master
     "server",
 ] }
 # Type-library only (architecture decision D1 in compositor #29):
@@ -44,9 +52,7 @@ cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daem
 cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
     "greeter",
 ] }
-cosmic-text = { version = "0.19", features = [
-    "shape-run-cache",
-] }
+cosmic-text = { version = "0.19", features = ["shape-run-cache"] }
 libdisplay-info = "0.3.0"
 egui = { version = "0.31.1", optional = true }
 egui_plot = { version = "0.31.0", optional = true }
@@ -55,6 +61,13 @@ i18n-embed = { version = "0.16", features = [
     "desktop-requester",
 ] }
 i18n-embed-fl = "0.10"
+<<<<<<< HEAD
+=======
+iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic" }
+iced_graphics = { git = "https://github.com/pop-os/libcosmic/", features = [
+    "geometry",
+] }
+>>>>>>> upstream/master
 indexmap = "2.13"
 # Night-light schedule timer needs local-time-of-day checks and
 # sunrise/sunset computation. `chrono` is only enabled with `clock`
@@ -87,6 +100,7 @@ tracing-subscriber = { version = "0.3.22", features = [
     "tracing-log",
 ] }
 tracy-client = { version = "0.18.4", default-features = false }
+wayland-server = { version = "0.31.13", features = ["libwayland_1_23"] }
 wayland-backend = "0.3.12"
 wayland-scanner = "0.31.8"
 xcursor = "0.3.10"
@@ -205,11 +219,8 @@ inherits = "release"
 [profile.release]
 lto = "fat"
 
-[patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "e3d461a" }
+smithay = { git = "https://github.com/smithay/smithay.git", rev = "8a27023" }
 smithay-egui = { git = "https://github.com/Smithay/smithay-egui.git", rev = "6511552" }
 
 [build-dependencies]

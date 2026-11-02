@@ -1,4 +1,5 @@
 [toolchain]
+<<<<<<< HEAD
 channel = "1.93"
 # rustup treats this file as the authority for what the toolchain carries, so a
 # workflow asking for `components: rustfmt` gets overridden by it and the job
@@ -6,3 +7,7 @@ channel = "1.93"
 # rather than per job - otherwise the file claims a toolchain that is not the
 # one anybody uses.
 components = [ "rust-src", "rustfmt", "clippy" ]
+=======
+channel = "1.95"
+components = ["rust-src"]
+>>>>>>> upstream/master
