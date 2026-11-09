@@ -68,8 +68,8 @@ impl Default for AppearanceConfig {
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DecorationPreference {
-    #[default]
     ClientSide,
+    #[default]
     ServerSide,
 }
 
