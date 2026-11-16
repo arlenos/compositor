@@ -4,6 +4,19 @@ use std::{
 };
 
 use calloop::LoopHandle;
+<<<<<<< HEAD
+=======
+use cosmic::{
+    Apply as _, Task,
+    iced::{
+        Alignment, Background,
+        core::{Border, Length, Rectangle as IcedRectangle},
+        widget::{Row, text::Style as TextStyle},
+    },
+    theme,
+    widget::{self, button, divider, icon::from_name, menu::menu_column::MenuColumn, space, text},
+};
+>>>>>>> upstream/master
 use smithay::{
     backend::{
         input::InputTime,
@@ -221,11 +234,321 @@ impl Item {
     }
 }
 
+<<<<<<< HEAD
 /// Active menu grab.
 ///
 /// The menu is always rendered by desktop-shell via the `arlen-shell-overlay`
 /// protocol. Pointer events are forwarded to `shell_focus` so that the
 /// desktop-shell client can detect clicks on the rendered menu.
+=======
+/// Menu that comes up when right-clicking an application header bar
+#[derive(Debug)]
+pub struct ContextMenu {
+    items: Vec<Item>,
+    selected: AtomicBool,
+    row_width: Mutex<Option<f32>>,
+}
+
+impl ContextMenu {
+    pub fn new(items: Vec<Item>) -> ContextMenu {
+        ContextMenu {
+            items,
+            selected: AtomicBool::new(false),
+            row_width: Mutex::new(None),
+        }
+    }
+
+    pub fn set_row_width(&self, width: f32) {
+        *self.row_width.lock().unwrap() = Some(width);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    ItemEntered(usize, IcedRectangle<f32>),
+    ItemPressed(usize),
+    ItemLeft(usize, IcedRectangle<f32>),
+}
+
+impl item::CursorEvents for Message {
+    fn cursor_entered(idx: usize, bounds: IcedRectangle<f32>) -> Self {
+        Message::ItemEntered(idx, bounds)
+    }
+
+    fn cursor_left(idx: usize, bounds: IcedRectangle<f32>) -> Self {
+        Message::ItemLeft(idx, bounds)
+    }
+}
+
+impl Program for ContextMenu {
+    type Message = Message;
+
+    fn update(
+        &mut self,
+        message: Self::Message,
+        loop_handle: &LoopHandle<'static, crate::state::State>,
+        last_seat: Option<&(Seat<State>, Serial)>,
+    ) -> Task<Self::Message> {
+        match message {
+            Message::ItemPressed(idx) => {
+                if let Some(Item::Entry { on_press, .. }) = self.items.get_mut(idx) {
+                    (on_press)(loop_handle);
+                    self.selected.store(true, Ordering::SeqCst);
+                }
+                // TODO: If Submenu, then also expand on "Pressed" for touch events.
+                // But right now we don't have any touch responsive menus with submenus
+            }
+            Message::ItemEntered(idx, bounds) => {
+                if let Some(Item::Submenu { items, .. }) = self.items.get_mut(idx)
+                    && let Some((seat, _)) = last_seat.cloned()
+                {
+                    let items = items.clone();
+                    let _ = loop_handle.insert_idle(move |state| {
+                        let grab_state = seat
+                            .user_data()
+                            .get::<SeatMenuGrabState>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+
+                        if let Some(grab_state) = &*grab_state {
+                            let mut elements = grab_state.elements.lock().unwrap();
+
+                            let position = elements.last().unwrap().position;
+                            let mut theme = state.common.theme.clone();
+                            theme.transparent = theme.cosmic().frosted_system_interface;
+                            let element = IcedElement::new(
+                                ContextMenu::new(items),
+                                Size::default(),
+                                state.common.event_loop_handle.clone(),
+                                theme,
+                            );
+
+                            let min_size = element.minimum_size();
+                            element.with_program(|p| {
+                                *p.row_width.lock().unwrap() = Some(min_size.w as f32);
+                            });
+                            element.resize(min_size);
+
+                            let output = seat.active_output();
+                            let position = [
+                                // to the right -> down
+                                Rectangle::new(
+                                    position
+                                        + Point::from((
+                                            bounds.width.floor() as i32,
+                                            bounds.y.ceil() as i32,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                                // to the right -> up
+                                Rectangle::new(
+                                    position
+                                        + Point::from((
+                                            bounds.width.floor() as i32,
+                                            bounds.y.ceil() as i32 + bounds.height.ceil() as i32
+                                                - min_size.h,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                                // to the left -> down
+                                Rectangle::new(
+                                    position
+                                        + Point::from((-min_size.w + 1, bounds.y.ceil() as i32)),
+                                    min_size.as_global(),
+                                ),
+                                // to the left -> up
+                                Rectangle::new(
+                                    position
+                                        + Point::from((
+                                            -min_size.w + 1,
+                                            bounds.y.ceil() as i32 + bounds.height.ceil() as i32
+                                                - min_size.h,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                            ]
+                            .iter()
+                            .rev() // preference of max_by_key is backwards
+                            .max_by_key(|rect| {
+                                output
+                                    .geometry()
+                                    .intersection(**rect)
+                                    .map(|rect| rect.size.w * rect.size.h)
+                            })
+                            .unwrap()
+                            .loc;
+                            element.output_enter(&output, element.bbox());
+                            element.set_additional_scale(*grab_state.scale.lock().unwrap());
+
+                            elements.push(Element {
+                                iced: element,
+                                position,
+                                pointer_entered: false,
+                                touch_entered: None,
+                                tablet_entered: None,
+                            })
+                        }
+                    });
+                }
+            }
+            Message::ItemLeft(idx, _) => {
+                if let Some(Item::Submenu { .. }) = self.items.get_mut(idx)
+                    && let Some((seat, _)) = last_seat.cloned()
+                {
+                    let _ = loop_handle.insert_idle(move |_| {
+                        let grab_state = seat
+                            .user_data()
+                            .get::<SeatMenuGrabState>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+
+                        if let Some(grab_state) = &*grab_state {
+                            let mut elements = grab_state.elements.lock().unwrap();
+                            elements.pop();
+                        }
+                    });
+                }
+            }
+        };
+
+        Task::none()
+    }
+
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
+        let width = self
+            .row_width
+            .lock()
+            .unwrap()
+            .map(Length::Fixed)
+            .unwrap_or(Length::Shrink);
+        let mode = match width {
+            Length::Shrink => Length::Shrink,
+            _ => Length::Fill,
+        };
+
+        MenuColumn::with_children(self.items.iter().enumerate().map(|(idx, item)| {
+            match item {
+                Item::Separator => divider::horizontal::light()
+                    .class(theme::Rule::Default)
+                    .into(),
+                Item::Submenu { title, .. } => Row::with_children([
+                    space().width(16).into(),
+                    text::body(title).width(mode).into(),
+                    from_name("go-next-symbolic")
+                        .size(16)
+                        .prefer_svg(true)
+                        .icon()
+                        .into(),
+                ])
+                .spacing(8)
+                .width(width)
+                .padding([8, 16])
+                .align_y(Alignment::Center)
+                .apply(|row| item::SubmenuItem::new(row, idx))
+                .style(theme::Button::MenuItem)
+                .into(),
+                Item::Entry {
+                    title,
+                    shortcut,
+                    toggled,
+                    disabled,
+                    ..
+                } => {
+                    let mut components = vec![
+                        if *toggled {
+                            from_name("object-select-symbolic")
+                                .size(16)
+                                .prefer_svg(true)
+                                .icon()
+                                .class(theme::Svg::custom(|theme| widget::svg::Style {
+                                    color: Some(theme.cosmic().accent.base.into()),
+                                }))
+                                .into()
+                        } else {
+                            space().width(16).into()
+                        },
+                        text::body(title)
+                            .width(mode)
+                            .class(if *disabled {
+                                theme::Text::Custom(|theme| {
+                                    let mut color = theme.cosmic().background(false).component.on;
+                                    color.alpha *= 0.5;
+                                    TextStyle {
+                                        color: Some(color.into()),
+                                        ..Default::default()
+                                    }
+                                })
+                            } else {
+                                theme::Text::Default
+                            })
+                            .into(),
+                        space().width(16).into(),
+                    ];
+                    if let Some(shortcut) = shortcut.as_ref() {
+                        components.push(
+                            text::body(shortcut)
+                                .align_x(Alignment::End)
+                                .width(Length::Shrink)
+                                .class(theme::Text::Custom(|theme| {
+                                    let mut color = theme.cosmic().background(false).component.on;
+                                    color.alpha *= 0.75;
+                                    TextStyle {
+                                        color: Some(color.into()),
+                                        ..Default::default()
+                                    }
+                                }))
+                                .into(),
+                        );
+                    }
+
+                    Row::with_children(components)
+                        .spacing(8)
+                        .width(mode)
+                        .align_y(Alignment::Center)
+                        .apply(button::custom)
+                        .width(width)
+                        .padding([8, 16])
+                        .on_press_maybe((!disabled).then_some(Message::ItemPressed(idx)))
+                        .class(theme::Button::MenuItem)
+                        .into()
+                }
+            }
+        }))
+        .width(Length::Shrink)
+        .apply(widget::container)
+        .padding(1)
+        .class(theme::Container::custom(|theme| {
+            let cosmic = theme.cosmic();
+            let component = &cosmic.background(theme.cosmic().frosted_windows).component;
+            widget::container::Style {
+                snap: true,
+                icon_color: Some(cosmic.accent.base.into()),
+                text_color: Some(component.on.into()),
+                background: Some(Background::Color(component.base.into())),
+                border: Border {
+                    radius: cosmic.radius_s().into(),
+                    width: 1.0,
+                    color: component.divider.into(),
+                },
+                shadow: Default::default(),
+            }
+        }))
+        .width(Length::Shrink)
+        .into()
+    }
+}
+
+pub struct Element {
+    iced: IcedElement<ContextMenu>,
+    position: Point<i32, Global>,
+    pointer_entered: bool,
+    touch_entered: Option<TouchSlot>,
+    tablet_entered: Option<TabletToolDescriptor>,
+}
+
+>>>>>>> upstream/master
 pub struct MenuGrab {
     start_data: GrabStartData,
     seat: Seat<State>,

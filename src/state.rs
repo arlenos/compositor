@@ -135,6 +135,7 @@ use std::{
     cmp::min,
     collections::{HashMap, HashSet},
     ffi::OsString,
+    os::unix::net::UnixStream,
     process::{Child, Command},
     sync::{Arc, LazyLock, Once, atomic::AtomicBool},
     time::{Duration, Instant},
@@ -263,6 +264,7 @@ pub struct Common {
     pub display_handle: DisplayHandle,
     pub event_loop_handle: LoopHandle<'static, State>,
     pub event_loop_signal: LoopSignal,
+    pub session_sock: Option<UnixStream>,
 
     pub popups: PopupManager,
     pub shell: Arc<parking_lot::RwLock<Shell>>,
@@ -656,7 +658,10 @@ impl LockedBackend<'_> {
             });
 
             match final_config.enabled {
-                OutputState::Enabled => shell_ref.workspaces.add_output(output, workspace_state),
+                OutputState::Enabled => {
+                    shell_ref.workspaces.add_output(output, workspace_state);
+                    shell_ref.add_output_zoom_state(output, loop_handle);
+                }
                 _ => {
                     let shell = &mut *shell_ref;
                     shell.workspaces.remove_output(
@@ -737,6 +742,7 @@ impl State {
         socket: OsString,
         handle: LoopHandle<'static, State>,
         signal: LoopSignal,
+        session_sock: Option<UnixStream>,
         with_xwayland: bool,
         kiosk_command: Option<Command>,
     ) -> State {
@@ -912,6 +918,7 @@ impl State {
                 display_handle: dh.clone(),
                 event_loop_handle: handle,
                 event_loop_signal: signal,
+                session_sock,
 
                 popups: PopupManager::default(),
                 shell,

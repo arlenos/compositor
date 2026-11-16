@@ -19,6 +19,20 @@ use crate::{
     utils::prelude::*,
 };
 use calloop::LoopHandle;
+<<<<<<< HEAD
+=======
+use cosmic::{
+    Apply, Element as CosmicElement, Theme,
+    iced::{
+        Alignment,
+        core::{Background, Border, Color, Length, border::Radius},
+        id::Id,
+        runtime::Task,
+        widget::scrollable::AbsoluteOffset,
+    },
+    theme, widget,
+};
+>>>>>>> upstream/master
 use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts;
 use shortcuts::action::{Direction, FocusDirection};
@@ -402,7 +416,7 @@ impl CosmicStack {
                     if !p.group_focused.load(Ordering::SeqCst) {
                         if let Ok(old) =
                             p.active
-                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                                .try_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
                                     val.checked_sub(1)
                                 })
                         {
@@ -429,7 +443,7 @@ impl CosmicStack {
                         let max = p.windows.lock().unwrap().len();
                         if let Ok(old) =
                             p.active
-                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                                .try_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
                                     if val < max - 1 { Some(val + 1) } else { None }
                                 })
                         {
@@ -1018,10 +1032,369 @@ impl CosmicStack {
             corners[corner::TOP_LEFT] = 0;
             corners[corner::TOP_RIGHT] = 0;
 
+<<<<<<< HEAD
             corners
+=======
+                corners
+            } else {
+                let mut corners = active_window.corner_radius(geometry_size).unwrap_or(radii);
+
+                corners[0] = radii[0];
+                corners[1] = radii[1];
+                corners[2] = radii[2].max(corners[2]);
+                corners[3] = radii[3].max(corners[3]);
+
+                corners
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Message {
+    DragStart,
+    Menu,
+    TabMenu(usize),
+    PotentialTabDragStart(usize),
+    Activate(usize),
+    Close(usize),
+    ScrollForward,
+    ScrollBack,
+    Scrolled,
+}
+
+impl TabMessage for Message {
+    fn activate(idx: usize) -> Self {
+        Message::Activate(idx)
+    }
+
+    fn scroll_back() -> Self {
+        Message::ScrollBack
+    }
+
+    fn scroll_further() -> Self {
+        Message::ScrollForward
+    }
+
+    fn populate_scroll(&mut self, mut current_offset: AbsoluteOffset) -> Option<AbsoluteOffset> {
+        match self {
+            Message::ScrollBack => Some({
+                current_offset.x -= 10.;
+                current_offset
+            }),
+            Message::ScrollForward => Some({
+                current_offset.x += 10.;
+                current_offset
+            }),
+            _ => None,
+        }
+    }
+
+    fn scrolled() -> Self {
+        Message::Scrolled
+    }
+}
+
+impl Program for CosmicStackInternal {
+    type Message = Message;
+
+    fn update(
+        &mut self,
+        message: Self::Message,
+        loop_handle: &LoopHandle<'static, crate::state::State>,
+        last_seat: Option<&(Seat<State>, Serial)>,
+    ) -> Task<Self::Message> {
+        match message {
+            Message::DragStart => {
+                if let Some((seat, serial)) = last_seat.cloned() {
+                    let active = self.active.load(Ordering::SeqCst);
+                    if let Some(surface) = self.windows.lock().unwrap()[active]
+                        .wl_surface()
+                        .map(Cow::into_owned)
+                    {
+                        loop_handle.insert_idle(move |state| {
+                            let res = state.common.shell.write().move_request(
+                                &surface,
+                                &seat,
+                                serial,
+                                ReleaseMode::NoMouseButtons,
+                                false,
+                                &state.common.config,
+                                &state.common.event_loop_handle,
+                                false,
+                                ModalBehavior::Block,
+                            );
+                            if let Some((grab, focus)) = res {
+                                match grab.grab_type() {
+                                    GrabType::Touch => {
+                                        seat.get_touch().unwrap().set_grab(state, grab, serial)
+                                    }
+                                    GrabType::Pointer => seat
+                                        .get_pointer()
+                                        .unwrap()
+                                        .set_grab(state, grab, serial, focus),
+                                    GrabType::TabletTool => seat
+                                        .tablet_seat()
+                                        .get_tool(grab.tool().unwrap())
+                                        .unwrap()
+                                        .set_grab(state, grab, InputTime::now(), serial, focus),
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            Message::PotentialTabDragStart(idx) => {
+                *self.potential_drag.lock().unwrap() = Some(idx);
+            }
+            Message::Activate(idx) => {
+                *self.potential_drag.lock().unwrap() = None;
+                if let Some(surface) = self.windows.lock().unwrap().get(idx).cloned() {
+                    loop_handle.insert_idle(move |state| {
+                        if let Some(mapped) =
+                            state.common.shell.read().element_for_surface(&surface)
+                        {
+                            mapped.stack_ref().unwrap().set_active(&surface);
+                        }
+                    });
+                    self.scroll_to_focus.store(true, Ordering::SeqCst);
+                }
+            }
+            Message::Close(idx) => {
+                if let Some(val) = self.windows.lock().unwrap().get(idx) {
+                    val.close()
+                }
+            }
+            Message::Scrolled => {
+                self.scroll_to_focus.store(false, Ordering::SeqCst);
+            }
+            Message::Menu => {
+                if let Some((seat, serial)) = last_seat.cloned() {
+                    let active = self.active.load(Ordering::SeqCst);
+                    if let Some(surface) = self.windows.lock().unwrap()[active]
+                        .wl_surface()
+                        .map(Cow::into_owned)
+                    {
+                        loop_handle.insert_idle(move |state| {
+                            let shell = state.common.shell.read();
+                            if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
+                                let position = if let Some((output, set)) =
+                                    shell.workspaces.sets.iter().find(|(_, set)| {
+                                        set.sticky_layer.mapped().any(|m| m == &mapped)
+                                    }) {
+                                    set.sticky_layer
+                                        .element_geometry(&mapped)
+                                        .unwrap()
+                                        .loc
+                                        .to_global(output)
+                                } else if let Some(workspace) = shell.space_for(&mapped) {
+                                    let Some(elem_geo) = workspace.element_geometry(&mapped) else {
+                                        return;
+                                    };
+                                    elem_geo.loc.to_global(&workspace.output)
+                                } else {
+                                    return;
+                                };
+
+                                let mut cursor = seat
+                                    .get_pointer()
+                                    .unwrap()
+                                    .current_location()
+                                    .to_i32_round();
+                                cursor.y -= TAB_HEIGHT;
+                                let res = shell.menu_request(
+                                    false,
+                                    &surface,
+                                    &seat,
+                                    serial,
+                                    cursor - position.as_logical(),
+                                    true,
+                                    &state.common.config,
+                                    &state.common.event_loop_handle,
+                                );
+
+                                std::mem::drop(shell);
+                                if let Some((grab, focus)) = res {
+                                    seat.get_pointer()
+                                        .unwrap()
+                                        .set_grab(state, grab, serial, focus);
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            Message::TabMenu(idx) => {
+                if let Some((seat, serial)) = last_seat.cloned()
+                    && let Some(surface) = self.windows.lock().unwrap()[idx]
+                        .wl_surface()
+                        .map(Cow::into_owned)
+                {
+                    loop_handle.insert_idle(move |state| {
+                        let shell = state.common.shell.read();
+                        if let Some(mapped) = shell.element_for_surface(&surface).cloned()
+                            && let Some(workspace) = shell.space_for(&mapped)
+                        {
+                            let Some(elem_geo) = workspace.element_geometry(&mapped) else {
+                                return;
+                            };
+                            let position = elem_geo.loc.to_global(&workspace.output);
+
+                            let mut cursor = seat
+                                .get_pointer()
+                                .unwrap()
+                                .current_location()
+                                .to_i32_round();
+                            cursor.y -= TAB_HEIGHT;
+                            let res = shell.menu_request(
+                                false,
+                                &surface,
+                                &seat,
+                                serial,
+                                cursor - position.as_logical(),
+                                false,
+                                &state.common.config,
+                                &state.common.event_loop_handle,
+                            );
+
+                            std::mem::drop(shell);
+                            if let Some((grab, focus)) = res {
+                                seat.get_pointer()
+                                    .unwrap()
+                                    .set_grab(state, grab, serial, focus);
+                            }
+                        }
+                    });
+                }
+            }
+            _ => unreachable!(),
+        }
+        Task::none()
+    }
+
+    fn view(&self) -> CosmicElement<'_, Self::Message> {
+        HOOKS.get().unwrap().stack_decorations.view(self)
+    }
+
+    fn foreground(
+        &self,
+        pixels: &mut tiny_skia::PixmapMut<'_>,
+        damage: &[Rectangle<i32, Buffer>],
+        scale: f32,
+        theme: &Theme,
+    ) {
+        if self.group_focused.load(Ordering::SeqCst) {
+            let border = Rectangle::new(
+                (0, ((TAB_HEIGHT as f32 * scale) - scale).floor() as i32).into(),
+                (pixels.width() as i32, scale.ceil() as i32).into(),
+            );
+
+            let mut paint = tiny_skia::Paint::default();
+            let (b, g, r, a) = theme.cosmic().accent_color().into_components();
+            paint.set_color(tiny_skia::Color::from_rgba(r, g, b, a).unwrap());
+
+            for rect in damage {
+                if let Some(overlap) = rect.intersection(border) {
+                    pixels.fill_rect(
+                        tiny_skia::Rect::from_xywh(
+                            overlap.loc.x as f32,
+                            overlap.loc.y as f32,
+                            overlap.size.w as f32,
+                            overlap.size.h as f32,
+                        )
+                        .unwrap(),
+                        &paint,
+                        Default::default(),
+                        None,
+                    )
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DefaultDecorations;
+
+impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
+    fn view(&self, stack: &CosmicStackInternal) -> cosmic::Element<'_, Message> {
+        let windows = stack.windows.lock().unwrap();
+        if stack.geometry.lock().unwrap().is_none() {
+            return widget::space().into();
+        };
+        let active = stack.active.load(Ordering::SeqCst);
+        let group_focused = stack.group_focused.load(Ordering::SeqCst);
+
+        let elements = [
+            widget::icon::from_name("window-stack-symbolic")
+                .size(16)
+                .prefer_svg(true)
+                .icon()
+                .class(if group_focused {
+                    theme::Svg::custom(|theme| widget::svg::Style {
+                        color: Some(if theme.cosmic().is_dark {
+                            Color::BLACK
+                        } else {
+                            Color::WHITE
+                        }),
+                    })
+                } else {
+                    theme::Svg::Default
+                })
+                .apply(widget::container)
+                .center_y(24)
+                .center_x(64)
+                .apply(widget::mouse_area)
+                .on_press(Message::DragStart)
+                .on_right_press(Message::Menu)
+                .into(),
+            CosmicElement::new(
+                Tabs::new(
+                    windows.iter().enumerate().map(|(i, w)| {
+                        let user_data = w.user_data();
+                        user_data.insert_if_missing(Id::unique);
+                        Tab::new(
+                            w.title(),
+                            w.app_id(),
+                            user_data.get::<Id>().unwrap().clone(),
+                        )
+                        .on_press(Message::PotentialTabDragStart(i))
+                        .on_right_click(Message::TabMenu(i))
+                        .on_close(Message::Close(i))
+                    }),
+                    active,
+                    windows[active].is_activated(false),
+                    group_focused,
+                )
+                .id(SCROLLABLE_ID.clone())
+                .force_visible(
+                    stack
+                        .scroll_to_focus
+                        .load(Ordering::SeqCst)
+                        .then_some(active),
+                )
+                .height(Length::Fill)
+                .width(Length::Fill),
+            ),
+            widget::space()
+                .height(24)
+                .width(64)
+                .apply(widget::mouse_area)
+                .on_press(Message::DragStart)
+                .on_right_press(Message::Menu)
+                .into(),
+        ];
+
+        let radius = if windows[active].is_maximized(false)
+            || (stack.tiled.load(Ordering::Acquire)
+                && !stack.appearance_conf.lock().unwrap().clip_tiled_windows)
+        {
+            Radius::from(0.0)
+>>>>>>> upstream/master
         } else {
             let mut corners = active_window.corner_radius(geometry_size).unwrap_or(radii);
 
+<<<<<<< HEAD
             // The top corners are the header's, so the frame decides them.
             corners[corner::TOP_LEFT] = radii[corner::TOP_LEFT];
             corners[corner::TOP_RIGHT] = radii[corner::TOP_RIGHT];
@@ -1032,6 +1405,49 @@ impl CosmicStack {
 
             corners
         }
+=======
+        widget::row(elements)
+            .height(TAB_HEIGHT as u16)
+            .width(Length::Fill)
+            .apply(widget::container)
+            .align_y(Alignment::Center)
+            .class(theme::Container::custom(move |theme| {
+                let cosmic_theme = theme.cosmic();
+
+                let mut background = if group_focused {
+                    cosmic_theme.accent_color()
+                } else {
+                    cosmic_theme.primary_container_color()
+                };
+                if cosmic_theme.frosted_windows {
+                    background.alpha = cosmic_theme.alpha_map.blurred_alpha(cosmic_theme.frosted);
+                }
+
+                widget::container::Style {
+                    snap: true,
+                    icon_color: Some(
+                        cosmic_theme
+                            .background(cosmic_theme.frosted_windows)
+                            .on
+                            .into(),
+                    ),
+                    text_color: Some(
+                        cosmic_theme
+                            .background(cosmic_theme.frosted_windows)
+                            .on
+                            .into(),
+                    ),
+                    background: Some(Background::Color(background.into())),
+                    border: Border {
+                        radius,
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    shadow: Default::default(),
+                }
+            }))
+            .into()
+>>>>>>> upstream/master
     }
 }
 
@@ -1114,11 +1530,37 @@ impl SpaceElement for CosmicStack {
             windows.push(active);
         }
 
+<<<<<<< HEAD
         let len = windows.len();
         let _ = p
             .active
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
                 (active >= len).then_some(len - 1)
+=======
+            let len = windows.len();
+            let _ = p
+                .active
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
+                    (active >= len).then_some(len - 1)
+                });
+            let active = p.active.load(Ordering::SeqCst);
+
+            if old_active != active {
+                self.0
+                    .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
+                self.0.force_redraw();
+            }
+
+            windows.iter().enumerate().for_each(|(i, w)| {
+                if i == active {
+                    w.set_suspended(false);
+                } else {
+                    w.set_suspended(true);
+                }
+                w.send_configure();
+
+                SpaceElement::refresh(w)
+>>>>>>> upstream/master
             });
         let active = p.active.load(Ordering::SeqCst);
 

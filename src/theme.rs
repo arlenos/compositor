@@ -123,6 +123,7 @@ pub(crate) fn arlen_hint_rgb(lt: &arlen_theme::ArlenTheme) -> [f32; 3] {
     }
 }
 
+<<<<<<< HEAD
 /// Unfocused window border color from ArlenTheme as `[r, g, b]`.
 ///
 /// The focused border uses [`arlen_hint_rgb`] (`[window.border].focused`,
@@ -176,6 +177,40 @@ pub fn try_recompose_effective_theme() -> Result<arlen_theme::ArlenTheme, String
     let bundled = match active_id.as_str() {
         "light" => LIGHT_TOML,
         _ => DARK_TOML,
+=======
+pub fn watch_theme(handle: LoopHandle<'_, State>) -> Result<(), cosmic_config::Error> {
+    let theme = cosmic::theme::system_preference();
+    cosmic::icon_theme::set_default(theme.cosmic().icon_theme.clone());
+
+    let (ping_tx, ping_rx) = calloop::ping::make_ping().unwrap();
+    let config_mode_helper = ThemeMode::config()?;
+    let config_dark_helper = Theme::dark_config()?;
+    let config_light_helper = Theme::light_config()?;
+
+    if let Err(e) = handle.insert_source(ping_rx, move |_, _, state| {
+        let new_theme = cosmic::theme::system_preference();
+
+        let icon_theme_changed =
+            state.common.theme.cosmic().icon_theme != new_theme.cosmic().icon_theme;
+
+        if theme.theme_type != new_theme.theme_type {
+            state.common.theme = new_theme;
+            let theme = state.common.theme.clone();
+            let mut workspace_guard = state.common.workspace_state.update();
+            state.common.shell.write().set_theme(
+                theme,
+                &state.common.xdg_activation_state,
+                &mut workspace_guard,
+            );
+        }
+
+        if icon_theme_changed {
+            cosmic::icon_theme::set_default(state.common.theme.cosmic().icon_theme.clone());
+            state.common.update_xwayland_settings();
+        }
+    }) {
+        tracing::error!("{e}");
+>>>>>>> upstream/master
     };
 
     // 2. User-installed-theme overlay if `theme.active` names a
