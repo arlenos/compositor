@@ -5,7 +5,20 @@ use std::{
 };
 
 use calloop::LoopHandle;
+<<<<<<< HEAD
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
+=======
+use cosmic::{
+    Apply,
+    iced::{
+        Alignment,
+        core::{Background, Border, Color, Length},
+    },
+    theme,
+    widget::{container, icon::from_name, row, space, text},
+};
+use cosmic_settings_config::shortcuts::action::{Action, ResizeDirection};
+>>>>>>> upstream/master
 use smithay::{
     backend::{
         input::InputTime,
@@ -188,9 +201,58 @@ impl ResizeIndicator {
     }
 }
 
+<<<<<<< HEAD
 impl IsAlive for ResizeIndicator {
     fn alive(&self) -> bool {
         true
+=======
+pub struct ResizeIndicatorInternal {
+    shortcut1: String,
+    shortcut2: String,
+}
+
+impl Program for ResizeIndicatorInternal {
+    type Message = ();
+
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
+        row([
+            text::heading(&self.shortcut1).into(),
+            text::body(fl!("grow-window")).into(),
+            space::horizontal().width(40).into(),
+            text::heading(&self.shortcut2).into(),
+            text::body(fl!("shrink-window")).into(),
+        ])
+        .apply(container)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .padding(16)
+        .apply(container)
+        .class(theme::Container::custom(|theme| {
+            let mut background = theme.cosmic().accent_color();
+            if theme.transparent {
+                background.alpha = theme
+                    .cosmic()
+                    .alpha_map
+                    .blurred_alpha(theme.cosmic().frosted);
+            }
+
+            container::Style {
+                snap: true,
+                icon_color: Some(Color::from(theme.cosmic().accent.on)),
+                text_color: Some(Color::from(theme.cosmic().accent.on)),
+                background: Some(Background::Color(background.into())),
+                border: Border {
+                    radius: theme.cosmic().radius_s().into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: Default::default(),
+            }
+        }))
+        .width(Length::Shrink)
+        .height(Length::Shrink)
+        .into()
+>>>>>>> upstream/master
     }
 }
 

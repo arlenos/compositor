@@ -62,6 +62,7 @@ use smithay::{
     },
     wayland::{pointer_constraints::with_pointer_constraint, seat::WaylandFocus},
 };
+<<<<<<< HEAD
 use std::{
     borrow::Cow,
     fmt,
@@ -71,6 +72,9 @@ use std::{
         atomic::{AtomicBool, AtomicU8, Ordering},
     },
 };
+=======
+use std::{borrow::Cow, fmt, hash::Hash, mem, sync::Arc};
+>>>>>>> upstream/master
 use wayland_backend::server::ObjectId;
 
 use super::CosmicSurface;
@@ -119,8 +123,9 @@ impl fmt::Debug for CosmicWindow {
 #[derive(Debug)]
 pub struct CosmicWindowInternal {
     pub(super) window: CosmicSurface,
-    activated: AtomicBool,
+    activated: bool,
     /// TODO: This needs to be per seat
+<<<<<<< HEAD
     pointer_entered: AtomicU8,
     last_title: Mutex<String>,
     tiled: AtomicBool,
@@ -160,9 +165,15 @@ pub struct CosmicWindowInternal {
     /// So the press arms this, the release disarms it, and the
     /// queued work installs the grab only if it is still armed.
     pub(crate) header_drag_pending: Arc<AtomicBool>,
+=======
+    pointer_entered: Option<Focus>,
+    last_title: String,
+    tiled: bool,
+    theme: cosmic::Theme,
+    appearance_conf: AppearanceConfig,
+>>>>>>> upstream/master
 }
 
-#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Focus {
     Header = 1,
@@ -228,6 +239,7 @@ impl Focus {
             Focus::Header => CursorIcon::Default,
         }
     }
+<<<<<<< HEAD
 
     /// # Safety
     ///
@@ -247,11 +259,18 @@ impl CosmicWindowInternal {
     pub fn swap_focus(&self, focus: Option<Focus>) -> Option<Focus> {
         let value = focus.map_or(0, |x| x as u8);
         unsafe { Focus::from_u8(self.pointer_entered.swap(value, Ordering::SeqCst)) }
+=======
+}
+
+impl CosmicWindowInternal {
+    pub fn swap_focus(&mut self, focus: Option<Focus>) -> Option<Focus> {
+        mem::replace(&mut self.pointer_entered, focus)
+>>>>>>> upstream/master
     }
 
     /// Returns the current focus state.
     pub fn current_focus(&self) -> Option<Focus> {
-        unsafe { Focus::from_u8(self.pointer_entered.load(Ordering::SeqCst)) }
+        self.pointer_entered
     }
 
     /// Returns if the window has any current or pending server-side
@@ -289,7 +308,7 @@ impl CosmicWindowInternal {
 
     /// Returns if the window is currently tiled.
     pub fn is_tiled(&self) -> bool {
-        self.tiled.load(Ordering::Acquire)
+        self.tiled
     }
 
     fn has_tiled_state(&self) -> bool {
@@ -318,6 +337,7 @@ impl CosmicWindow {
         CosmicWindow {
             inner: Arc::new(Mutex::new(CosmicWindowInternal {
                 window,
+<<<<<<< HEAD
                 activated: AtomicBool::new(false),
                 pointer_entered: AtomicU8::new(0),
                 last_title: Mutex::new(String::new()),
@@ -329,6 +349,16 @@ impl CosmicWindow {
                 ),
                 header_drag_pending: Arc::new(AtomicBool::new(false)),
             })),
+=======
+                activated: false,
+                pointer_entered: None,
+                last_title,
+                tiled: false,
+                theme: theme.clone(),
+                appearance_conf: appearance,
+            },
+            (width, SSD_HEIGHT),
+>>>>>>> upstream/master
             handle,
         }
     }
@@ -479,6 +509,7 @@ impl CosmicWindow {
             location
         };
 
+<<<<<<< HEAD
         let p = self.p();
         p.window.push_popup_render_elements(
             renderer,
@@ -489,6 +520,25 @@ impl CosmicWindow {
             crate::theme::arlen_blur_strength(&crate::theme::arlen_theme()),
             &mut |elem| push(elem.into()),
         )
+=======
+        self.0.with_program(|p| {
+            let frosted = if p.theme.cosmic().frosted_windows {
+                (p.theme.cosmic().frosted as u8 + 1) as usize
+            } else {
+                0
+            };
+
+            p.window.push_popup_render_elements(
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_node,
+                frosted,
+                &mut |elem| push(elem.into()),
+            )
+        })
+>>>>>>> upstream/master
     }
 
     /// Render a shadow element for this window.
@@ -506,11 +556,18 @@ impl CosmicWindow {
         R::TextureId: Send + Clone + 'static,
         C: From<CosmicWindowRenderElement<R>>,
     {
+<<<<<<< HEAD
         let p = self.p();
         let has_ssd = p.has_ssd(false);
         let is_tiled = p.is_tiled();
         let activated = p.window.is_activated(false);
         let appearance = p.appearance_conf.lock().unwrap();
+=======
+        self.0.with_program(|p| {
+            let has_ssd = p.has_ssd(false);
+            let is_tiled = p.is_tiled();
+            let activated = p.window.is_activated(false);
+>>>>>>> upstream/master
 
         if p.window.is_maximized(false) {
             return None;
@@ -539,6 +596,7 @@ impl CosmicWindow {
             }
         }
 
+<<<<<<< HEAD
         let mut geo = SpaceElement::geometry(&p.window).to_f64();
         if has_ssd {
             geo.size.h += SSD_HEIGHT as f64;
@@ -551,9 +609,39 @@ impl CosmicWindow {
 
         let _appearance = appearance;
         drop(_appearance);
+=======
+            let clip = (!is_tiled && p.appearance_conf.clip_floating_windows)
+                || (is_tiled && p.appearance_conf.clip_tiled_windows);
+            let should_draw_shadow = if is_tiled {
+                p.appearance_conf.shadow_tiled_windows
+            } else {
+                p.appearance_conf.clip_floating_windows || has_ssd
+            };
+
+            if !should_draw_shadow {
+                return None;
+            }
+            let mut radii = p
+                .theme
+                .cosmic()
+                .radius_s()
+                .map(|x| if x < 4.0 { x } else { x + 4.0 })
+                .map(|x| (x * scale as f32).round() as u8);
+            if has_ssd && !clip {
+                // bottom corners
+                radii[2] = 0;
+                radii[3] = 0;
+                if is_tiled {
+                    // top corners
+                    radii[0] = 0;
+                    radii[1] = 0;
+                }
+            }
+>>>>>>> upstream/master
 
         let window_key = CosmicMappedKey(CosmicMappedKeyInner::Window(Arc::downgrade(&self.inner)));
 
+<<<<<<< HEAD
         Some(
             CosmicWindowRenderElement::Shadow(ShadowShader::element(
                 renderer,
@@ -566,6 +654,24 @@ impl CosmicWindow {
             ))
             .into(),
         )
+=======
+            let window_key =
+                CosmicMappedKey(CosmicMappedKeyInner::Window(Arc::downgrade(&self.0.0)));
+
+            Some(
+                CosmicWindowRenderElement::Shadow(ShadowShader::element(
+                    renderer,
+                    window_key,
+                    geo.to_i32_round().as_local(),
+                    radii,
+                    if activated { alpha } else { alpha * 0.75 },
+                    output_scale.x,
+                    p.theme.cosmic().is_dark,
+                ))
+                .into(),
+            )
+        })
+>>>>>>> upstream/master
     }
 
     /// Push all of this window's elements: the Arlen header, then the surface.
@@ -596,8 +702,17 @@ impl CosmicWindow {
                 p.has_ssd(false),
                 p.is_tiled(),
                 p.window.is_maximized(false),
+<<<<<<< HEAD
                 mapped,
                 *p.appearance_conf.lock().unwrap(),
+=======
+                p.theme
+                    .cosmic()
+                    .radius_s()
+                    .map(|x| if x < 4.0 { x } else { x + 4.0 })
+                    .map(|x| x.round() as u8),
+                p.appearance_conf,
+>>>>>>> upstream/master
             )
         };
         let clip = ((!is_tiled && appearance.clip_floating_windows)
@@ -618,6 +733,7 @@ impl CosmicWindow {
             location
         };
 
+<<<<<<< HEAD
         // No border: desktop-shell owns the window chrome over the shell
         // overlay protocol. The SSD radii adjustment is not chrome, so it stays.
         //
@@ -635,12 +751,57 @@ impl CosmicWindow {
         // client's top edge is not a corner of the window at all - the header's
         // top corners are - so the client is cut square there. Its bottom
         // corners are the window's bottom corners and keep the radius.
+=======
+        let (mut geo, bg_divider) = self.0.with_program(|p| {
+            (
+                SpaceElement::geometry(&p.window).to_f64(),
+                p.theme.cosmic().bg_divider(),
+            )
+        });
+        geo.loc += location.to_f64().to_logical(scale);
+>>>>>>> upstream/master
         if has_ssd {
             radii[corner::TOP_LEFT] = 0;
             radii[corner::TOP_RIGHT] = 0;
         }
+<<<<<<< HEAD
         {
             let p = self.p();
+=======
+        if let Some(max_size) = max_size {
+            geo.size = geo.size.clamp(Size::default(), max_size.to_f64());
+        }
+
+        if (has_ssd || clip) && !is_maximized {
+            let window_key =
+                CosmicMappedKey(CosmicMappedKeyInner::Window(Arc::downgrade(&self.0.0)));
+
+            let (r, g, b, a) = bg_divider.into_components();
+            let elem = CosmicWindowRenderElement::Border(IndicatorShader::element(
+                renderer,
+                Key::Window(Usage::Border, window_key.clone()),
+                geo.to_i32_round().as_local(),
+                1,
+                radii,
+                a * alpha,
+                scale.x,
+                [r, g, b],
+            ));
+            push_above(elem);
+        }
+
+        self.0.with_program(|p| {
+            let mut radii = radii;
+            if has_ssd {
+                radii[0] = 0;
+                radii[1] = 0;
+            }
+            let frosted = if p.theme.cosmic().frosted_windows {
+                (p.theme.cosmic().frosted as u8 + 1) as usize
+            } else {
+                0
+            };
+>>>>>>> upstream/master
             p.window.push_render_elements(
                 renderer,
                 window_loc,
@@ -657,6 +818,7 @@ impl CosmicWindow {
         }
     }
 
+<<<<<<< HEAD
     /// Update the appearance configuration, adjusting tiling state if needed.
     pub fn update_appearance_conf(&self, appearance: &AppearanceConfig) {
         let p = self.p();
@@ -667,6 +829,26 @@ impl CosmicWindow {
                 p.window.set_tiled(true);
             } else if !p.tiled.load(Ordering::Acquire) {
                 p.window.set_tiled(false);
+=======
+    pub(crate) fn set_theme(&self, mut theme: cosmic::Theme) {
+        theme.transparent = theme.cosmic().frosted_windows;
+        self.0.with_program(|p| {
+            p.theme = theme.clone();
+        });
+        self.0.set_theme(theme);
+    }
+
+    pub fn update_appearance_conf(&self, appearance: &AppearanceConfig) {
+        self.0.with_program(|p| {
+            if p.appearance_conf != *appearance {
+                p.appearance_conf = *appearance;
+                if appearance.clip_floating_windows {
+                    p.window.set_tiled(true);
+                } else if !p.tiled {
+                    p.window.set_tiled(false);
+                }
+                p.window.send_configure();
+>>>>>>> upstream/master
             }
             p.window.send_configure();
         }
@@ -677,6 +859,7 @@ impl CosmicWindow {
         // No-op: Iced rendering removed.
     }
 
+<<<<<<< HEAD
     /// Return the header button (if any) that the given
     /// logical-space pointer position sits over. Logical space is
     /// the same one `PointerTarget::motion` / `button` receive via
@@ -693,6 +876,36 @@ impl CosmicWindow {
             let p = self.p();
             if !p.has_ssd(false) {
                 return None;
+=======
+    pub fn min_size(&self) -> Option<Size<i32, Logical>> {
+        self.0
+            .with_program(|p| p.window.min_size_without_ssd())
+            .map(|size| {
+                if self.0.with_program(|p| !p.window.is_decorated(false)) {
+                    size + (0, SSD_HEIGHT).into()
+                } else {
+                    size
+                }
+            })
+    }
+    pub fn max_size(&self) -> Option<Size<i32, Logical>> {
+        self.0
+            .with_program(|p| p.window.max_size_without_ssd())
+            .map(|size| {
+                if self.0.with_program(|p| !p.window.is_decorated(false)) {
+                    size + (0, SSD_HEIGHT).into()
+                } else {
+                    size
+                }
+            })
+    }
+
+    pub fn set_tiled(&self, tiled: bool) {
+        self.0.with_program(|p| {
+            p.tiled = tiled;
+            if !p.appearance_conf.clip_floating_windows {
+                p.window.set_tiled(tiled);
+>>>>>>> upstream/master
             }
             p.window.geometry().size.w
         };
@@ -731,6 +944,7 @@ impl CosmicWindow {
         None
     }
 
+<<<<<<< HEAD
     /// Refresh the cached `ButtonInteraction` from the current
     /// pointer location. Called on every motion inside the header
     /// zone; the next render frame picks up the new state and
@@ -766,6 +980,25 @@ impl CosmicWindow {
                 if over != Some(pressed_btn) {
                     // No change — keep Pressed; release handler decides.
                     return;
+=======
+    pub fn corner_radius(&self, geometry_size: Size<i32, Logical>, default_radius: u8) -> [u8; 4] {
+        self.0.with_program(|p| {
+            let has_ssd = p.has_ssd(false);
+            let is_tiled = p.is_tiled();
+
+            let clip = ((!is_tiled && p.appearance_conf.clip_floating_windows)
+                || (is_tiled && p.appearance_conf.clip_tiled_windows))
+                && !p.window.is_maximized(false);
+            let round = (!is_tiled || p.appearance_conf.clip_tiled_windows)
+                && !p.window.is_maximized(false);
+            let radii = if round {
+                {
+                    p.theme
+                        .cosmic()
+                        .radius_s()
+                        .map(|x| if x < 4.0 { x } else { x + 4.0 })
+                        .map(|x| x.round() as u8)
+>>>>>>> upstream/master
                 }
             }
             _ => {
@@ -1049,6 +1282,7 @@ impl CosmicWindow {
             [0; 4]
         };
 
+<<<<<<< HEAD
         match (has_ssd, clip) {
             (has_ssd, true) => {
                 let mut corners = p.window.corner_radius(geometry_size).unwrap_or(radii);
@@ -1066,6 +1300,22 @@ impl CosmicWindow {
                 for i in [corner::BOTTOM_RIGHT, corner::BOTTOM_LEFT] {
                     corners[i] = radii[i].max(corners[i]);
                 }
+=======
+impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations {
+    fn view(&self, win: &CosmicWindowInternal) -> cosmic::Element<'_, Message> {
+        let sharp_corners = win.window.is_maximized(false)
+            || (win.is_tiled() && !win.appearance_conf.clip_tiled_windows);
+
+        let mut header = cosmic::widget::header_bar()
+            .title(win.last_title.clone())
+            .on_drag(Message::DragStart)
+            .on_close(Message::Close)
+            .focused(win.window.is_activated(false))
+            .on_double_click(Message::Maximize)
+            .on_right_click(Message::Menu)
+            .is_ssd(true)
+            .sharp_corners(sharp_corners);
+>>>>>>> upstream/master
 
                 corners
             }
@@ -1114,10 +1364,20 @@ impl SpaceElement for CosmicWindow {
             .is_some()
     }
     fn set_activate(&self, activated: bool) {
+<<<<<<< HEAD
         let p = self.p();
         if p.activated.load(Ordering::SeqCst) != activated {
             p.activated.store(activated, Ordering::SeqCst);
             SpaceElement::set_activate(&p.window, activated);
+=======
+        if self.0.with_program(|p| p.activated != activated) {
+            SpaceElement::set_activate(&self.0, activated);
+            self.0.force_redraw();
+            self.0.with_program(|p| {
+                p.activated = activated;
+                SpaceElement::set_activate(&p.window, activated);
+            });
+>>>>>>> upstream/master
         }
     }
     #[profiling::function]
@@ -1148,9 +1408,17 @@ impl SpaceElement for CosmicWindow {
         SpaceElement::refresh(&p.window);
         if p.has_ssd(true) {
             let title = p.window.title();
+<<<<<<< HEAD
             let mut last_title = p.last_title.lock().unwrap();
             if *last_title != title {
                 *last_title = title;
+=======
+            if p.last_title != title {
+                p.last_title = title;
+                true
+            } else {
+                false
+>>>>>>> upstream/master
             }
         }
     }

@@ -1643,7 +1643,7 @@ pub struct OutputId(usize);
 
 impl OutputId {
     pub fn namespace_for_workspace(&self, idx: usize) -> usize {
-        self.0 | (idx << 32)
+        self.0 | (idx << (usize::BITS / 2))
     }
 }
 
@@ -1664,6 +1664,7 @@ impl Common {
             .user_data()
             .insert_if_missing_threadsafe(|| OutputId(next_output_id()));
 
+<<<<<<< HEAD
         if let Some(state) = shell.zoom_state.as_ref() {
             output.user_data().insert_if_missing_threadsafe(|| {
                 Mutex::new(OutputZoomState::new(
@@ -1675,6 +1676,9 @@ impl Common {
                 ))
             });
         }
+=======
+        shell.add_output_zoom_state(output, &self.event_loop_handle);
+>>>>>>> upstream/master
 
         std::mem::drop(shell);
         self.refresh(); // fixes indicies of any moved workspaces
@@ -2785,6 +2789,22 @@ impl Shell {
         self.appearance_conf
     }
 
+    pub fn add_output_zoom_state(&self, output: &Output, loop_handle: &LoopHandle<'static, State>) {
+        if let Some(state) = self.zoom_state.as_ref() {
+            output.user_data().insert_if_missing_threadsafe(|| {
+                Mutex::new(OutputZoomState::new(
+                    &state.seat,
+                    output,
+                    1.0,
+                    state.increment,
+                    state.movement,
+                    loop_handle.clone(),
+                    self.theme.clone(),
+                ))
+            });
+        }
+    }
+
     pub fn trigger_zoom(
         &mut self,
         seat: &Seat<State>,
@@ -3500,7 +3520,12 @@ impl Shell {
             }
         }
 
-        for set in self.workspaces.sets.values_mut() {
+        for set in self
+            .workspaces
+            .sets
+            .values_mut()
+            .chain(self.workspaces.backup_set.as_mut())
+        {
             let sticky_res = set.sticky_layer.mapped().find_map(|m| {
                 m.windows()
                     .position(|(s, _)| &s == surface)
